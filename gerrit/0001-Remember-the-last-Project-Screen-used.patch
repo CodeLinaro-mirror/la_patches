@@ -1,0 +1,127 @@
+From dfc13516b4022f1b90f6acba58a6e45000020171 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Wed, 5 Dec 2012 12:02:59 -0700
+Subject: [PATCH] Remember the last Project Screen used
+
+Remember the last project screen used every time a project
+screen is loaded.  Go to the remembered screen when selecting
+a new project from the project list instead of always going
+to the project info screen.  This makes navigating between
+projects much more pleasant (fewer clicks), especially when
+comparing access rights or dashboards.
+
+Change-Id: I5ec4025b42c68028a8a459b25cbe8ad567ab0049
+---
+ .../java/com/google/gerrit/client/Dispatcher.java  |    6 +++++-
+ .../gerrit/client/admin/ProjectAccessScreen.java   |    1 +
+ .../gerrit/client/admin/ProjectBranchesScreen.java |    1 +
+ .../gerrit/client/admin/ProjectInfoScreen.java     |    1 +
+ .../gerrit/client/admin/ProjectListScreen.java     |    2 +-
+ .../google/gerrit/client/admin/ProjectScreen.java  |    6 ++++++
+ .../client/changes/ProjectDashboardScreen.java     |    6 ++++++
+ 7 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/Dispatcher.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/Dispatcher.java
+index 0229d38..5e1cd85 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/Dispatcher.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/Dispatcher.java
+@@ -153,8 +153,12 @@ public class Dispatcher {
+     return "/admin/groups/uuid-" + uuid.toString() + "," + panel;
+   }
+ 
++  public static String toProject(Project.NameKey n) {
++    return toProjectAdmin(n, ProjectScreen.getSavedPanel());
++  }
++
+   public static String toProjectAdmin(Project.NameKey n, String panel) {
+-    if (ProjectScreen.INFO.equals(panel)) {
++    if (panel == null || ProjectScreen.INFO.equals(panel)) {
+       return "/admin/projects/" + n.toString();
+     }
+     return "/admin/projects/" + n.toString() + "," + panel;
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
+index 4403ce6..0e6305a 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
+@@ -110,6 +110,7 @@ public class ProjectAccessScreen extends ProjectScreen {
+             displayReadOnly(access);
+           }
+         });
++    savedPanel = ACCESS;
+   }
+ 
+   private void displayReadOnly(ProjectAccess access) {
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectBranchesScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectBranchesScreen.java
+index e08259e..bb02252 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectBranchesScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectBranchesScreen.java
+@@ -86,6 +86,7 @@ public class ProjectBranchesScreen extends ProjectScreen {
+             }
+           }
+         });
++    savedPanel = BRANCH;
+   }
+ 
+   private void display(final List<Branch> listBranches) {
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectInfoScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectInfoScreen.java
+index af66602..802c9a5 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectInfoScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectInfoScreen.java
+@@ -99,6 +99,7 @@ public class ProjectInfoScreen extends ProjectScreen {
+             display(result);
+           }
+         });
++    savedPanel = INFO;
+   }
+ 
+   private void enableForm(final boolean canModifyAgreements,
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectListScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectListScreen.java
+index 11cbcb2..74324d8 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectListScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectListScreen.java
+@@ -66,7 +66,7 @@ public class ProjectListScreen extends Screen {
+       }
+ 
+       private String link(final ProjectInfo item) {
+-        return Dispatcher.toProjectAdmin(item.name_key(), ProjectScreen.INFO);
++        return Dispatcher.toProject(item.name_key());
+       }
+ 
+       @Override
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java
+index d8e53c8..3e0fa00 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java
+@@ -23,6 +23,12 @@ public abstract class ProjectScreen extends Screen {
+   public static final String ACCESS = "access";
+   public static final String DASHBOARDS = "dashboards";
+ 
++  protected static String savedPanel;
++
++  public static String getSavedPanel() {
++    return savedPanel;
++  }
++
+   private final Project.NameKey name;
+ 
+   public ProjectScreen(final Project.NameKey toShow) {
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ProjectDashboardScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ProjectDashboardScreen.java
+index 76d395b..3778220 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ProjectDashboardScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ProjectDashboardScreen.java
+@@ -54,6 +54,12 @@ public class ProjectDashboardScreen extends ProjectScreen implements ChangeListS
+   }
+ 
+   @Override
++  public void onLoad() {
++    super.onLoad();
++    savedPanel = DASHBOARDS;
++  }
++
++  @Override
+   public void registerKeys() {
+     super.registerKeys();
+     table.setRegisterKeys(true);
+-- 
+1.7.8
+

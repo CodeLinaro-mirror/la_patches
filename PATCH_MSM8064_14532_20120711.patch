@@ -1,0 +1,44 @@
+From 5b2c92762b0070eb2a887830b3e802ca6819aa91 Mon Sep 17 00:00:00 2001
+From: Mingming Yin <mingming@codeaurora.org>
+Date: Tue, 10 Jul 2012 16:51:05 -0700
+Subject: [PATCH] alsa_sound: Define csd-client flag to enable voice call on
+ Fusion3
+
+- Define CSD_CLIENT_ENABLED in header file instead of make file
+- Disable unnecessary audio logs
+
+Change-Id: I4761480ee7769e992bea3cb17d360791acdc4305
+---
+ alsa_sound/ALSAStreamOps.cpp   |    2 +-
+ alsa_sound/AudioHardwareALSA.h |    2 ++
+ 2 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/alsa_sound/ALSAStreamOps.cpp b/alsa_sound/ALSAStreamOps.cpp
+index 6735a87..221ef91 100644
+--- a/alsa_sound/ALSAStreamOps.cpp
++++ b/alsa_sound/ALSAStreamOps.cpp
+@@ -287,7 +287,7 @@ int ALSAStreamOps::format() const
+             break;
+     }
+ 
+-    ALOGD("ALSAFormat:0x%x,audioSystemFormat:0x%x",ALSAFormat,audioSystemFormat);
++    ALOGV("ALSAFormat:0x%x,audioSystemFormat:0x%x",ALSAFormat,audioSystemFormat);
+     return audioSystemFormat;
+ }
+ 
+diff --git a/alsa_sound/AudioHardwareALSA.h b/alsa_sound/AudioHardwareALSA.h
+index 9cc22d7..e875b37 100644
+--- a/alsa_sound/AudioHardwareALSA.h
++++ b/alsa_sound/AudioHardwareALSA.h
+@@ -39,6 +39,8 @@ extern "C" {
+ 
+ #include <hardware/hardware.h>
+ 
++#define QCOM_CSDCLIENT_ENABLED
++
+ namespace android_audio_legacy
+ {
+ using android::List;
+-- 
+1.7.8.3
+

@@ -1,0 +1,290 @@
+From fa92d59e2e618058bb6e82dc7a22af4bb14b5bbb Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Thu, 29 Dec 2011 18:19:48 -0700
+Subject: [PATCH] Create a ChangeCache for ChangeDetails in ChangeScreen
+
+Create a ChangeCache as a general place to hold client
+side data about changes.  Having a common place to store
+change data will allow multiple UI widgets to refer to
+the same data without having to be connected to or aware
+of other widgets.  In this change, the ChangeCache holds
+ChangeDetailCaches by ChangeId.
+
+ChanegDetailsCaches are also new in this change and can
+hold a ChangeDetail while being listened to.  A
+ChangeDetailCache will inform its listeners when a new
+ChangeDetail is loaded into the cache.
+
+Make the ChangeScreen listen to the ChangeDetailCache
+and update itself when the ChangeDetail changes.  This
+gives components another way to tell a ChangeScreen to
+update itself without having to hold a reference to the
+ChangeScreen, and without actually even having any
+knowledge that such a screen even exits. This will allow
+current and new UI sub or super components to be more
+independent from a ChangeScreen.
+
+The current way to update the ChangeScreen's ChangeDetail
+is for widgets to hold a reference to the ChangeScreen
+and to call its update() method with a ChangeDetail.
+While this change introduces the ability to update a
+ChangeScreen via the ChangeDetailCache, this new method
+is only use internally so far (onLoad), no external
+components use this facility yet.
+
+To use this feature, components need only grab a
+ChangeDetailCache from the ChangeCache for the current
+Change, and then update the ChangeDetailCache with a
+call to set(ChangeDetail).  Or more likely, if they need
+to make an RPC call which will return a ChangeDetail,
+they may statically obtain a GerritCallback from the
+ChangeDetailCache class which knows how to update the
+appropriate ChangeDetailCache for them directly.  Both
+of these approaches will enable any listeners to the
+ChangeDetail value to be aware that they need to update
+themselves to the new value of the ChangeDetail.  The
+ChangeScreen is now such a listener and does exactly
+that.
+
+Change-Id: Iaa0a9a2faece760f3b54f6e204f268d9d6ef2c5b
+---
+ .../google/gerrit/client/changes/ChangeCache.java  |   53 ++++++++++++++++++
+ .../gerrit/client/changes/ChangeDetailCache.java   |   57 ++++++++++++++++++++
+ .../google/gerrit/client/changes/ChangeScreen.java |   45 +++++++++-------
+ 3 files changed, 136 insertions(+), 19 deletions(-)
+ create mode 100644 gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeCache.java
+ create mode 100644 gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeDetailCache.java
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeCache.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeCache.java
+new file mode 100644
+index 0000000..78c0d17
+--- /dev/null
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeCache.java
+@@ -0,0 +1,53 @@
++// Copyright (C) 2012 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.client.changes;
++
++import com.google.gerrit.reviewdb.Change;
++
++import java.util.HashMap;
++import java.util.Map;
++
++public class ChangeCache {
++  private static Map<Change.Id,ChangeCache> caches =
++    new HashMap<Change.Id,ChangeCache>();
++
++  public static ChangeCache get(Change.Id chg) {
++    ChangeCache cache = caches.get(chg);
++    if (cache == null) {
++      cache = new ChangeCache(chg);
++      caches.put(chg, cache);
++    }
++    return cache;
++  }
++
++
++  private Change.Id changeId;
++  private ChangeDetailCache detail;
++
++  protected ChangeCache(Change.Id chg) {
++    changeId = chg;
++  }
++
++  public Change.Id getChangeId() {
++    return changeId;
++  }
++
++  public ChangeDetailCache getChangeDetailCache() {
++    if (detail == null) {
++      detail = new ChangeDetailCache(changeId);
++    }
++    return detail;
++  }
++}
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeDetailCache.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeDetailCache.java
+new file mode 100644
+index 0000000..a17705e
+--- /dev/null
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeDetailCache.java
+@@ -0,0 +1,57 @@
++// Copyright (C) 2012 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.client.changes;
++
++import com.google.gerrit.client.ui.ListenableValue;
++import com.google.gerrit.common.data.ChangeDetail;
++import com.google.gerrit.reviewdb.Change;
++
++import com.google.gwt.user.client.rpc.AsyncCallback;
++
++public class ChangeDetailCache extends ListenableValue<ChangeDetail> {
++  public static class GerritCallback extends
++      com.google.gerrit.client.rpc.GerritCallback<ChangeDetail> {
++    @Override
++    public void onSuccess(ChangeDetail detail) {
++      setChangeDetail(detail);
++    }
++  }
++
++  public static class IgnoreErrorCallback implements AsyncCallback<ChangeDetail> {
++    @Override
++    public void onSuccess(ChangeDetail detail) {
++      setChangeDetail(detail);
++    }
++
++    @Override
++    public void onFailure(Throwable caught) {
++    }
++  }
++
++  public static void setChangeDetail(ChangeDetail detail) {
++    Change.Id chgId = detail.getChange().getId();
++    ChangeCache.get(chgId).getChangeDetailCache().set(detail);
++  }
++
++  private final Change.Id changeId;
++
++  public ChangeDetailCache(final Change.Id chg) {
++    changeId = chg;
++  }
++
++  public void refresh() {
++    Util.DETAIL_SVC.changeDetail(changeId, new GerritCallback());
++  }
++}
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeScreen.java
+index 1b382a8..2cc3650 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeScreen.java
+@@ -22,6 +22,7 @@ import com.google.gerrit.client.ui.CommentPanel;
+ import com.google.gerrit.client.ui.ComplexDisclosurePanel;
+ import com.google.gerrit.client.ui.ExpandAllCommand;
+ import com.google.gerrit.client.ui.LinkMenuBar;
++import com.google.gerrit.client.ui.ListenableValue;
+ import com.google.gerrit.client.ui.NeedsSignInKeyCommand;
+ import com.google.gerrit.client.ui.Screen;
+ import com.google.gerrit.common.data.AccountInfo;
+@@ -39,6 +40,8 @@ import com.google.gwt.event.dom.client.ChangeHandler;
+ import com.google.gwt.event.dom.client.ClickEvent;
+ import com.google.gwt.event.dom.client.ClickHandler;
+ import com.google.gwt.event.dom.client.KeyPressEvent;
++import com.google.gwt.event.logical.shared.ValueChangeEvent;
++import com.google.gwt.event.logical.shared.ValueChangeHandler;
+ import com.google.gwt.event.shared.HandlerRegistration;
+ import com.google.gwt.i18n.client.LocaleInfo;
+ import com.google.gwt.user.client.ui.DisclosurePanel;
+@@ -59,9 +62,11 @@ import java.sql.Timestamp;
+ import java.util.List;
+ 
+ 
+-public class ChangeScreen extends Screen {
++public class ChangeScreen extends Screen
++    implements ValueChangeHandler<ChangeDetail> {
+   private final Change.Id changeId;
+   private final PatchSet.Id openPatchSetId;
++  private ChangeDetailCache detailCache;
+ 
+   private Image starChange;
+   private boolean starred;
+@@ -130,7 +135,7 @@ public class ChangeScreen extends Screen {
+   @Override
+   protected void onLoad() {
+     super.onLoad();
+-    refresh();
++    detailCache.refresh();
+   }
+ 
+   @Override
+@@ -156,21 +161,6 @@ public class ChangeScreen extends Screen {
+     }
+   }
+ 
+-  public void refresh() {
+-    Util.DETAIL_SVC.changeDetail(changeId,
+-        new ScreenLoadCallback<ChangeDetail>(this) {
+-          @Override
+-          protected void preDisplay(final ChangeDetail r) {
+-            display(r);
+-          }
+-
+-          @Override
+-          protected void postDisplay() {
+-            patchSetsBlock.setRegisterKeys(true);
+-          }
+-        });
+-  }
+-
+   private void setStarred(final boolean s) {
+     if (s) {
+       starChange.setResource(Gerrit.RESOURCES.starFilled());
+@@ -183,6 +173,12 @@ public class ChangeScreen extends Screen {
+   @Override
+   protected void onInitUI() {
+     super.onInitUI();
++
++    ChangeCache cache = ChangeCache.get(changeId);
++
++    detailCache = cache.getChangeDetailCache();
++    detailCache.addValueChangeHandler(this);
++
+     addStyleName(Gerrit.RESOURCES.css().changeScreen());
+ 
+     keysNavigation = new KeyCommandSet(Gerrit.C.sectionNavigation());
+@@ -284,9 +280,15 @@ public class ChangeScreen extends Screen {
+     setPageTitle(titleBuf.toString());
+   }
+ 
++  @Override
++  public void onValueChange(ValueChangeEvent<ChangeDetail> event) {
++    if (isAttached()) {
++      display(event.getValue());
++    }
++  }
++
+   void update(final ChangeDetail detail) {
+-    display(detail);
+-    patchSetsBlock.setRegisterKeys(true);
++    detailCache.set(detail);
+   }
+ 
+   private void display(final ChangeDetail detail) {
+@@ -348,6 +350,11 @@ public class ChangeScreen extends Screen {
+       dependenciesPanel.getHeader().add(new InlineLabel(
+         Util.M.outdatedHeader(outdated)));
+     }
++
++    if (! isCurrentView()) {
++      display();
++    }
++    patchSetsBlock.setRegisterKeys(true);
+   }
+ 
+   private void addComments(final ChangeDetail detail) {
+-- 
+1.7.8
+

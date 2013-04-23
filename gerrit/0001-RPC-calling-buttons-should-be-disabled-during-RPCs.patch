@@ -1,0 +1,128 @@
+From d09f1730ee87cc331dc220a5375989d5151586e4 Mon Sep 17 00:00:00 2001
+From: Raviteja Sunkara <raviteja@codeaurora.org>
+Date: Fri, 11 Mar 2011 19:25:24 +0530
+Subject: [PATCH] RPC calling buttons should be disabled during RPCs
+
+This commit disables the following buttons after they have
+been clicked till the corresponding RPC is complete.
+Abandon, Restore buttons in PatchSetComplexDisclosurePanel
+Cancel Buttons in AbandonChangeDialog, RestoreChangeDialog
+Remove Button in ApprovalTable
+
+Change-Id: I22a39bc550cc7c6eee68104af8464f66c58f1462
+Bug: issue 846
+---
+ .../gerrit/client/changes/AbandonChangeDialog.java |    2 ++
+ .../gerrit/client/changes/ApprovalTable.java       |   13 ++++++++++---
+ .../changes/PatchSetComplexDisclosurePanel.java    |    2 ++
+ .../gerrit/client/changes/RestoreChangeDialog.java |    2 ++
+ 4 files changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/AbandonChangeDialog.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/AbandonChangeDialog.java
+index 34e300a..bc63fc0 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/AbandonChangeDialog.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/AbandonChangeDialog.java
+@@ -75,6 +75,7 @@ public class AbandonChangeDialog extends AutoCenterDialogBox implements CloseHan
+       @Override
+       public void onClick(final ClickEvent event) {
+         sendButton.setEnabled(false);
++        cancelButton.setEnabled(false);
+         Util.MANAGE_SVC.abandonChange(psid, message.getText().trim(),
+             new GerritCallback<ChangeDetail>() {
+               public void onSuccess(ChangeDetail result) {
+@@ -88,6 +89,7 @@ public class AbandonChangeDialog extends AutoCenterDialogBox implements CloseHan
+               @Override
+               public void onFailure(Throwable caught) {
+                 sendButton.setEnabled(true);
++                cancelButton.setEnabled(true);
+                 super.onFailure(caught);
+               }
+             });
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ApprovalTable.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ApprovalTable.java
+index 23dd635..a20b02e 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ApprovalTable.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ApprovalTable.java
+@@ -232,7 +232,7 @@ public class ApprovalTable extends Composite {
+     table.setWidget(row, col++, link(ad.getAccount()));
+ 
+     if (ad.canRemove()) {
+-      PushButton remove = new PushButton( //
++      final PushButton remove = new PushButton( //
+           new Image(Util.R.removeReviewerNormal()), //
+           new Image(Util.R.removeReviewerPressed()));
+       remove.setTitle(Util.M.removeReviewer( //
+@@ -241,7 +241,7 @@ public class ApprovalTable extends Composite {
+       remove.addClickHandler(new ClickHandler() {
+         @Override
+         public void onClick(ClickEvent event) {
+-          doRemove(ad);
++          doRemove(ad, remove);
+         }
+       });
+       table.setWidget(row, col, remove);
+@@ -294,7 +294,8 @@ public class ApprovalTable extends Composite {
+     col++;
+   }
+ 
+-  private void doRemove(final ApprovalDetail ad) {
++  private void doRemove(final ApprovalDetail ad, final PushButton remove) {
++    remove.setEnabled(false);
+     PatchUtil.DETAIL_SVC.removeReviewer(changeId, ad.getAccount(),
+         new GerritCallback<ReviewerResult>() {
+           @Override
+@@ -306,6 +307,12 @@ public class ApprovalTable extends Composite {
+               new ErrorDialog(result.getErrors().get(0).toString()).center();
+             }
+           }
++
++          @Override
++          public void onFailure(final Throwable caught) {
++            remove.setEnabled(true);
++            super.onFailure(caught);
++          }
+         });
+   }
+ }
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchSetComplexDisclosurePanel.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchSetComplexDisclosurePanel.java
+index 248e57d..2c62565 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchSetComplexDisclosurePanel.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchSetComplexDisclosurePanel.java
+@@ -400,6 +400,7 @@ class PatchSetComplexDisclosurePanel extends ComplexDisclosurePanel implements O
+       b.addClickHandler(new ClickHandler() {
+         @Override
+         public void onClick(final ClickEvent event) {
++          b.setEnabled(false);
+           new AbandonChangeDialog(patchSet.getId(),
+               new AsyncCallback<ChangeDetail>() {
+                 public void onSuccess(ChangeDetail result) {
+@@ -420,6 +421,7 @@ class PatchSetComplexDisclosurePanel extends ComplexDisclosurePanel implements O
+       b.addClickHandler(new ClickHandler() {
+         @Override
+         public void onClick(final ClickEvent event) {
++          b.setEnabled(false);
+           new RestoreChangeDialog(patchSet.getId(),
+               new AsyncCallback<ChangeDetail>() {
+                 public void onSuccess(ChangeDetail result) {
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/RestoreChangeDialog.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/RestoreChangeDialog.java
+index e05c42a..69d7c1f 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/RestoreChangeDialog.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/RestoreChangeDialog.java
+@@ -75,6 +75,7 @@ public class RestoreChangeDialog extends AutoCenterDialogBox implements CloseHan
+       @Override
+       public void onClick(final ClickEvent event) {
+         sendButton.setEnabled(false);
++        cancelButton.setEnabled(false);
+         Util.MANAGE_SVC.restoreChange(psid, message.getText().trim(),
+             new GerritCallback<ChangeDetail>() {
+               @Override
+@@ -89,6 +90,7 @@ public class RestoreChangeDialog extends AutoCenterDialogBox implements CloseHan
+               @Override
+               public void onFailure(Throwable caught) {
+                 sendButton.setEnabled(true);
++                cancelButton.setEnabled(true);
+                 super.onFailure(caught);
+               }
+             });
+-- 
+1.7.4.1
+

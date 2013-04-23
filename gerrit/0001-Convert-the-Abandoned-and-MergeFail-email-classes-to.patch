@@ -1,0 +1,301 @@
+From 772e3e02eeb78473d4e82cd11abb40f9b5777faf Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Wed, 21 Jul 2010 11:46:21 -0600
+Subject: [PATCH] Convert the Abandoned and MergeFail email classes to templates
+
+Convert the AbandonedSender and MergeFailSender classes to use
+file based velocity templates which an admin may edit.
+---
+ .../gerrit/pgm/init/SitePathInitializer.java       |   12 +++
+ .../google/gerrit/server/mail/AbandonedSender.java |   11 ++-
+ .../com/google/gerrit/server/mail/ChangeEmail.java |    2 +-
+ .../google/gerrit/server/mail/MergeFailSender.java |   11 +---
+ .../com/google/gerrit/server/mail/Abandoned.vm     |   82 +++++++++++++++++++
+ .../com/google/gerrit/server/mail/MergeFail.vm     |   83 ++++++++++++++++++++
+ 6 files changed, 186 insertions(+), 15 deletions(-)
+ create mode 100644 gerrit-server/src/main/resources/com/google/gerrit/server/mail/Abandoned.vm
+ create mode 100644 gerrit-server/src/main/resources/com/google/gerrit/server/mail/MergeFail.vm
+
+diff --git a/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java b/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java
+index 74e7548..14585a3 100644
+--- a/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java
++++ b/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java
+@@ -25,11 +25,13 @@ import static com.google.gerrit.pgm.init.InitUtil.version;
+ import com.google.gerrit.pgm.Init;
+ import com.google.gerrit.pgm.util.ConsoleUI;
+ import com.google.gerrit.server.config.SitePaths;
++import com.google.gerrit.server.mail.OutgoingEmail;
+ import com.google.inject.Binding;
+ import com.google.inject.Inject;
+ import com.google.inject.Injector;
+ import com.google.inject.TypeLiteral;
+ 
++import java.io.File;
+ import java.util.ArrayList;
+ import java.util.List;
+ 
+@@ -66,6 +68,7 @@ public class SitePathInitializer {
+     mkdir(site.etc_dir);
+     mkdir(site.lib_dir);
+     mkdir(site.logs_dir);
++    mkdir(site.mail_dir);
+     mkdir(site.static_dir);
+ 
+     for (InitStep step : steps) {
+@@ -82,11 +85,20 @@ public class SitePathInitializer {
+     extract(site.gerrit_sh, Init.class, "gerrit.sh");
+     chmod(0755, site.gerrit_sh);
+ 
++    extractMailExample("Abandoned.vm");
++    extractMailExample("MergeFail.vm");
++
+     if (!ui.isBatch()) {
+       System.err.println();
+     }
+   }
+ 
++  private void extractMailExample (String orig) throws Exception {
++    File ex = new File(site.mail_dir, "/" + orig + ".example");
++    extract(ex, OutgoingEmail.class, orig);
++    chmod(0444, ex);
++  }
++
+   private static List<InitStep> stepsOf(final Injector injector) {
+     final ArrayList<InitStep> r = new ArrayList<InitStep>();
+     for (Binding<InitStep> b : all(injector)) {
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/AbandonedSender.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/AbandonedSender.java
+index d2b5c29..00c8c87 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/AbandonedSender.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/AbandonedSender.java
+@@ -39,10 +39,13 @@ public class AbandonedSender extends ReplyToChangeSender {
+   }
+ 
+   @Override
++  protected void setupVelocityContext() {
++    super.setupVelocityContext();
++    velocityContext.put("fromName", getNameFor(fromId));
++  }
++
++  @Override
+   protected void formatChange() {
+-    appendText(getNameFor(fromId));
+-    appendText(" has abandoned change " + change.getKey().abbreviate() + ":\n");
+-    appendText("\n");
+-    formatCoverLetter();
++    appendText(velocifyFile("Abandoned.vm"));
+   }
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+index fd31f16..3b6008c 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+@@ -268,7 +268,7 @@ public abstract class ChangeEmail extends OutgoingEmail {
+   }
+ 
+   /** Get the text of the "cover letter", from {@link ChangeMessage}. */
+-  protected String getCoverLetter() {
++  public String getCoverLetter() {
+     if (changeMessage != null) {
+       final String txt = changeMessage.getMessage();
+       if (txt != null) {
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/MergeFailSender.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/MergeFailSender.java
+index 00750ef..3b80813 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/MergeFailSender.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/MergeFailSender.java
+@@ -38,15 +38,6 @@ public class MergeFailSender extends ReplyToChangeSender {
+ 
+   @Override
+   protected void formatChange() {
+-    appendText("Change " + change.getKey().abbreviate());
+-    if (patchSetInfo != null && patchSetInfo.getAuthor() != null
+-        && patchSetInfo.getAuthor().getName() != null) {
+-      appendText(" by ");
+-      appendText(patchSetInfo.getAuthor().getName());
+-    }
+-    appendText(" FAILED to submit to ");
+-    appendText(change.getDest().getShortName());
+-    appendText(".\n\n");
+-    formatCoverLetter();
++    appendText(velocifyFile("MergeFail.vm"));
+   }
+ }
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Abandoned.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Abandoned.vm
+new file mode 100644
+index 0000000..8b36162
+--- /dev/null
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Abandoned.vm
+@@ -0,0 +1,82 @@
++## Copyright (c) 2010, Code Aurora Forum. All rights reserved.
++##
++## Redistribution and use in source and binary forms, with or without
++## modification, are permitted provided that the following conditions are
++## met:
++##     * Redistributions of source code must retain the above copyright
++##       notice, this list of conditions and the following disclaimer.
++##     * Redistributions in binary form must reproduce the above
++##       copyright notice, this list of conditions and the following
++##       disclaimer in the documentation and/or other materials provided
++##       with the distribution.
++##     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++##       contributors may be used to endorse or promote products derived
++##       from this software without specific prior written permission.
++##
++## THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++## WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++## MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++## ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++## BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++## CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++## SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++## BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++## WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++## OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++## IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++##
++##
++## Template Type:
++## -------------
++## This is a velocity template, see: http://velocity.apache.org/
++##
++## Template File Names and extensions:
++## ----------------------------------
++## Gerrit will use templates ending in ".vm" but will ignore templates ending
++## in ".vm.example".  If a .vm template does not exist, the default internal
++## gerrit template which is the same as the .vm.example will be used.  If you
++## want to override the default template, copy the .vm.exmaple file to a .vm
++## file and edit it appropriately.
++##
++## Template Purposes;
++## -----------------
++## The Abandonned.vm template will determine the contents of the email related
++## to a change being abandonned. (see also ChangeSubject.vm and
++## ChangeFooter.vm).
++##
++## Template Resources:
++## ------------------
++## Writting templates for gerrit emails is likely to require some basic
++## knowledge of the class structure to be useful, so browsing the source
++## code might be necessary.  All outgoing emails have the following
++## variables available to them:
++##
++##  $email          a reference to the class constructing the current email.
++##                  With this reference it is possible to call any public
++##                  method on the email class.
++##
++##  $messageClass   a String containing the messageClass
++##
++##  StringUtils     a reference to the apaache StringUtils class.  This can
++##                  be very usefull for formatting strings.
++##
++##
++## All change related emails have the following additional variables available
++## to them:
++##
++##  $change         a reference to the current change object
++##
++##  $branch         a reference to the bracn of this change
++##
++##  $projectName    the name of this change's project
++##
++##  $patchSet       a reference to the current patchSet
++##
++##  $patchSetInfo   a reference to the current patchSetInfo
++##
++$fromName has abandoned change $change.key.abbreviate():
++
++#if ($email.coverLetter)
++$email.coverLetter
++
++#end
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/MergeFail.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/MergeFail.vm
+new file mode 100644
+index 0000000..e4d0350
+--- /dev/null
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/MergeFail.vm
+@@ -0,0 +1,83 @@
++## Copyright (c) 2010, Code Aurora Forum. All rights reserved.
++##
++## Redistribution and use in source and binary forms, with or without
++## modification, are permitted provided that the following conditions are
++## met:
++##     * Redistributions of source code must retain the above copyright
++##       notice, this list of conditions and the following disclaimer.
++##     * Redistributions in binary form must reproduce the above
++##       copyright notice, this list of conditions and the following
++##       disclaimer in the documentation and/or other materials provided
++##       with the distribution.
++##     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++##       contributors may be used to endorse or promote products derived
++##       from this software without specific prior written permission.
++##
++## THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++## WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++## MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++## ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++## BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++## CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++## SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++## BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++## WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++## OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++## IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++##
++##
++## Template Type:
++## -------------
++## This is a velocity template, see: http://velocity.apache.org/
++##
++## Template File Names and extensions:
++## ----------------------------------
++## Gerrit will use templates ending in ".vm" but will ignore templates ending
++## in ".vm.example".  If a .vm template does not exist, the default internal
++## gerrit template which is the same as the .vm.example will be used.  If you
++## want to override the default template, copy the .vm.exmaple file to a .vm
++## file and edit it appropriately.
++##
++## Template Purposes;
++## -----------------
++## The MergeFail.vm template will determine the contents of the email related
++## to a failure upon attempting to merge a change to the head (see also
++## ChangeSubject.vm and ChangeFooter.vm).
++##
++## Template Resources:
++## ------------------
++## Writting templates for gerrit emails is likely to require some basic
++## knowledge of the class structure to be useful, so browsing the source
++## code might be necessary.  All outgoing emails have the following
++## variables available to them:
++##
++##  $email          a reference to the class constructing the current email.
++##                  With this reference it is possible to call any public
++##                  method on the email class.
++##
++##  $messageClass   a String containing the messageClass
++##
++##  StringUtils     a reference to the apaache StringUtils class.  This can
++##                  be very usefull for formatting strings.
++##
++##
++## All change related emails have the following additional variables available
++## to them:
++##
++##  $change         a reference to the current change object
++##
++##  $branch         a reference to the bracn of this change
++##
++##  $projectName    the name of this change's project
++##
++##  $patchSet       a reference to the current patchSet
++##
++##  $patchSetInfo   a reference to the current patchSetInfo
++##
++Change $change.key.abbreviate()#if ($patchSetInfo.author.name)
++ by $patchSetInfo.author.name#end FAILED to submit to ${change.dest.shortName}.
++
++#if ($email.coverLetter)
++$email.coverLetter
++
++#end
+-- 
+1.7.1.1
+

@@ -1,0 +1,676 @@
+From 588323251dadd621485f04fadb277823c50b14bd Mon Sep 17 00:00:00 2001
+From: Keunhong Park <keunhong@codeaurora.org>
+Date: Thu, 21 Jun 2012 14:10:17 -0600
+Subject: [PATCH] New patch screen header
+
+This adds a new patch screen header that is displayed above both the
+side-by-side and unified views. The new header contains actual links to
+the available patchsets and shows which patchset is being currently
+displayed.
+
+This change also adds download links to the unified diff view.
+
+Bug: issue 1192
+Change-Id: I81339d3c0e05457e28d44ad089aa05c4b6f1af11
+---
+ .../main/java/com/google/gerrit/client/gerrit.css  |    4 +
+ .../gerrit/client/patches/PatchConstants.java      |    1 +
+ .../client/patches/PatchConstants.properties       |    1 +
+ .../google/gerrit/client/patches/PatchScreen.java  |    6 +
+ .../gerrit/client/patches/PatchSetSelectBox.java   |  171 ++++++++++++++++++++
+ .../gerrit/client/patches/PatchSetSelectBox.ui.xml |   74 +++++++++
+ .../gerrit/client/patches/PatchTableHeader.java    |   71 ++++++++
+ .../patches/PatchTableHeaderSideBySide.ui.xml      |   69 ++++++++
+ .../client/patches/PatchTableHeaderUnified.ui.xml  |   43 +++++
+ .../gerrit/client/patches/SideBySideTable.java     |   73 ---------
+ 10 files changed, 440 insertions(+), 73 deletions(-)
+ create mode 100644 gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchSetSelectBox.java
+ create mode 100644 gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchSetSelectBox.ui.xml
+ create mode 100644 gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeader.java
+ create mode 100644 gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeaderSideBySide.ui.xml
+ create mode 100644 gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeaderUnified.ui.xml
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/gerrit.css b/gerrit-gwtui/src/main/java/com/google/gerrit/client/gerrit.css
+index 3789c6a..61cb085 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/gerrit.css
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/gerrit.css
+@@ -1042,6 +1042,10 @@ a:hover.downloadLink {
+   display: table;
+ }
+ 
++.sideBySideScreenSideBySideTable .fileLine {
++  width: 50%;
++}
++
+ .sideBySideScreenLinkTable {
+   width: 100%;
+ }
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchConstants.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchConstants.java
+index fd34729..d76bcca 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchConstants.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchConstants.java
+@@ -31,6 +31,7 @@ public interface PatchConstants extends Constants {
+   String patchHeaderPatchSet();
+   String patchHeaderOld();
+   String patchHeaderNew();
++  String patchSet();
+ 
+   String patchHistoryTitle();
+   String disabledOnLargeFiles();
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchConstants.properties b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchConstants.properties
+index 23090a2..24c4140 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchConstants.properties
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchConstants.properties
+@@ -15,6 +15,7 @@ patchHeaderPatchSet = Patch Set
+ patchHeaderOld = Old Version
+ patchHeaderNew = New Version
+ patchHistoryTitle = Patch History
++patchSet = Patch Set
+ disabledOnLargeFiles = Disabled on very large source files.
+ intralineFailure = Intraline difference not available due to server error.
+ illegalNumberOfColumns = The number of columns cannot be zero or negative
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
+index 77d8659..7089e2b 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
+@@ -106,6 +106,7 @@ public abstract class PatchScreen extends Screen implements
+   private HistoryTable historyTable;
+   private FlowPanel topPanel;
+   private FlowPanel contentPanel;
++  private PatchTableHeader header;
+   private Label noDifference;
+   private AbstractPatchContentTable contentTable;
+   private CommitMessageBlock commitMessageBlock;
+@@ -250,6 +251,8 @@ public abstract class PatchScreen extends Screen implements
+     topPanel = new FlowPanel();
+     add(topPanel);
+ 
++    header = new PatchTableHeader(getPatchScreenType());
++
+     noDifference = new Label(PatchUtil.C.noDifference());
+     noDifference.setStyleName(Gerrit.RESOURCES.css().patchNoDifference());
+     noDifference.setVisible(false);
+@@ -264,6 +267,7 @@ public abstract class PatchScreen extends Screen implements
+     contentPanel = new FlowPanel();
+     contentPanel.setStyleName(Gerrit.RESOURCES.css()
+         .sideBySideScreenSideBySideTable());
++    contentPanel.add(header);
+     contentPanel.add(noDifference);
+     contentPanel.add(contentTable);
+     add(contentPanel);
+@@ -439,6 +443,8 @@ public abstract class PatchScreen extends Screen implements
+       setToken(Dispatcher.toPatchUnified(idSideA, patchKey));
+     }
+ 
++    header.display(patchSetDetail, script, patchKey, idSideA, idSideB);
++
+     if (hasDifferences) {
+       contentTable.display(patchKey, idSideA, idSideB, script);
+       contentTable.display(script.getCommentDetail(), script.isExpandAllComments());
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchSetSelectBox.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchSetSelectBox.java
+new file mode 100644
+index 0000000..ebf6e45
+--- /dev/null
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchSetSelectBox.java
+@@ -0,0 +1,171 @@
++// Copyright (C) 2012 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.client.patches;
++
++import com.google.gerrit.client.Dispatcher;
++import com.google.gerrit.client.Gerrit;
++import com.google.gerrit.common.data.PatchScript;
++import com.google.gerrit.common.data.PatchSetDetail;
++import com.google.gerrit.reviewdb.client.Patch;
++import com.google.gerrit.reviewdb.client.PatchSet;
++import com.google.gwt.core.client.GWT;
++import com.google.gwt.dom.client.SpanElement;
++import com.google.gwt.event.dom.client.ClickEvent;
++import com.google.gwt.event.dom.client.ClickHandler;
++import com.google.gwt.resources.client.CssResource;
++import com.google.gwt.uibinder.client.UiBinder;
++import com.google.gwt.uibinder.client.UiField;
++import com.google.gwt.user.client.ui.Anchor;
++import com.google.gwt.user.client.ui.Composite;
++import com.google.gwt.user.client.ui.HTMLPanel;
++import com.google.gwt.user.client.ui.Label;
++import com.google.gwtorm.client.KeyUtil;
++
++import java.util.LinkedList;
++import java.util.List;
++
++public class PatchSetSelectBox extends Composite {
++  interface Binder extends UiBinder<HTMLPanel, PatchSetSelectBox> {
++  }
++
++  private static Binder uiBinder = GWT.create(Binder.class);
++
++  interface BoxStyle extends CssResource {
++    String selected();
++
++    String deselected();
++
++    String hidden();
++  }
++
++  PatchScript script;
++  Patch.Key patchKey;
++  PatchSet.Id idSideA;
++  PatchSet.Id idSideB;
++  PatchSet.Id idActive;
++  Side side;
++  PatchScreen.Type screenType;
++  List<Anchor> links;
++
++  @UiField
++  HTMLPanel linkPanel;
++
++  @UiField
++  BoxStyle style;
++
++  @UiField
++  SpanElement sideMarker;
++
++  public enum Side {
++    A, B
++  }
++
++  public PatchSetSelectBox(Side side, final PatchScreen.Type type) {
++    this.side = side;
++    this.screenType = type;
++
++    initWidget(uiBinder.createAndBindUi(this));
++  }
++
++  public void display(final PatchSetDetail detail, final PatchScript script, Patch.Key key,
++      PatchSet.Id idSideA, PatchSet.Id idSideB) {
++    this.script = script;
++    this.patchKey = key;
++    this.idSideA = idSideA;
++    this.idSideB = idSideB;
++    this.idActive = (side == Side.A) ? idSideA : idSideB;
++    this.links = new LinkedList<Anchor>();
++
++    if (screenType == PatchScreen.Type.UNIFIED) {
++      sideMarker.setInnerText((side == Side.A) ? "(-)" : "(+)");
++    }
++
++    if (detail.getInfo().getParents().size() > 1) {
++      addLink(PatchUtil.C.patchBaseAutoMerge(), null);
++    } else {
++      addLink(PatchUtil.C.patchBase(), null);
++    }
++
++    if (side == Side.B) {
++      links.get(0).setStyleName(style.hidden());
++    }
++
++    for (Patch patch : script.getHistory()) {
++      PatchSet.Id psId = patch.getKey().getParentKey();
++      addLink(Integer.toString(psId.get()), psId);
++    }
++
++    if (idActive == null && side == Side.A) {
++      links.get(0).setStyleName(style.selected());
++    } else {
++      links.get(idActive.get()).setStyleName(style.selected());
++    }
++
++    Anchor downloadLink = getDownloadLink();
++    if (downloadLink != null) {
++      linkPanel.add(new Label(" - "));
++      linkPanel.add(downloadLink);
++    }
++  }
++
++  private void addLink(String label, final PatchSet.Id id) {
++    final Anchor anchor = new Anchor(label);
++    anchor.addClickHandler(new ClickHandler() {
++      @Override
++      public void onClick(ClickEvent event) {
++        if (side == Side.A) {
++          idSideA = id;
++        } else {
++          idSideB = id;
++        }
++
++        Patch.Key k = new Patch.Key(idSideB, patchKey.get());
++
++        switch (screenType) {
++          case SIDE_BY_SIDE:
++            Gerrit.display(Dispatcher.toPatchSideBySide(idSideA, k));
++            break;
++          case UNIFIED:
++            Gerrit.display(Dispatcher.toPatchUnified(idSideA, k));
++            break;
++        }
++      }
++
++    });
++
++    links.add(anchor);
++    linkPanel.add(anchor);
++  }
++
++  private Anchor getDownloadLink() {
++    boolean isCommitMessage = Patch.COMMIT_MSG.equals(script.getNewName());
++
++    if (isCommitMessage || (side == Side.A && 0 >= script.getA().size())
++        || (side == Side.B && 0 >= script.getB().size())) {
++      return null;
++    }
++
++    Patch.Key key =
++        (idSideA == null) ? patchKey : (new Patch.Key(idSideA, patchKey.get()));
++
++    String sideURL = (side == Side.A) ? "1" : "0";
++    final String base = GWT.getHostPageBaseURL() + "cat/";
++
++    final Anchor anchor = new Anchor(PatchUtil.C.download());
++    anchor.setHref(base + KeyUtil.encode(key.toString()) + "^" + sideURL);
++
++    return anchor;
++  }
++}
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchSetSelectBox.ui.xml b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchSetSelectBox.ui.xml
+new file mode 100644
+index 0000000..17eca92
+--- /dev/null
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchSetSelectBox.ui.xml
+@@ -0,0 +1,74 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!--
++Copyright (C) 2012 The Android Open Source Project
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++-->
++
++<ui:UiBinder xmlns:ui='urn:ui:com.google.gwt.uibinder'
++    xmlns:g='urn:import:com.google.gwt.user.client.ui'>
++
++
++  <ui:with field='res' type='com.google.gerrit.client.GerritResources'/>
++  <ui:with field='cons' type='com.google.gerrit.client.patches.PatchConstants'/>
++  <ui:style type='com.google.gerrit.client.patches.PatchSetSelectBox.BoxStyle'>
++    @eval selectionColor com.google.gerrit.client.Gerrit.getTheme().selectionColor;
++    @eval trimColor com.google.gerrit.client.Gerrit.getTheme().trimColor;
++    @eval backgroundColor com.google.gerrit.client.Gerrit.getTheme().backgroundColor;
++
++    .wrapper {
++      width: 100%;
++    }
++
++    .patchSetLabel {
++      font-weight: bold;
++    }
++
++    .linkPanel > div {
++      display: inline-block;
++      padding: 3px;
++    }
++
++    .linkPanel {
++      font-size: 12px;
++    }
++
++    .linkPanel > a {
++      padding: 3px;
++      display: inline-block;
++      text-decoration: none;
++    }
++
++    .selected {
++      font-weight: bold;
++      background-color: selectionColor;
++    }
++
++    .deselected {
++      font-weight: normal;
++    }
++
++    .sideMarker {
++      font-family: monospace;
++    }
++
++    .hidden {
++      visibility: hidden;
++    }
++  </ui:style>
++
++  <g:HTMLPanel styleName='wrapper'>
++    <g:HTMLPanel styleName='{style.linkPanel}' ui:field='linkPanel'><span class='{style.patchSetLabel}'><ui:text from="{cons.patchSet}" /></span> <span class='{style.sideMarker}' ui:field='sideMarker'></span>: </g:HTMLPanel>
++  </g:HTMLPanel>
++</ui:UiBinder>
++
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeader.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeader.java
+new file mode 100644
+index 0000000..3dd8908
+--- /dev/null
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeader.java
+@@ -0,0 +1,71 @@
++// Copyright (C) 2012 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.client.patches;
++
++import com.google.gerrit.common.data.PatchScript;
++import com.google.gerrit.common.data.PatchSetDetail;
++import com.google.gerrit.reviewdb.client.Patch;
++import com.google.gerrit.reviewdb.client.PatchSet;
++import com.google.gwt.core.client.GWT;
++import com.google.gwt.uibinder.client.UiBinder;
++import com.google.gwt.uibinder.client.UiField;
++import com.google.gwt.uibinder.client.UiTemplate;
++import com.google.gwt.user.client.ui.Composite;
++import com.google.gwt.user.client.ui.HTMLPanel;
++import com.google.gwt.user.client.ui.SimplePanel;
++
++public class PatchTableHeader extends Composite {
++
++  @UiTemplate("PatchTableHeaderSideBySide.ui.xml")
++  interface SideBySideBinder extends UiBinder<HTMLPanel, PatchTableHeader> {
++  }
++
++  @UiTemplate("PatchTableHeaderUnified.ui.xml")
++  interface UnifiedBinder extends UiBinder<HTMLPanel, PatchTableHeader> {
++  }
++
++  private static SideBySideBinder uiBinderS = GWT.create(SideBySideBinder.class);
++  private static UnifiedBinder uiBinderU = GWT.create(UnifiedBinder.class);
++
++  @UiField
++  SimplePanel sideAPanel;
++
++  @UiField
++  SimplePanel sideBPanel;
++
++  PatchSetSelectBox listA;
++  PatchSetSelectBox listB;
++
++  public PatchTableHeader(PatchScreen.Type type) {
++    listA = new PatchSetSelectBox(PatchSetSelectBox.Side.A, type);
++    listB = new PatchSetSelectBox(PatchSetSelectBox.Side.B, type);
++
++    if (type == PatchScreen.Type.SIDE_BY_SIDE) {
++      initWidget(uiBinderS.createAndBindUi(this));
++    } else {
++      initWidget(uiBinderU.createAndBindUi(this));
++    }
++
++    sideAPanel.add(listA);
++    sideBPanel.add(listB);
++  }
++
++
++  public void display(final PatchSetDetail detail, PatchScript script, final Patch.Key patchKey,
++      final PatchSet.Id idSideA, final PatchSet.Id idSideB) {
++    listA.display(detail, script, patchKey, idSideA, idSideB);
++    listB.display(detail, script, patchKey, idSideA, idSideB);
++  }
++}
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeaderSideBySide.ui.xml b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeaderSideBySide.ui.xml
+new file mode 100644
+index 0000000..530e143
+--- /dev/null
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeaderSideBySide.ui.xml
+@@ -0,0 +1,69 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!--
++Copyright (C) 2012 The Android Open Source Project
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++-->
++
++<ui:UiBinder xmlns:ui='urn:ui:com.google.gwt.uibinder'
++    xmlns:g='urn:import:com.google.gwt.user.client.ui'>
++
++
++  <ui:with field='res' type='com.google.gerrit.client.GerritResources'/>
++  <ui:style>
++    @eval trimColor com.google.gerrit.client.Gerrit.getTheme().trimColor;
++
++    .wrapper {
++      width: 100%;
++      background-color: trimColor;
++      overflow: hidden;
++    }
++
++    .wrapper .box {
++      width: 100%;
++      text-align: center;
++    }
++
++    .leftWrapper {
++      width: 50%;
++      float: left;
++    }
++
++    .rightWrapper {
++      width: 50%;
++      overflow: hidden;
++    }
++
++    .leftBox {
++      float:left;
++    }
++
++    .rightBox {
++      float: right;
++    }
++
++    .clear {
++      clear: both;
++    }
++  </ui:style>
++
++  <g:HTMLPanel styleName="{style.wrapper}">
++    <div class='{style.leftWrapper}'>
++      <g:SimplePanel addStyleNames='{style.box} {style.leftBox}' ui:field='sideAPanel'></g:SimplePanel>
++    </div>
++    <div class='{style.rightWrapper}'>
++      <g:SimplePanel addStyleNames='{style.box} {style.rightBox}' ui:field='sideBPanel'></g:SimplePanel>
++    </div>
++  </g:HTMLPanel>
++</ui:UiBinder>
++
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeaderUnified.ui.xml b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeaderUnified.ui.xml
+new file mode 100644
+index 0000000..d4bf806
+--- /dev/null
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchTableHeaderUnified.ui.xml
+@@ -0,0 +1,43 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!--
++Copyright (C) 2012 The Android Open Source Project
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++-->
++
++<ui:UiBinder xmlns:ui='urn:ui:com.google.gwt.uibinder'
++    xmlns:g='urn:import:com.google.gwt.user.client.ui'>
++
++
++  <ui:with field='res' type='com.google.gerrit.client.GerritResources'/>
++  <ui:style>
++    @eval trimColor com.google.gerrit.client.Gerrit.getTheme().trimColor;
++
++    .wrapper {
++      width: 100%;
++      background-color: trimColor;
++    }
++
++    .wrapper .box {
++      width: 100%;
++      text-align: left;
++      margin-left: 3px;
++    }
++  </ui:style>
++
++  <g:HTMLPanel styleName="{style.wrapper}">
++    <g:SimplePanel addStyleNames='{style.box}' ui:field='sideAPanel'></g:SimplePanel>
++    <g:SimplePanel addStyleNames='{style.box}' ui:field='sideBPanel'></g:SimplePanel>
++  </g:HTMLPanel>
++</ui:UiBinder>
++
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/SideBySideTable.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/SideBySideTable.java
+index 964ba4b..ec63a83 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/SideBySideTable.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/SideBySideTable.java
+@@ -25,10 +25,7 @@ import com.google.gerrit.common.data.PatchScript;
+ import com.google.gerrit.common.data.PatchScript.FileMode;
+ import com.google.gerrit.prettify.common.EditList;
+ import com.google.gerrit.prettify.common.SparseHtmlFile;
+-import com.google.gerrit.reviewdb.client.Patch;
+-import com.google.gerrit.reviewdb.client.Patch.ChangeType;
+ import com.google.gerrit.reviewdb.client.PatchLineComment;
+-import com.google.gwt.core.client.GWT;
+ import com.google.gwt.event.dom.client.ClickEvent;
+ import com.google.gwt.event.dom.client.ClickHandler;
+ import com.google.gwt.user.client.ui.Anchor;
+@@ -38,8 +35,6 @@ import com.google.gwt.user.client.ui.HasVerticalAlignment;
+ import com.google.gwt.user.client.ui.InlineLabel;
+ import com.google.gwtexpui.safehtml.client.SafeHtml;
+ import com.google.gwtexpui.safehtml.client.SafeHtmlBuilder;
+-import com.google.gwtorm.client.KeyUtil;
+-
+ import org.eclipse.jgit.diff.Edit;
+ 
+ import java.util.ArrayList;
+@@ -89,9 +84,6 @@ public class SideBySideTable extends AbstractPatchContentTable {
+         script.getDiffPrefs().isIntralineDifference()
+             && script.hasIntralineDifference();
+ 
+-    appendHeader(script, nc);
+-    lines.add(null);
+-
+     if (script.getFileModeA() != FileMode.FILE
+         || script.getFileModeB() != FileMode.FILE) {
+       openLine(nc);
+@@ -262,71 +254,6 @@ public class SideBySideTable extends AbstractPatchContentTable {
+     return row;
+   }
+ 
+-  private void appendHeader(PatchScript script, final SafeHtmlBuilder m) {
+-    boolean isCommitMessage = Patch.COMMIT_MSG.equals(script.getNewName());
+-
+-    m.openTr();
+-
+-    m.openTd();
+-    m.addStyleName(Gerrit.RESOURCES.css().iconCell());
+-    m.addStyleName(Gerrit.RESOURCES.css().fileColumnHeader());
+-    m.closeTd();
+-
+-    m.openTd();
+-    m.addStyleName(Gerrit.RESOURCES.css().fileColumnHeader());
+-    m.addStyleName(Gerrit.RESOURCES.css().lineNumber());
+-    m.closeTd();
+-
+-    m.openTd();
+-    m.setStyleName(Gerrit.RESOURCES.css().fileColumnHeader());
+-    m.setAttribute("width", "50%");
+-    if (script.getChangeType() == ChangeType.RENAMED
+-        || script.getChangeType() == ChangeType.COPIED) {
+-      m.append(script.getOldName());
+-    } else {
+-      m.append(PatchUtil.C.patchHeaderOld());
+-    }
+-    if (!isCommitMessage) {
+-      m.br();
+-      if (0 < script.getA().size()) {
+-        if (idSideA == null) {
+-          downloadLink(m, patchKey, "1");
+-        } else {
+-          downloadLink(m, new Patch.Key(idSideA, patchKey.get()), "0");
+-        }
+-      }
+-    }
+-    m.closeTd();
+-
+-    m.openTd();
+-    m.setStyleName(Gerrit.RESOURCES.css().fileColumnHeader());
+-    m.setAttribute("width", "50%");
+-    m.append(PatchUtil.C.patchHeaderNew());
+-    if (!isCommitMessage) {
+-      m.br();
+-      if (0 < script.getB().size()) {
+-        downloadLink(m, new Patch.Key(idSideB, patchKey.get()), "0");
+-      }
+-    }
+-    m.closeTd();
+-
+-    m.openTd();
+-    m.addStyleName(Gerrit.RESOURCES.css().fileColumnHeader());
+-    m.addStyleName(Gerrit.RESOURCES.css().lineNumber());
+-    m.closeTd();
+-
+-    m.closeTr();
+-  }
+-
+-  private void downloadLink(final SafeHtmlBuilder m, final Patch.Key key,
+-      final String side) {
+-    final String base = GWT.getHostPageBaseURL() + "cat/";
+-    m.openAnchor();
+-    m.setAttribute("href", base + KeyUtil.encode(key.toString()) + "^" + side);
+-    m.append(PatchUtil.C.download());
+-    m.closeAnchor();
+-  }
+-
+   private void appendSkipLine(final SafeHtmlBuilder m, final int skipCnt) {
+     m.openTr();
+ 
+-- 
+1.7.8.3
+

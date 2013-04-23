@@ -1,0 +1,409 @@
+From eaff51b77ec8f9404819063e1f4d4804cf3917b5 Mon Sep 17 00:00:00 2001
+From: Martin Fick <c_mfick@quicinc.com>
+Date: Wed, 12 May 2010 15:03:07 -0600
+Subject: [PATCH] Refactor the common parts of submitting a change into utility classes.
+
+Both the web submit, SubmitAction, and ssh submit, SubmitCommand, do
+very similar things to submit changes.  This patch refactors the
+common code in these two classes into two primary utilty functions:
+ChangeControl.canSubmit() to first verify the validity of the submit,
+and ChangeUtil.submit() to actually perform the submit.
+---
+ .../httpd/rpc/changedetail/SubmitAction.java       |   79 ++-----------------
+ .../java/com/google/gerrit/server/ChangeUtil.java  |   51 +++++++++++++
+ .../gerrit/server/project/ChangeControl.java       |   63 +++++++++++++++-
+ .../google/gerrit/sshd/commands/SubmitCommand.java |   80 +++-----------------
+ 4 files changed, 133 insertions(+), 140 deletions(-)
+
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/SubmitAction.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/SubmitAction.java
+index ce833b3..f32ebc4 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/SubmitAction.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/SubmitAction.java
+@@ -29,6 +29,7 @@ import com.google.gerrit.server.ChangeUtil;
+ import com.google.gerrit.server.IdentifiedUser;
+ import com.google.gerrit.server.git.MergeQueue;
+ import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
++import com.google.gerrit.server.project.ChangeControl;
+ import com.google.gerrit.server.project.NoSuchChangeException;
+ import com.google.gerrit.server.workflow.CategoryFunction;
+ import com.google.gerrit.server.workflow.FunctionState;
+@@ -52,6 +53,8 @@ class SubmitAction extends Handler<ChangeDetail> {
+   private final FunctionState.Factory functionState;
+   private final IdentifiedUser user;
+   private final ChangeDetailFactory.Factory changeDetailFactory;
++  @Inject
++  private ChangeControl.Factory changeControlFactory;
+ 
+   private final PatchSet.Id patchSetId;
+ 
+@@ -74,79 +77,15 @@ class SubmitAction extends Handler<ChangeDetail> {
+   public ChangeDetail call() throws OrmException, NoSuchEntityException,
+       IllegalStateException, PatchSetInfoNotAvailableException,
+       NoSuchChangeException {
+-    final Change.Id changeId = patchSetId.getParentKey();
+-    Change change = db.changes().get(changeId);
+-    if (change == null) {
+-      throw new NoSuchEntityException();
+-    }
+-
+-    if (!patchSetId.equals(change.currentPatchSetId())) {
+-      throw new IllegalStateException("Patch set " + patchSetId
+-          + " not current");
+-    }
+-    if (change.getStatus().isClosed()) {
+-      throw new IllegalStateException("Change" + changeId + " is closed");
+-    }
+-
+-    final List<PatchSetApproval> allApprovals =
+-        new ArrayList<PatchSetApproval>(db.patchSetApprovals().byPatchSet(
+-            patchSetId).toList());
+ 
+-    final PatchSetApproval.Key ak =
+-        new PatchSetApproval.Key(patchSetId, user.getAccountId(), SUBMIT);
+-    PatchSetApproval myAction = null;
+-    for (final PatchSetApproval ca : allApprovals) {
+-      if (ak.equals(ca.getKey())) {
+-        myAction = ca;
+-        myAction.setValue((short) 1);
+-        myAction.setGranted();
+-        break;
+-      }
+-    }
+-    if (myAction == null) {
+-      myAction = new PatchSetApproval(ak, (short) 1);
+-      allApprovals.add(myAction);
+-    }
+-
+-    final ApprovalType actionType =
+-        approvalTypes.getApprovalType(myAction.getCategoryId());
+-    if (actionType == null || !actionType.getCategory().isAction()) {
+-      throw new IllegalArgumentException(actionType.getCategory().getName()
+-          + " not an action");
+-    }
+-
+-    final FunctionState fs =
+-        functionState.create(change, patchSetId, allApprovals);
+-    for (ApprovalType c : approvalTypes.getApprovalTypes()) {
+-      CategoryFunction.forCategory(c.getCategory()).run(c, fs);
+-    }
+-    if (!CategoryFunction.forCategory(actionType.getCategory()).isValid(user,
+-        actionType, fs)) {
+-      throw new IllegalStateException(actionType.getCategory().getName()
+-          + " not permitted");
+-    }
+-    fs.normalize(actionType, myAction);
+-    if (myAction.getValue() <= 0) {
+-      throw new IllegalStateException(actionType.getCategory().getName()
+-          + " not permitted");
+-    }
+-
+-    db.patchSetApprovals().upsert(Collections.singleton(myAction));
++    final Change.Id changeId = patchSetId.getParentKey();
++    final ChangeControl changeControl = changeControlFactory.validateFor(changeId);
+ 
+-    change = db.changes().atomicUpdate(changeId, new AtomicUpdate<Change>() {
+-      @Override
+-      public Change update(Change change) {
+-        if (change.getStatus() == Change.Status.NEW) {
+-          change.setStatus(Change.Status.SUBMITTED);
+-          ChangeUtil.updated(change);
+-        }
+-        return change;
+-      }
+-    });
++    String err = changeControl.canSubmit(patchSetId, db, approvalTypes,
++        functionState);
++    if(err != null) { throw new IllegalStateException(err); }
+ 
+-    if (change.getStatus() == Change.Status.SUBMITTED) {
+-      merger.merge(change.getDest());
+-    }
++    ChangeUtil.submit(patchSetId, user, db, merger);
+ 
+     return changeDetailFactory.create(changeId).call();
+   }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+index 4d9c177..320cf65 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+@@ -14,15 +14,23 @@
+ 
+ package com.google.gerrit.server;
+ 
++import static com.google.gerrit.reviewdb.ApprovalCategory.SUBMIT;
++
+ import com.google.gerrit.reviewdb.Change;
++import com.google.gerrit.reviewdb.PatchSet;
++import com.google.gerrit.reviewdb.PatchSetApproval;
+ import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.server.git.MergeQueue;
++import com.google.gwtorm.client.AtomicUpdate;
+ import com.google.gwtorm.client.OrmConcurrencyException;
+ import com.google.gwtorm.client.OrmException;
+ 
+ import org.eclipse.jgit.util.Base64;
+ import org.eclipse.jgit.util.NB;
+ 
++import java.util.ArrayList;
+ import java.util.Collections;
++import java.util.List;
+ 
+ public class ChangeUtil {
+   private static int uuidPrefix;
+@@ -67,6 +75,49 @@ public class ChangeUtil {
+     computeSortKey(c);
+   }
+ 
++  public static void submit(PatchSet.Id patchSetId, IdentifiedUser user, ReviewDb db, MergeQueue merger)
++      throws OrmException {
++    final Change.Id changeId = patchSetId.getParentKey();
++    final PatchSetApproval approval = createSubmitApproval(patchSetId, user, db);
++
++    db.patchSetApprovals().upsert(Collections.singleton(approval));
++
++    final Change change = db.changes().atomicUpdate(changeId, new AtomicUpdate<Change>() {
++      @Override
++      public Change update(Change change) {
++        if (change.getStatus() == Change.Status.NEW) {
++          change.setStatus(Change.Status.SUBMITTED);
++          ChangeUtil.updated(change);
++        }
++        return change;
++      }
++    });
++
++    if (change.getStatus() == Change.Status.SUBMITTED) {
++      merger.merge(change.getDest());
++    }
++  }
++
++  public static PatchSetApproval createSubmitApproval(PatchSet.Id patchSetId, IdentifiedUser user, ReviewDb db) 
++      throws OrmException {
++    final List<PatchSetApproval> allApprovals =
++        new ArrayList<PatchSetApproval>(db.patchSetApprovals().byPatchSet(
++            patchSetId).toList());
++
++    final PatchSetApproval.Key akey =
++        new PatchSetApproval.Key(patchSetId, user.getAccountId(), SUBMIT);
++
++    for (final PatchSetApproval approval : allApprovals) {
++      if (akey.equals(approval.getKey())) {
++        approval.setValue((short) 1);
++        approval.setGranted();
++        return approval;
++      }
++    }
++    return new PatchSetApproval(akey, (short) 1);
++  }
++
++
+   public static void computeSortKey(final Change c) {
+     // The encoding uses minutes since Wed Oct 1 00:00:00 2008 UTC.
+     // We overrun approximately 4,085 years later, so ~6093.
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/project/ChangeControl.java b/gerrit-server/src/main/java/com/google/gerrit/server/project/ChangeControl.java
+index 86afcbe..01f0d88 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/project/ChangeControl.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/project/ChangeControl.java
+@@ -14,17 +14,27 @@
+ 
+ package com.google.gerrit.server.project;
+ 
+-import com.google.gerrit.reviewdb.Account;
++import com.google.gerrit.common.data.ApprovalType;
++import com.google.gerrit.common.data.ApprovalTypes;
+ import com.google.gerrit.reviewdb.Change;
++import com.google.gerrit.reviewdb.PatchSet;
+ import com.google.gerrit.reviewdb.PatchSetApproval;
+ import com.google.gerrit.reviewdb.Project;
+ import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.server.ChangeUtil;
+ import com.google.gerrit.server.CurrentUser;
+ import com.google.gerrit.server.IdentifiedUser;
++import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
++import com.google.gerrit.server.workflow.CategoryFunction;
++import com.google.gerrit.server.workflow.FunctionState;
+ import com.google.gwtorm.client.OrmException;
+ import com.google.inject.Inject;
+ import com.google.inject.Provider;
+ 
++import java.util.ArrayList;
++import java.util.List;
++
++
+ /** Access control management for a user accessing a single change. */
+ public class ChangeControl {
+   public static class Factory {
+@@ -173,4 +183,55 @@ public class ChangeControl {
+ 
+     return false;
+   }
++
++  /** Can this user submit patch set to this change? */
++  public String canSubmit(final PatchSet.Id patchSetId, final ReviewDb db,
++        final ApprovalTypes approvalTypes,
++        FunctionState.Factory functionStateFactory)
++      throws NoSuchChangeException, OrmException,
++        PatchSetInfoNotAvailableException {
++
++    final Change.Id changeId = patchSetId.getParentKey();
++    if (change.getStatus().isClosed()) {
++      return "Change " + changeId + " is closed";
++    }
++
++    final Change change = getChange();
++    if (!patchSetId.equals(change.currentPatchSetId())) {
++      return "Patch set " + patchSetId + " not current";
++    }
++
++    final List<PatchSetApproval> allApprovals =
++        new ArrayList<PatchSetApproval>(db.patchSetApprovals().byPatchSet(
++            patchSetId).toList());
++
++    if(!(getCurrentUser() instanceof IdentifiedUser)) {
++      throw new IllegalArgumentException("user is not identified");
++    }
++    final PatchSetApproval myAction =
++        ChangeUtil.createSubmitApproval(patchSetId,
++            (IdentifiedUser) getCurrentUser(), db);
++
++    final ApprovalType actionType =
++        approvalTypes.getApprovalType(myAction.getCategoryId());
++    if (actionType == null || !actionType.getCategory().isAction()) {
++      throw new IllegalArgumentException(myAction.getCategoryId() +
++        " not an action");
++    }
++
++    final FunctionState fs =
++        functionStateFactory.create(change, patchSetId, allApprovals);
++    for (ApprovalType c : approvalTypes.getApprovalTypes()) {
++      CategoryFunction.forCategory(c.getCategory()).run(c, fs);
++    }
++    if (!CategoryFunction.forCategory(actionType.getCategory()).isValid(
++         getCurrentUser(), actionType, fs)) {
++      return actionType.getCategory().getName() + " not permitted";
++    }
++    fs.normalize(actionType, myAction);
++    if (myAction.getValue() <= 0) {
++      return actionType.getCategory().getName() + " not permitted";
++    }
++    return null;
++  }
+ }
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/SubmitCommand.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/SubmitCommand.java
+index 8f590be..35f1346 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/SubmitCommand.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/SubmitCommand.java
+@@ -18,7 +18,11 @@ import static com.google.gerrit.reviewdb.ApprovalCategory.SUBMIT;
+ 
+ import com.google.gerrit.common.data.ApprovalType;
+ import com.google.gerrit.common.data.ApprovalTypes;
++import com.google.gerrit.common.errors.NoSuchEntityException;
++import com.google.gerrit.reviewdb.ApprovalCategory;
++import com.google.gerrit.reviewdb.ApprovalCategoryValue;
+ import com.google.gerrit.reviewdb.Change;
++import com.google.gerrit.reviewdb.ChangeMessage;
+ import com.google.gerrit.reviewdb.PatchSet;
+ import com.google.gerrit.reviewdb.PatchSetApproval;
+ import com.google.gerrit.reviewdb.RevId;
+@@ -34,6 +38,7 @@ import com.google.gerrit.server.project.ProjectControl;
+ import com.google.gerrit.server.workflow.CategoryFunction;
+ import com.google.gerrit.server.workflow.FunctionState;
+ import com.google.gerrit.sshd.BaseCommand;
++import com.google.gerrit.util.cli.CmdLineParser;
+ import com.google.gwtorm.client.OrmException;
+ import com.google.gwtorm.client.ResultSet;
+ import com.google.inject.Inject;
+@@ -114,7 +119,8 @@ public class SubmitCommand extends BaseCommand {
+             ok = false;
+             writeError("fatal: internal server error while submitting "
+                 + patchSetId + "\n");
+-            log.error("internal error while submitting " + patchSetId);
++            log.error("internal error while submitting " + patchSetId + "\n" 
++                      + e.getMessage());
+           }
+         }
+         if (!ok) {
+@@ -130,76 +136,12 @@ public class SubmitCommand extends BaseCommand {
+       PatchSetInfoNotAvailableException {
+ 
+     final Change.Id changeId = patchSetId.getParentKey();
+-    final ChangeControl changeControl =
+-        changeControlFactory.validateFor(changeId);
+-    Change change = changeControl.getChange();
++    final ChangeControl changeControl = changeControlFactory.validateFor(changeId);
+ 
+-    if (!patchSetId.equals(change.currentPatchSetId())) {
+-      throw new IllegalStateException("Patch set " + patchSetId
+-          + " not current");
+-    }
+-    if (change.getStatus().isClosed()) {
+-      throw new IllegalStateException("Change" + changeId + " is closed");
+-    }
+-
+-    final List<PatchSetApproval> allApprovals =
+-        new ArrayList<PatchSetApproval>(db.patchSetApprovals().byPatchSet(
+-            patchSetId).toList());
+-
+-    final PatchSetApproval.Key ak =
+-        new PatchSetApproval.Key(patchSetId, currentUser.getAccountId(), SUBMIT);
+-    PatchSetApproval myAction = null;
+-    for (final PatchSetApproval ca : allApprovals) {
+-      if (ak.equals(ca.getKey())) {
+-        myAction = ca;
+-        myAction.setValue((short) 1);
+-        myAction.setGranted();
+-        break;
+-      }
+-    }
+-    if (myAction == null) {
+-      myAction = new PatchSetApproval(ak, (short) 1);
+-      allApprovals.add(myAction);
+-    }
+-
+-    final ApprovalType actionType =
+-        approvalTypes.getApprovalType(myAction.getCategoryId());
+-    if (actionType == null || !actionType.getCategory().isAction()) {
+-      throw new IllegalArgumentException(myAction.getCategoryId() + " not an action");
+-    }
++    String err = changeControl.canSubmit(patchSetId, db, approvalTypes, functionStateFactory);
++    if(err != null) { throw error(err); }
+ 
+-    final FunctionState fs =
+-        functionStateFactory.create(change, patchSetId, allApprovals);
+-    for (ApprovalType c : approvalTypes.getApprovalTypes()) {
+-      CategoryFunction.forCategory(c.getCategory()).run(c, fs);
+-    }
+-    if (!CategoryFunction.forCategory(actionType.getCategory()).isValid(currentUser,
+-        actionType, fs)) {
+-      throw new IllegalStateException(actionType.getCategory().getName()
+-          + " not permitted");
+-    }
+-    fs.normalize(actionType, myAction);
+-    if (myAction.getValue() <= 0) {
+-      throw new IllegalStateException(actionType.getCategory().getName()
+-          + " not permitted");
+-    }
+-
+-    db.patchSetApprovals().upsert(Collections.singleton(myAction));
+-
+-    change = db.changes().atomicUpdate(changeId, new AtomicUpdate<Change>() {
+-      @Override
+-      public Change update(Change change) {
+-        if (change.getStatus() == Change.Status.NEW) {
+-          change.setStatus(Change.Status.SUBMITTED);
+-          ChangeUtil.updated(change);
+-        }
+-        return change;
+-      }
+-    });
+-
+-    if (change.getStatus() == Change.Status.SUBMITTED) {
+-      merger.merge(change.getDest());
+-    }
++    ChangeUtil.submit(patchSetId, currentUser, db, merger);
+   }
+ 
+   private Set<PatchSet.Id> parsePatchSetId(final String patchIdentity)
+-- 
+1.7.1
+

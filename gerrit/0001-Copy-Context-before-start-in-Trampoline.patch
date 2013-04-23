@@ -1,0 +1,39 @@
+From 07f05da621798f6e3ba4a0700c75aa679fdb8a5e Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Thu, 1 Dec 2011 14:39:04 -0700
+Subject: [PATCH] Copy Context before start in Trampoline
+
+The CommandFactoryProvider uses a Trampoline class
+to put each command into the Executor.  In doing
+so it keeps a Context which the Runnable it creates
+has access to in its catch block and its toString()
+method.  Since the ctx variable which stores this
+in the Trampoline class is nulled out in the public
+destroy() method, an NPE can occur when the Runnable
+is used.  I have seen an NPE on our server on the
+toString() line when I repeatedly query the queue.
+
+To avoid the ctx var from being nulled out by the
+destroy method, copy it first into the Runnables
+scope.
+
+Change-Id: Ia7e6cc46c0b96dc9a3a7b4c8e606235918d3e7c1
+---
+ .../google/gerrit/sshd/CommandFactoryProvider.java |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/CommandFactoryProvider.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/CommandFactoryProvider.java
+index 89338c4..fb17169 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/CommandFactoryProvider.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/CommandFactoryProvider.java
+@@ -109,6 +109,7 @@ class CommandFactoryProvider implements Provider<CommandFactory> {
+ 
+     public void start(final Environment env) throws IOException {
+       this.env = env;
++      final Context ctx = this.ctx;
+       startExecutor.execute(new Runnable() {
+         public void run() {
+           try {
+-- 
+1.7.8
+

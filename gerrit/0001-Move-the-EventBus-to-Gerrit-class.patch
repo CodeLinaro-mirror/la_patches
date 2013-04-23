@@ -1,0 +1,78 @@
+From a3792de8b71f452fa79b217e22c471716dfc99db Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Tue, 4 Dec 2012 11:08:00 -0700
+Subject: [PATCH] Move the EventBus to Gerrit class
+
+Since there should only be one EventBus per application,
+move it to the Gerrit class since that is generally where
+UI pieces go to get global static things.
+
+Change-Id: Ic0b0faf15a7a54a58584b6d3ee2ad74e3cc78a5f
+---
+ .../main/java/com/google/gerrit/client/Gerrit.java |    3 +++
+ .../gerrit/client/changes/StarredChanges.java      |    7 ++-----
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java
+index 3298c3e..817892f 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java
+@@ -55,6 +55,8 @@ import com.google.gwt.dom.client.AnchorElement;
+ import com.google.gwt.dom.client.Document;
+ import com.google.gwt.event.logical.shared.ValueChangeEvent;
+ import com.google.gwt.event.logical.shared.ValueChangeHandler;
++import com.google.gwt.event.shared.EventBus;
++import com.google.gwt.event.shared.SimpleEventBus;
+ import com.google.gwt.http.client.URL;
+ import com.google.gwt.http.client.UrlBuilder;
+ import com.google.gwt.user.client.Command;
+@@ -90,6 +92,7 @@ public class Gerrit implements EntryPoint {
+   public static final GerritResources RESOURCES =
+       GWT.create(GerritResources.class);
+   public static final SystemInfoService SYSTEM_SVC;
++  public static final EventBus EVENT_BUS = GWT.create(SimpleEventBus.class);
+ 
+   private static String myHost;
+   private static GerritConfig myConfig;
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/StarredChanges.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/StarredChanges.java
+index 8b5aa1c..7d2084a 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/StarredChanges.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/StarredChanges.java
+@@ -21,8 +21,6 @@ import com.google.gerrit.reviewdb.client.Change;
+ import com.google.gwt.event.dom.client.ClickEvent;
+ import com.google.gwt.event.dom.client.ClickHandler;
+ import com.google.gwt.event.dom.client.KeyPressEvent;
+-import com.google.gwt.event.shared.EventBus;
+-import com.google.gwt.event.shared.SimpleEventBus;
+ import com.google.gwt.resources.client.ImageResource;
+ import com.google.gwt.user.client.ui.Image;
+ import com.google.gwtexpui.globalkey.client.KeyCommand;
+@@ -32,7 +30,6 @@ import com.google.web.bindery.event.shared.HandlerRegistration;
+ 
+ /** Supports the star icon displayed on changes and tracking the status. */
+ public class StarredChanges {
+-  private static final EventBus eventBus = new SimpleEventBus();
+   private static final Event.Type<ChangeStarHandler> TYPE =
+       new Event.Type<ChangeStarHandler>();
+ 
+@@ -87,7 +84,7 @@ public class StarredChanges {
+   public static HandlerRegistration addHandler(
+       Change.Id source,
+       ChangeStarHandler handler) {
+-    return eventBus.addHandlerToSource(TYPE, source, handler);
++    return Gerrit.EVENT_BUS.addHandlerToSource(TYPE, source, handler);
+   }
+ 
+   /**
+@@ -95,7 +92,7 @@ public class StarredChanges {
+    * not RPC to the server and does not alter the starred status of a change.
+    */
+   public static void fireChangeStarEvent(Change.Id id, boolean starred) {
+-    eventBus.fireEventFromSource(
++    Gerrit.EVENT_BUS.fireEventFromSource(
+         new ChangeStarEvent(id, starred),
+         id);
+   }
+-- 
+1.7.8
+

@@ -1,0 +1,160 @@
+From 7f9bc24521b38222c80ed3f57fcbf8de032a6203 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Tue, 20 Jul 2010 18:47:14 -0600
+Subject: [PATCH] Refactor complex logic out of formatters into getters.
+
+Create 2 new getters via refactoring: getSshHost() and
+getEmailRegistrationToken() and use them in formatters.
+---
+ .../google/gerrit/server/mail/NewChangeSender.java |   27 ++++++++++++-------
+ .../gerrit/server/mail/RegisterNewEmailSender.java |   22 +++++++++------
+ .../gerrit/server/mail/ReplacePatchSetSender.java  |   27 ++++++++++++-------
+ 3 files changed, 47 insertions(+), 29 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/NewChangeSender.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/NewChangeSender.java
+index 5b2566d..ec90615 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/NewChangeSender.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/NewChangeSender.java
+@@ -1,4 +1,4 @@
+-// Copyright (C) 2009 The Android Open Source Project
++// Copyright (C) 2009-2010 The Android Open Source Project
+ //
+ // Licensed under the Apache License, Version 2.0 (the "License");
+ // you may not use this file except in compliance with the License.
+@@ -112,24 +112,31 @@ public abstract class NewChangeSender extends ChangeEmail {
+   }
+ 
+   private String getPullUrl() {
+-    final List<HostKey> hostKeys = sshInfo.getHostKeys();
+-    if (hostKeys.isEmpty()) {
++    final String host = getSshHost();
++    if (host == null) {
+       return "";
+     }
+ 
+-    final String host = hostKeys.get(0).getHost();
+     final StringBuilder r = new StringBuilder();
+     r.append("git pull ssh://");
+-    if (host.startsWith("*:")) {
+-      r.append(getGerritHost());
+-      r.append(host.substring(1));
+-    } else {
+-      r.append(host);
+-    }
++    r.append(host);
+     r.append("/");
+     r.append(projectName);
+     r.append(" ");
+     r.append(patchSet.getRefName());
+     return r.toString();
+   }
++
++  public String getSshHost() {
++    final List<HostKey> hostKeys = sshInfo.getHostKeys();
++    if (hostKeys.isEmpty()) {
++      return null;
++    }
++
++    final String host = hostKeys.get(0).getHost();
++    if (host.startsWith("*:")) {
++      return getGerritHost() + host.substring(1);
++    }
++    return host;
++  }
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/RegisterNewEmailSender.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/RegisterNewEmailSender.java
+index 0007efe..ce80143 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/RegisterNewEmailSender.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/RegisterNewEmailSender.java
+@@ -1,4 +1,4 @@
+-// Copyright (C) 2009 The Android Open Source Project
++// Copyright (C) 2009-2010 The Android Open Source Project
+ //
+ // Licensed under the Apache License, Version 2.0 (the "License");
+ // you may not use this file except in compliance with the License.
+@@ -56,14 +56,7 @@ public class RegisterNewEmailSender extends OutgoingEmail {
+     final StringBuilder url = new StringBuilder();
+     url.append(getGerritUrl());
+     url.append("#VE,");
+-    try {
+-      url.append(authConfig.getEmailRegistrationToken().newToken(
+-          Base64.encodeBytes(addr.getBytes("UTF-8"))));
+-    } catch (XsrfException e) {
+-      throw new IllegalArgumentException(e);
+-    } catch (UnsupportedEncodingException e) {
+-      throw new IllegalArgumentException(e);
+-    }
++    url.append(getEmailRegistrationToken());
+ 
+     appendText("Welcome to Gerrit Code Review at ");
+     appendText(getGerritHost());
+@@ -93,4 +86,15 @@ public class RegisterNewEmailSender extends OutgoingEmail {
+         + "  Replies to this message will not\n");
+     appendText("be read or answered.\n");
+   }
++
++  public String getEmailRegistrationToken() {
++    try {
++      return authConfig.getEmailRegistrationToken().newToken(
++          Base64.encodeBytes(addr.getBytes("UTF-8")));
++    } catch (XsrfException e) {
++      throw new IllegalArgumentException(e);
++    } catch (UnsupportedEncodingException e) {
++      throw new IllegalArgumentException(e);
++    }
++  }
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java
+index 5ac39fa..7157fb3 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java
+@@ -1,4 +1,4 @@
+-// Copyright (C) 2009 The Android Open Source Project
++// Copyright (C) 2009-2010 The Android Open Source Project
+ //
+ // Licensed under the Apache License, Version 2.0 (the "License");
+ // you may not use this file except in compliance with the License.
+@@ -125,24 +125,31 @@ public class ReplacePatchSetSender extends ReplyToChangeSender {
+   }
+ 
+   private String getPullUrl() {
+-    final List<HostKey> hostKeys = sshInfo.getHostKeys();
+-    if (hostKeys.isEmpty()) {
++    final String host = getSshHost();
++    if (host == null) {
+       return "";
+     }
+ 
+-    final String host = hostKeys.get(0).getHost();
+     final StringBuilder r = new StringBuilder();
+     r.append("git pull ssh://");
+-    if (host.startsWith("*:")) {
+-      r.append(getGerritHost());
+-      r.append(host.substring(1));
+-    } else {
+-      r.append(host);
+-    }
++    r.append(host);
+     r.append("/");
+     r.append(projectName);
+     r.append(" ");
+     r.append(patchSet.getRefName());
+     return r.toString();
+   }
++
++  public String getSshHost() {
++    final List<HostKey> hostKeys = sshInfo.getHostKeys();
++    if (hostKeys.isEmpty()) {
++      return null;
++    }
++
++    final String host = hostKeys.get(0).getHost();
++    if (host.startsWith("*:")) {
++      return getGerritHost() + host.substring(1);
++    }
++    return host;
++  }
+ }
+-- 
+1.7.1.1
+

@@ -1,0 +1,103 @@
+From 81384fabbccf7179c7dd3ee3c589900416475926 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Mon, 13 Jun 2011 16:50:00 -0600
+Subject: [PATCH] Do not log timeout erros on upload and receive connections
+
+The Upload and Receive SSH commands were turning
+InterruptedIOExceptions into Failures which get logged by
+BaseCommand.  Instead, let the InterruptedIOExceptions trickle
+up and die quietly in BaseCommand where they are captured.
+
+Change-Id: I8e9dcde9f2eb616b3ab3130bbbbd218b062d4be8
+---
+ .../java/com/google/gerrit/sshd/BaseCommand.java   |   19 ++++++++-----------
+ .../com/google/gerrit/sshd/commands/Receive.java   |    4 ----
+ .../com/google/gerrit/sshd/commands/Upload.java    |    7 +------
+ 3 files changed, 9 insertions(+), 21 deletions(-)
+
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/BaseCommand.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/BaseCommand.java
+index f7d7226..4ba3e86 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/BaseCommand.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/BaseCommand.java
+@@ -43,6 +43,7 @@ import org.slf4j.LoggerFactory;
+ import java.io.BufferedWriter;
+ import java.io.IOException;
+ import java.io.InputStream;
++import java.io.InterruptedIOException;
+ import java.io.OutputStream;
+ import java.io.OutputStreamWriter;
+ import java.io.PrintWriter;
+@@ -285,17 +286,13 @@ public abstract class BaseCommand implements Command {
+   }
+ 
+   private int handleError(final Throwable e) {
+-    if (e.getClass() == IOException.class
+-        && "Pipe closed".equals(e.getMessage())) {
+-      // This is sshd telling us the client just dropped off while
+-      // we were waiting for a read or a write to complete. Either
+-      // way its not really a fatal error. Don't log it.
+-      //
+-      return 127;
+-    }
+-
+-    if (e.getClass() == SshException.class
+-        && "Already closed".equals(e.getMessage())) {
++    if ((e.getClass() == IOException.class
++         && "Pipe closed".equals(e.getMessage()))
++        || //
++        (e.getClass() == SshException.class
++         && "Already closed".equals(e.getMessage()))
++        || //
++        e.getClass() == InterruptedIOException.class) {
+       // This is sshd telling us the client just dropped off while
+       // we were waiting for a read or a write to complete. Either
+       // way its not really a fatal error. Don't log it.
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Receive.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Receive.java
+index e31925b..4ba55b7 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Receive.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Receive.java
+@@ -29,7 +29,6 @@ import org.eclipse.jgit.transport.RefFilter;
+ import org.kohsuke.args4j.Option;
+ 
+ import java.io.IOException;
+-import java.io.InterruptedIOException;
+ import java.util.ArrayList;
+ import java.util.HashSet;
+ import java.util.List;
+@@ -88,9 +87,6 @@ final class Receive extends AbstractGitCommand {
+     try {
+       receive.advertiseHistory();
+       rp.receive(in, out, err);
+-    } catch (InterruptedIOException err) {
+-      throw new Failure(128, "fatal: client IO read/write timeout", err);
+-
+     } catch (UnpackException badStream) {
+       // This may have been triggered by branch level access controls.
+       // Log what the heck is going on, as detailed as we can.
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Upload.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Upload.java
+index 95b33f7..31c0f45 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Upload.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Upload.java
+@@ -24,7 +24,6 @@ import com.google.inject.Provider;
+ import org.eclipse.jgit.transport.UploadPack;
+ 
+ import java.io.IOException;
+-import java.io.InterruptedIOException;
+ 
+ /** Publishes Git repositories over SSH using the Git upload-pack protocol. */
+ final class Upload extends AbstractGitCommand {
+@@ -46,10 +45,6 @@ final class Upload extends AbstractGitCommand {
+     }
+     up.setPackConfig(config.getPackConfig());
+     up.setTimeout(config.getTimeout());
+-    try {
+-      up.upload(in, out, err);
+-    } catch (InterruptedIOException err) {
+-      throw new Failure(128, "fatal: client IO read/write timeout", err);
+-    }
++    up.upload(in, out, err);
+   }
+ }
+-- 
+1.7.4.1
+

@@ -1,0 +1,29 @@
+From 2f0cb8ead998ca4781de06672363f4e105464451 Mon Sep 17 00:00:00 2001
+From: Raviteja Sunkara <raviteja@codeaurora.org>
+Date: Wed, 22 Feb 2012 20:12:17 +0530
+Subject: [PATCH] Add bccStarredBy to ReplacePatchSetSender class
+
+bccStarredBy() is somehow not added while creating ReplacePatchSetSender class.
+All other subclasses of ReplyToChangeSender class has this function
+called. I think calling this function in this class too makes sense.
+
+Change-Id: I6170270c550c7ecb0c49d7c0d58487f3cadfefa3
+---
+ .../gerrit/server/mail/ReplacePatchSetSender.java  |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java
+index b09cb27..0465641 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java
+@@ -67,6 +67,7 @@ public class ReplacePatchSetSender extends ReplyToChangeSender {
+     add(RecipientType.TO, reviewers);
+     add(RecipientType.CC, extraCC);
+     rcptToAuthors(RecipientType.CC);
++    bccStarredBy();
+   }
+ 
+   @Override
+-- 
+1.7.7.1
+

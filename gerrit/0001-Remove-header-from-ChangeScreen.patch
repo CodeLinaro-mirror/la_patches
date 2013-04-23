@@ -1,0 +1,82 @@
+From 641c734fdeac247d14a95cfa9aa22fb31a0043ec Mon Sep 17 00:00:00 2001
+From: Keunhong Park <keunhong@codeaurora.org>
+Date: Thu, 14 Jun 2012 14:46:59 -0600
+Subject: [PATCH] Remove header from ChangeScreen
+
+Remove header from ChangeScreen since it only holds duplicate
+information.
+
+Add margin to header to make title-less screens look better.
+
+Change-Id: Ie1e12443041811b340470fa04235ed54dcd6f212
+---
+ .../java/com/google/gerrit/client/GerritCss.java   |    1 +
+ .../google/gerrit/client/changes/ChangeScreen.java |    2 ++
+ .../main/java/com/google/gerrit/client/gerrit.css  |    3 +++
+ .../java/com/google/gerrit/client/ui/Screen.java   |    4 ++++
+ 4 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritCss.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritCss.java
+index 490db59..1e2621c 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritCss.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritCss.java
+@@ -183,6 +183,7 @@ public interface GerritCss extends CssResource {
+   String rpcStatusPanel();
+   String screen();
+   String screenHeader();
++  String screenNoHeader();
+   String searchPanel();
+   String sectionHeader();
+   String sideBySideScreenLinkTable();
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeScreen.java
+index 289f51a..5fa79ba 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeScreen.java
+@@ -153,6 +153,7 @@ public class ChangeScreen extends Screen
+     detailCache.addValueChangeHandler(this);
+ 
+     addStyleName(Gerrit.RESOURCES.css().changeScreen());
++    addStyleName(Gerrit.RESOURCES.css().screenNoHeader());
+ 
+     keysNavigation = new KeyCommandSet(Gerrit.C.sectionNavigation());
+     keysAction = new KeyCommandSet(Gerrit.C.sectionActions());
+@@ -238,6 +239,7 @@ public class ChangeScreen extends Screen
+       }
+     }
+     setPageTitle(titleBuf.toString());
++    setHeaderVisible(false);
+   }
+ 
+   @Override
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/gerrit.css b/gerrit-gwtui/src/main/java/com/google/gerrit/client/gerrit.css
+index 9a1ca43..dc0e171 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/gerrit.css
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/gerrit.css
+@@ -401,6 +401,9 @@
+   overflow: hidden;
+ }
+ 
++.screenNoHeader {
++  margin-top: 5px;
++}
+ 
+ /** ChangeTable **/
+ .changeTable {
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/Screen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/Screen.java
+index 7f5eead..845a046 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/Screen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/Screen.java
+@@ -95,6 +95,10 @@ public abstract class Screen extends View {
+     }
+   }
+ 
++  protected void setHeaderVisible(boolean value) {
++    header.setVisible(value);
++  }
++
+   protected void setTitleEast(final Widget w) {
+     header.setWidget(0, Cols.East.ordinal(), w);
+   }
+-- 
+1.7.8.3
+
