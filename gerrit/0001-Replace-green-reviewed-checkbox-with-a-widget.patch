@@ -1,0 +1,180 @@
+From 578f0cc8dbb4f7900e35c4eee88c638a027bc8de Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Tue, 22 Nov 2011 15:43:27 -0700
+Subject: [PATCH] Replace green reviewed checkbox with a widget
+
+This allows users to set/unset the reviewed status of
+any file in a PatchSet directly from the PatchTable
+filelist.
+
+Change-Id: I09180752e722f100764e6d7433cf2c649c73f238
+---
+ .../google/gerrit/client/changes/PatchTable.java   |   70 +++++++++++++++-----
+ .../google/gerrit/client/patches/PatchScreen.java  |    6 +-
+ 2 files changed, 57 insertions(+), 19 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchTable.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchTable.java
+index a028619..b897eac 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchTable.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchTable.java
+@@ -16,6 +16,7 @@ package com.google.gerrit.client.changes;
+ 
+ import com.google.gerrit.client.Gerrit;
+ import com.google.gerrit.client.patches.PatchScreen;
++import com.google.gerrit.client.patches.PatchUtil;
+ import com.google.gerrit.client.ui.InlineHyperlink;
+ import com.google.gerrit.client.ui.ListenableAccountDiffPreference;
+ import com.google.gerrit.client.ui.NavigationTable;
+@@ -33,7 +34,11 @@ import com.google.gwt.event.dom.client.ClickEvent;
+ import com.google.gwt.event.dom.client.ClickHandler;
+ import com.google.gwt.event.dom.client.KeyCodes;
+ import com.google.gwt.event.dom.client.KeyPressEvent;
++import com.google.gwt.event.logical.shared.ValueChangeEvent;
++import com.google.gwt.event.logical.shared.ValueChangeHandler;
+ import com.google.gwt.user.client.Command;
++import com.google.gwt.user.client.rpc.AsyncCallback;
++import com.google.gwt.user.client.ui.CheckBox;
+ import com.google.gwt.user.client.ui.Composite;
+ import com.google.gwt.user.client.ui.FlowPanel;
+ import com.google.gwt.user.client.ui.HTMLTable.Cell;
+@@ -44,10 +49,13 @@ import com.google.gwtexpui.globalkey.client.KeyCommand;
+ import com.google.gwtexpui.progress.client.ProgressBar;
+ import com.google.gwtexpui.safehtml.client.SafeHtml;
+ import com.google.gwtexpui.safehtml.client.SafeHtmlBuilder;
++import com.google.gwtjsonrpc.client.VoidResult;
+ import com.google.gwtorm.client.KeyUtil;
+ 
+ import java.util.ArrayList;
+ import java.util.List;
++import java.util.HashMap;
++import java.util.Map;
+ 
+ public class PatchTable extends Composite {
+   private final FlowPanel myBody;
+@@ -265,6 +273,31 @@ public class PatchTable extends Composite {
+     if (myTable != null) {
+       myTable.updateReviewedStatus(patchKey, reviewed);
+     }
++    updateDBReviewedStatus(patchKey, reviewed, null);
++  }
++
++  private void updateDBReviewedStatus(Patch.Key patchKey,
++      final boolean reviewed, final CheckBox cb) {
++    if (cb != null) {
++      cb.setEnabled(false);
++    }
++    PatchUtil.DETAIL_SVC.setReviewedByCurrentUser(patchKey, reviewed,
++      new AsyncCallback<VoidResult>() {
++        @Override
++        public void onFailure(Throwable arg0) {
++          if (cb != null) {
++            cb.setValue(!reviewed);
++            cb.setEnabled(true);
++          }
++        }
++
++        @Override
++        public void onSuccess(VoidResult result) {
++          if (cb != null) {
++            cb.setEnabled(true);
++          }
++        }
++      });
+   }
+ 
+   public ListenableAccountDiffPreference getPreferences() {
+@@ -289,6 +322,7 @@ public class PatchTable extends Composite {
+     private static final int C_SIZE = 4;
+     private static final int C_SIDEBYSIDE = 5;
+     private int activeRow = -1;
++    private Map<Patch,CheckBox> reviewedByPatch = new HashMap();
+ 
+     MyTable() {
+       keysNavigation.add(new PrevKeyCommand(0, 'k', Util.C.patchTablePrev()));
+@@ -321,16 +355,8 @@ public class PatchTable extends Composite {
+         final Patch patch = getRowItem(row);
+         if (patch != null) {
+           patch.setReviewedByCurrentUser(reviewed);
+-
+-          int col = C_SIDEBYSIDE + 2;
+-          if (patch.getPatchType() == Patch.PatchType.BINARY) {
+-            col = C_SIDEBYSIDE + 3;
+-          }
+-
+-          if (reviewed) {
+-            table.setWidget(row, col, new Image(Gerrit.RESOURCES.greenCheck()));
+-          } else {
+-            table.clearCell(row, col);
++          if (Gerrit.isSignedIn()) {
++            reviewedByPatch.get(patch).setValue(reviewed);
+           }
+         }
+       }
+@@ -419,6 +445,14 @@ public class PatchTable extends Composite {
+       table.setWidget(row, C_UNIFIED, new PatchLink.Unified(Util.C
+           .patchTableDiffUnified(), patch.getKey(), row - 1, detail,
+           PatchTable.this));
++
++      if (Gerrit.isSignedIn()) {
++        int col = C_SIDEBYSIDE + 2;
++        if (patch.getPatchType() == Patch.PatchType.BINARY) {
++          col = C_SIDEBYSIDE + 3;
++        }
++        table.setWidget(row, col, reviewedByPatch.get(patch));
++      }
+     }
+ 
+     void appendHeader(final SafeHtmlBuilder m) {
+@@ -565,15 +599,19 @@ public class PatchTable extends Composite {
+       openlink(m, 1);
+       m.closeTd();
+ 
+-      // Green check mark if the user is logged in and they reviewed that file
++      // Checkbox if the user is logged in and they reviewed that file
+       if (Gerrit.isSignedIn()) {
++        final CheckBox rev =  new CheckBox();
++        reviewedByPatch.put(p, rev);
++        rev.setValue(p.isReviewedByCurrentUser());
++        rev.addValueChangeHandler(new ValueChangeHandler<Boolean>() {
++          @Override
++          public void onValueChange(ValueChangeEvent<Boolean> ev) {
++            updateDBReviewedStatus(p.getKey(), ev.getValue(), rev);
++          }
++        });
+         m.openTd();
+         m.setStyleName(Gerrit.RESOURCES.css().dataCell());
+-        if (p.isReviewedByCurrentUser()) {
+-          m.openDiv();
+-          m.setStyleName(Gerrit.RESOURCES.css().greenCheckClass());
+-          m.closeSelf();
+-        }
+         m.closeTd();
+       }
+ 
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
+index 910bf61..0800b0d 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
+@@ -273,9 +273,8 @@ public abstract class PatchScreen extends Screen implements
+   void setReviewedByCurrentUser(boolean reviewed) {
+     if (fileList != null) {
+       fileList.updateReviewedStatus(patchKey, reviewed);
+-    }
+-
+-    PatchUtil.DETAIL_SVC.setReviewedByCurrentUser(patchKey, reviewed,
++    } else {
++      PatchUtil.DETAIL_SVC.setReviewedByCurrentUser(patchKey, reviewed,
+         new AsyncCallback<VoidResult>() {
+           @Override
+           public void onFailure(Throwable arg0) {
+@@ -287,6 +286,7 @@ public abstract class PatchScreen extends Screen implements
+             // nop
+           }
+         });
++    }
+   }
+ 
+   @Override
+-- 
+1.7.6
+

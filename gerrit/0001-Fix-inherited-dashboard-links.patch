@@ -1,0 +1,79 @@
+From 7b943a983df5d35d41535bb90b3108045630d785 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Fri, 7 Dec 2012 18:33:20 -0700
+Subject: [PATCH] Fix inherited dashboard links
+
+When navigating to a project's list of dashboards and selecting
+an inherited dashboard, the link pointed to the project from
+which the dashboard is inherited.  While this did not actually
+prevent stable links, it likely prevented users from getting
+the correct stable link for a project dashboard by copying it
+from this page without paying attention to the fact that the
+dashboard was inherited.  The correct link still worked, but if
+they bookmarked the link from the dashboard list, it would be
+an incorrect long term link and it would no longer point to the
+correct dashboard if this dashboard were later overridden and
+no longer inherited.
+
+Change-Id: Ibf6e69c4185387f97a3dc023cb8dd21b1e25eff0
+---
+ .../gerrit/client/dashboards/DashboardInfo.java    |    1 +
+ .../gerrit/client/dashboards/DashboardsTable.java  |    7 +++----
+ .../server/project/DashboardsCollection.java       |    4 +++-
+ 3 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/dashboards/DashboardInfo.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/dashboards/DashboardInfo.java
+index 79f88a1e..9eb42f3 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/dashboards/DashboardInfo.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/dashboards/DashboardInfo.java
+@@ -19,6 +19,7 @@ import com.google.gwt.core.client.JavaScriptObject;
+ public class DashboardInfo extends JavaScriptObject {
+   public final native String id() /*-{ return this.id; }-*/;
+   public final native String project() /*-{ return this.project; }-*/;
++  public final native String definingProject() /*-{ return this.defining_project; }-*/;
+   public final native String ref() /*-{ return this.ref; }-*/;
+   public final native String path() /*-{ return this.path; }-*/;
+   public final native String description() /*-{ return this.description; }-*/;
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/dashboards/DashboardsTable.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/dashboards/DashboardsTable.java
+index faac157..724307e 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/dashboards/DashboardsTable.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/dashboards/DashboardsTable.java
+@@ -125,10 +125,9 @@ public class DashboardsTable extends NavigationTable<DashboardInfo> {
+     table.setWidget(row, 2, new Anchor(k.path(), "#"
+             + PageLinks.toProjectDashboard(new Project.NameKey(k.project()), k.id())));
+     table.setText(row, 3, k.description());
+-    if (k.project() != null && !project.get().equals(k.project())) {
+-      table.setWidget(row, 4, new Anchor(k.project(), "#"
+-                  + PageLinks.toProjectDashboards(new Project.NameKey(k
+-                      .project()))));
++    if (k.definingProject() != null && !k.definingProject().equals(k.project())) {
++      table.setWidget(row, 4, new Anchor(k.definingProject(), "#"
++          + PageLinks.toProjectDashboards(new Project.NameKey(k.definingProject()))));
+     }
+     setRowItem(row, k);
+   }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/project/DashboardsCollection.java b/gerrit-server/src/main/java/com/google/gerrit/server/project/DashboardsCollection.java
+index 92e1357..29544ca 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/project/DashboardsCollection.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/project/DashboardsCollection.java
+@@ -161,7 +161,8 @@ class DashboardsCollection implements
+       String path, Config config, String project, boolean setDefault)
+       throws UnsupportedEncodingException {
+     DashboardInfo info = new DashboardInfo(refName, path);
+-    info.project = definingProject.getName();
++    info.project = project;
++    info.definingProject = definingProject.getName();
+     info.title = config.getString("dashboard", null, "title");
+     info.description = config.getString("dashboard", null, "description");
+     info.foreach = config.getString("dashboard", null, "foreach");
+@@ -207,6 +208,7 @@ class DashboardsCollection implements
+     final String kind = "gerritcodereview#dashboard";
+     String id;
+     String project;
++    String definingProject;
+     String ref;
+     String path;
+     String description;
+-- 
+1.7.8
+

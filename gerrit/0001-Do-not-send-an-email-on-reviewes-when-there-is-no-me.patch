@@ -1,0 +1,44 @@
+From 6d4c9f4c6c00fa68ed4721aee9de53cecb22c63a Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Wed, 27 Jul 2011 10:45:12 -0600
+Subject: [PATCH] Do not send an email on reviewes when there is no message.
+
+No longer send an email when reviewing a change via ssh, and
+the change message is blank (when no change message is actually
+added to the review).  This occured when an approval was
+repeated (no change), and no message was explicitly added.
+
+Issue: 1069
+Change-Id: Ibf6cd970fdb81ffc1353a2675a2f21a23c46a2cd
+---
+ .../gerrit/server/patch/PublishComments.java       |   14 ++++++++------
+ 1 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/patch/PublishComments.java b/gerrit-server/src/main/java/com/google/gerrit/server/patch/PublishComments.java
+index 8efb4ae..1d43453 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/patch/PublishComments.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/patch/PublishComments.java
+@@ -285,12 +285,14 @@ public class PublishComments implements Callable<VoidResult> {
+ 
+   private void email() {
+     try {
+-      final CommentSender cm = commentSenderFactory.create(change);
+-      cm.setFrom(user.getAccountId());
+-      cm.setPatchSet(patchSet, patchSetInfoFactory.get(patchSetId));
+-      cm.setChangeMessage(message);
+-      cm.setPatchLineComments(drafts);
+-      cm.send();
++      if (message != null) {
++        final CommentSender cm = commentSenderFactory.create(change);
++        cm.setFrom(user.getAccountId());
++        cm.setPatchSet(patchSet, patchSetInfoFactory.get(patchSetId));
++        cm.setChangeMessage(message);
++        cm.setPatchLineComments(drafts);
++        cm.send();
++      }
+     } catch (EmailException e) {
+       log.error("Cannot send comments by email for patch set " + patchSetId, e);
+     } catch (PatchSetInfoNotAvailableException e) {
+-- 
+1.7.3.1
+

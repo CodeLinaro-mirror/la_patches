@@ -1,0 +1,167 @@
+From 88484b2e97be739d08f7686489e970158859d7c9 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Fri, 6 Jan 2012 14:52:19 -0700
+Subject: [PATCH] Adapt and use the StarCache in ChangeTable
+
+Adapt the StarCache to also be able to listen to a
+ListenableValue of ChangeInfo and use the StarCache
+in the ChangeTable.  If either the ChangeDetail or
+the ChangeInfo are updated, the starred value will
+be updated and transferred to the opposing change
+data container type.
+
+Change-Id: I0dd5144e9948f570e1acc289d87d9f1ac2789e16
+---
+ .../google/gerrit/client/changes/ChangeCache.java  |   10 +++++
+ .../google/gerrit/client/changes/ChangeTable.java  |   41 +++-----------------
+ .../google/gerrit/client/changes/StarCache.java    |    9 ++++
+ 3 files changed, 25 insertions(+), 35 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeCache.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeCache.java
+index 5852eab..b3c541b 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeCache.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeCache.java
+@@ -14,6 +14,8 @@
+ 
+ package com.google.gerrit.client.changes;
+ 
++import com.google.gerrit.client.ui.ListenableValue;
++import com.google.gerrit.common.data.ChangeInfo;
+ import com.google.gerrit.reviewdb.Change;
+ 
+ import java.util.HashMap;
+@@ -35,6 +37,7 @@ public class ChangeCache {
+ 
+   private Change.Id changeId;
+   private ChangeDetailCache detail;
++  private ListenableValue<ChangeInfo> info;
+   private StarCache starred;
+ 
+   protected ChangeCache(Change.Id chg) {
+@@ -52,6 +55,13 @@ public class ChangeCache {
+     return detail;
+   }
+ 
++  public ListenableValue<ChangeInfo> getChangeInfoCache() {
++    if (info == null) {
++      info = new ListenableValue<ChangeInfo>();
++    }
++    return info;
++  }
++
+   public StarCache getStarCache() {
+     if (starred == null) {
+       starred = new StarCache(changeId);
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeTable.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeTable.java
+index 3b71ee2..415af45 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeTable.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeTable.java
+@@ -136,7 +136,7 @@ public class ChangeTable extends NavigationTable<ChangeInfo> {
+           return;
+         }
+         if (cell.getCellIndex() == C_STAR) {
+-          onStarClick(cell.getRowIndex());
++          // Don't do anything (handled by star itself).
+         } else if (cell.getCellIndex() == C_OWNER) {
+           // Don't do anything.
+         } else if (getRowItem(cell.getRowIndex()) != null) {
+@@ -149,23 +149,7 @@ public class ChangeTable extends NavigationTable<ChangeInfo> {
+   protected void onStarClick(final int row) {
+     final ChangeInfo c = getRowItem(row);
+     if (c != null && Gerrit.isSignedIn()) {
+-      final boolean prior = c.isStarred();
+-      c.setStarred(!prior);
+-      setStar(row, c);
+-
+-      final ToggleStarRequest req = new ToggleStarRequest();
+-      req.toggle(c.getId(), c.isStarred());
+-      Util.LIST_SVC.toggleStars(req, new GerritCallback<VoidResult>() {
+-        public void onSuccess(final VoidResult result) {
+-        }
+-
+-        @Override
+-        public void onFailure(final Throwable caught) {
+-          super.onFailure(caught);
+-          c.setStarred(prior);
+-          setStar(row, c);
+-        }
+-      });
++       ChangeCache.get(c.getId()).getStarCache().toggleStar();
+     }
+   }
+ 
+@@ -212,10 +196,13 @@ public class ChangeTable extends NavigationTable<ChangeInfo> {
+   }
+ 
+   private void populateChangeRow(final int row, final ChangeInfo c) {
++    ChangeCache cache = ChangeCache.get(c.getId());
++    cache.getChangeInfoCache().set(c);
++
+     final String idstr = c.getKey().abbreviate();
+     table.setWidget(row, C_ARROW, null);
+     if (Gerrit.isSignedIn()) {
+-      setStar(row, c);
++      table.setWidget(row, C_STAR, cache.getStarCache().createStar());
+     }
+     table.setWidget(row, C_ID, new TableChangeLink(idstr, c));
+ 
+@@ -244,22 +231,6 @@ public class ChangeTable extends NavigationTable<ChangeInfo> {
+     return AccountDashboardLink.link(accountCache, id);
+   }
+ 
+-  private void setStar(final int row, final ChangeInfo c) {
+-    final ImageResource star;
+-    if (c.isStarred()) {
+-      star = Gerrit.RESOURCES.starFilled();
+-    } else {
+-      star = Gerrit.RESOURCES.starOpen();
+-    }
+-
+-    final Widget i = table.getWidget(row, C_STAR);
+-    if (i instanceof Image) {
+-      ((Image) i).setResource(star);
+-    } else {
+-      table.setWidget(row, C_STAR, new Image(star));
+-    }
+-  }
+-
+   public void addSection(final Section s) {
+     assert s.parent == null;
+ 
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/StarCache.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/StarCache.java
+index 859261a..2d6e30b 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/StarCache.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/StarCache.java
+@@ -61,6 +61,10 @@ public class StarCache implements HasValueChangeHandlers<Boolean> {
+     if (detail != null) {
+       return detail.isStarred();
+     }
++    ChangeInfo info = cache.getChangeInfoCache().get();
++    if (info != null) {
++      return info.isStarred();
++    }
+     return false;
+   }
+ 
+@@ -83,6 +87,10 @@ public class StarCache implements HasValueChangeHandlers<Boolean> {
+     if (detail != null) {
+       detail.setStarred(s);
+     }
++    ChangeInfo info = cache.getChangeInfoCache().get();
++    if (info != null) {
++      info.setStarred(s);
++    }
+   }
+ 
+ 
+@@ -109,6 +117,7 @@ public class StarCache implements HasValueChangeHandlers<Boolean> {
+       };
+ 
+     cache.getChangeDetailCache().addValueChangeHandler(starUpdater);
++    cache.getChangeInfoCache().addValueChangeHandler(starUpdater);
+ 
+     this.addValueChangeHandler(starUpdater);
+ 
+-- 
+1.7.8
+

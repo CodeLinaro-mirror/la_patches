@@ -1,0 +1,1210 @@
+From 0ae5eb4507d24bfb2f768b5a80ea3daa0ffb08c3 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Thu, 3 Feb 2011 18:06:11 -0700
+Subject: [PATCH 2/7] Add RPC services to access Searches and SearchLists
+
+Add two new RPC services.  SearchService allows searches
+to be created, modified and deleted.  SearchServiceList
+provides access to lists of Searches and information about
+the owners (users, groups, projects) of those Searches.
+
+Change-Id: I4d7b4a4ce2d42d9f96418fe36d20d462dd429497
+---
+ .../com/google/gerrit/common/data/AccountInfo.java |    7 +
+ .../com/google/gerrit/common/data/OwnerInfo.java   |  104 ++++++++++++
+ .../com/google/gerrit/common/data/SearchList.java  |   78 +++++++++
+ .../gerrit/common/data/SearchListService.java      |   45 +++++
+ .../google/gerrit/common/data/SearchService.java   |   38 +++++
+ .../httpd/rpc/BaseServiceImplementation.java       |    7 +
+ .../httpd/rpc/OwnerBaseServiceImplementation.java  |   85 ++++++++++
+ .../gerrit/httpd/rpc/SearchListServiceImpl.java    |  122 ++++++++++++++
+ .../google/gerrit/httpd/rpc/SearchServiceImpl.java |  174 ++++++++++++++++++++
+ .../com/google/gerrit/httpd/rpc/UiRpcModule.java   |    2 +
+ .../google/gerrit/reviewdb/AccountGroupAccess.java |    4 +
+ .../com/google/gerrit/server/OwnerControl.java     |  159 ++++++++++++++++++
+ .../java/com/google/gerrit/server/OwnerUtil.java   |  143 ++++++++++++++++
+ .../google/gerrit/server/query/SearchControl.java  |   83 ++++++++++
+ 14 files changed, 1051 insertions(+), 0 deletions(-)
+ create mode 100644 gerrit-common/src/main/java/com/google/gerrit/common/data/OwnerInfo.java
+ create mode 100644 gerrit-common/src/main/java/com/google/gerrit/common/data/SearchList.java
+ create mode 100644 gerrit-common/src/main/java/com/google/gerrit/common/data/SearchListService.java
+ create mode 100644 gerrit-common/src/main/java/com/google/gerrit/common/data/SearchService.java
+ create mode 100644 gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/OwnerBaseServiceImplementation.java
+ create mode 100644 gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SearchListServiceImpl.java
+ create mode 100644 gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SearchServiceImpl.java
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/OwnerControl.java
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/OwnerUtil.java
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/query/SearchControl.java
+
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/AccountInfo.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/AccountInfo.java
+index 39c5d9c..9a4e601 100644
+--- a/gerrit-common/src/main/java/com/google/gerrit/common/data/AccountInfo.java
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/AccountInfo.java
+@@ -19,6 +19,7 @@ import com.google.gerrit.reviewdb.Account;
+ /** Summary information about an {@link Account}, for simple tabular displays. */
+ public class AccountInfo {
+   protected Account.Id id;
++  protected String userName;
+   protected String fullName;
+   protected String preferredEmail;
+ 
+@@ -43,6 +44,7 @@ public class AccountInfo {
+    */
+   public AccountInfo(final Account a) {
+     id = a.getId();
++    userName = a.getUserName();
+     fullName = a.getFullName();
+     preferredEmail = a.getPreferredEmail();
+   }
+@@ -52,6 +54,11 @@ public class AccountInfo {
+     return id;
+   }
+ 
++  /** @return the computed user name for this account */
++  public String getUserName() {
++    return userName;
++  }
++
+   /** @return the full name of the account holder; null if not supplied */
+   public String getFullName() {
+     return fullName;
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/OwnerInfo.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/OwnerInfo.java
+new file mode 100644
+index 0000000..3435759
+--- /dev/null
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/OwnerInfo.java
+@@ -0,0 +1,104 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.common.data;
++
++import com.google.gerrit.reviewdb.Account;
++import com.google.gerrit.reviewdb.AccountGroup;
++import com.google.gerrit.reviewdb.Owner;
++import com.google.gerrit.reviewdb.Project;
++
++/** Summary information about an {@link Owner}. */
++public class OwnerInfo extends Owner {
++  private String forDisplay = "";
++  private String forLink = "";
++
++  protected OwnerInfo(Owner.Type type, String owner) {
++    super(type, owner);
++  }
++
++  public OwnerInfo(Owner.Type type) {
++    this(type, "");
++  }
++
++  public OwnerInfo(final Account o) {
++    this(Owner.Type.USER, o.getId().toString());
++    try {
++      forLink = notNull(o.getUserName());
++      if ("".equals(forLink)) {
++        forLink = notNull(o.getId().toString());
++      }
++    } catch (Exception e) {}
++
++    try {
++      forDisplay = notNull(o.getFullName());
++      if ("".equals(forDisplay)) {
++        forDisplay = forLink;
++      }
++    } catch (Exception e) {}
++  }
++
++  public OwnerInfo(final AccountGroup o) {
++    this(Owner.Type.GROUP, o.getId().toString());
++    try {
++      forLink = notNull(o.getName());
++      if ("".equals(forLink)) {
++        forLink = notNull(o.getId().toString());
++      }
++      if (forLink.matches(".* .*")) {
++        forDisplay = forLink;
++        forLink = notNull(o.getId().toString());
++        return;
++      }
++
++    } catch (Exception e) {}
++
++    forDisplay = forLink;
++  }
++
++  public OwnerInfo(final Project o) {
++    this(Owner.Type.PROJECT, o.getName());
++    forLink = notNull(o.getName());
++    forDisplay = forLink;
++  }
++
++  public OwnerInfo() {
++    this(Owner.Type.SITE, "");
++  }
++
++  public String getOwnerForDisplay() {
++    return forDisplay;
++  }
++
++  public String getOwnerForLink() {
++    return forLink;
++  }
++
++  public static String notNull(String s) {
++    return s == null ? "" : s;
++  }
++}
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/SearchList.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/SearchList.java
+new file mode 100644
+index 0000000..703d3f8
+--- /dev/null
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/SearchList.java
+@@ -0,0 +1,78 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.common.data;
++
++import com.google.gerrit.common.data.OwnerInfo;
++import com.google.gerrit.reviewdb.Owner;
++import com.google.gerrit.reviewdb.Search;
++
++import java.util.ArrayList;
++import java.util.List;
++
++/** Summary information about a {@link SearchList}. */
++public class SearchList {
++  private OwnerInfo ownerInfo;
++  private boolean editable = false;
++  private List<Search> searches = new ArrayList<Search>(0);
++
++  protected SearchList() {
++  }
++
++  public SearchList(OwnerInfo ownerInfo) {
++    setOwnerInfo(ownerInfo);
++  }
++
++
++  public OwnerInfo getOwnerInfo() {
++    return ownerInfo;
++  }
++
++  public void setOwnerInfo(OwnerInfo ownerInfo) {
++    this.ownerInfo = ownerInfo;
++  }
++
++  public Owner.Type getType() {
++    return getOwnerInfo().getType();
++  }
++
++  public boolean isEditable() {
++    return editable;
++  }
++
++  public void setEditable(boolean editable) {
++    this.editable = editable;
++  }
++
++  public List<Search> getSearches() {
++    return searches;
++  }
++
++  public void setSearches(List<Search> searches) {
++    this.searches = searches;
++  }
++}
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/SearchListService.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/SearchListService.java
+new file mode 100644
+index 0000000..77c1fb7
+--- /dev/null
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/SearchListService.java
+@@ -0,0 +1,45 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.common.data;
++
++import com.google.gerrit.reviewdb.Owner;
++import com.google.gerrit.reviewdb.Search;
++import com.google.gwt.user.client.rpc.AsyncCallback;
++import com.google.gwtjsonrpc.client.RemoteJsonService;
++import com.google.gwtjsonrpc.client.RpcImpl;
++import com.google.gwtjsonrpc.client.RpcImpl.Version;
++
++import java.util.List;
++
++@RpcImpl(version = Version.V2_0)
++public interface SearchListService extends RemoteJsonService {
++
++  void getSearches(Owner.Id owner, AsyncCallback<List<Search>> callback);
++
++  void getSearchList(Owner.Id owner, AsyncCallback<SearchList> callback);
++}
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/SearchService.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/SearchService.java
+new file mode 100644
+index 0000000..de27a9c
+--- /dev/null
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/SearchService.java
+@@ -0,0 +1,38 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.common.data;
++
++import com.google.gerrit.common.auth.SignInRequired;
++import com.google.gerrit.reviewdb.Search;
++import com.google.gwt.user.client.rpc.AsyncCallback;
++import com.google.gwtjsonrpc.client.RemoteJsonService;
++import com.google.gwtjsonrpc.client.RpcImpl;
++import com.google.gwtjsonrpc.client.RpcImpl.Version;
++import com.google.gwtjsonrpc.client.VoidResult;
++
++import java.util.Set;
++
++@RpcImpl(version = Version.V2_0)
++public interface SearchService extends RemoteJsonService {
++
++  @SignInRequired
++  void createSearch(Search search, AsyncCallback<String> callback);
++
++  @SignInRequired
++  void changeSearch(Search.Key key, Search search, AsyncCallback<String> callback);
++
++  @SignInRequired
++  void deleteSearches(Set<Search.Key> keys, AsyncCallback<VoidResult> callback);
++}
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/BaseServiceImplementation.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/BaseServiceImplementation.java
+index 120de30..11c8b9a 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/BaseServiceImplementation.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/BaseServiceImplementation.java
+@@ -48,6 +48,13 @@ public class BaseServiceImplementation {
+     return null;
+   }
+ 
++  protected boolean isLoggedIn() {
++    try {
++      return getAccountId() != null;
++    } catch(Exception e) {}
++    return false;
++  }
++
+   /**
+    * Executes <code>action.run</code> with an active ReviewDb connection.
+    * <p>
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/OwnerBaseServiceImplementation.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/OwnerBaseServiceImplementation.java
+new file mode 100644
+index 0000000..cfd8beb
+--- /dev/null
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/OwnerBaseServiceImplementation.java
+@@ -0,0 +1,85 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.httpd.rpc;
++
++import com.google.gerrit.common.data.OwnerInfo;
++import com.google.gerrit.common.errors.NoSuchAccountException;
++import com.google.gerrit.common.errors.NoSuchEntityException;
++import com.google.gerrit.reviewdb.Owner;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.server.IdentifiedUser;
++import com.google.gerrit.server.OwnerControl;
++import com.google.gerrit.server.OwnerUtil;
++import com.google.gerrit.server.account.NoSuchGroupException;
++import com.google.gerrit.server.project.NoSuchProjectException;
++import com.google.gwtorm.client.OrmException;
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++public class OwnerBaseServiceImplementation extends BaseServiceImplementation {
++  private final OwnerControl.Factory ownerControlFactory;
++  private final OwnerUtil ownerUtil;
++
++  @Inject
++  OwnerBaseServiceImplementation(final Provider<ReviewDb> schema,
++      final Provider<IdentifiedUser> currentUser,
++      final OwnerControl.Factory ownerControlFactory,
++      final OwnerUtil ownerUtil) {
++    super(schema, currentUser);
++    this.ownerControlFactory = ownerControlFactory;
++    this.ownerUtil = ownerUtil;
++  }
++
++  protected OwnerInfo getOwnerInfo(final Owner.Id id)
++      throws OrmException, Failure {
++    try {
++      return ownerUtil.getOwnerInfo(id);
++    } catch (NoSuchEntityException e) {
++      throw new Failure(e);
++    } catch (NoSuchAccountException e) {
++      throw new Failure(e);
++    } catch (NoSuchGroupException e) {
++      throw new Failure(e);
++    } catch (NoSuchProjectException e) {
++      throw new Failure(e);
++    }
++  }
++
++  protected OwnerControl validateOwnerControlFor(Owner.Id owner)
++      throws Failure {
++    try {
++      return ownerControlFactory.validateFor(owner);
++    } catch (NoSuchEntityException e) {
++      throw new Failure(e);
++    } catch (NoSuchGroupException e) {
++      throw new Failure(e);
++    } catch (NoSuchProjectException e) {
++      throw new Failure(e);
++    }
++  }
++}
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SearchListServiceImpl.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SearchListServiceImpl.java
+new file mode 100644
+index 0000000..13023a7
+--- /dev/null
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SearchListServiceImpl.java
+@@ -0,0 +1,122 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.httpd.rpc;
++
++import com.google.gerrit.common.data.OwnerInfo;
++import com.google.gerrit.common.data.SearchList;
++import com.google.gerrit.common.data.SearchListService;
++import com.google.gerrit.reviewdb.Owner;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.reviewdb.Search;
++import com.google.gerrit.server.IdentifiedUser;
++import com.google.gerrit.server.OwnerControl;
++import com.google.gerrit.server.OwnerUtil;
++import com.google.gerrit.server.query.SearchControl;
++import com.google.gwt.user.client.rpc.AsyncCallback;
++import com.google.gwtorm.client.OrmException;
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++import java.util.ArrayList;
++import java.util.List;
++
++public class SearchListServiceImpl extends OwnerBaseServiceImplementation implements
++    SearchListService {
++
++  private final Provider<IdentifiedUser> currentUser;
++  private final SearchControl.Factory searchControlFactory;
++
++  @Inject
++  SearchListServiceImpl(final Provider<ReviewDb> schema,
++      final Provider<IdentifiedUser> currentUser,
++      final SearchControl.Factory searchControlFactory,
++      final OwnerControl.Factory ownerControlFactory,
++      final OwnerUtil ownerUtil) {
++    super(schema, currentUser, ownerControlFactory, ownerUtil);
++    this.currentUser = currentUser;
++    this.searchControlFactory = searchControlFactory;
++  }
++
++  @Override
++  public void getSearches(final Owner.Id id,
++      final AsyncCallback<List<Search>> callback) {
++    run(callback, new Action<List<Search>>() {
++      public List<Search> run(final ReviewDb db) throws OrmException, Failure {
++        return visibleFor(db, getOwnerInfo(id).getId());
++      }
++    });
++  }
++
++  @Override
++  public void getSearchList(final Owner.Id id,
++      final AsyncCallback<SearchList> callback) {
++    run(callback, new Action<SearchList>() {
++      public SearchList run(final ReviewDb db) throws OrmException, Failure {
++        SearchList list = new SearchList(new OwnerInfo(id.getType()));
++
++        if (! "".equals(id.get())) {
++          IdentifiedUser user = null;
++          if (isLoggedIn()) {
++            user = currentUser.get();
++          }
++          list.setOwnerInfo(getOwnerInfo(id));
++        } else if (id.getType() == Owner.Type.USER && isLoggedIn()) {
++          list.setOwnerInfo(new OwnerInfo(currentUser.get().getAccount()));
++        } else if (id.getType() != Owner.Type.SITE) {
++          return list;
++        }
++
++        try {
++          list.setEditable(validateOwnerControlFor(list.getOwnerInfo().getId())
++            .canEdit());
++        } catch (Exception e) {
++          throw new Failure(e);
++        }
++        list.setSearches(visibleFor(db, list.getOwnerInfo().getId()));
++        return list;
++      }
++    });
++  }
++
++  private List<Search> visibleFor(final ReviewDb db, final Owner.Id id)
++      throws OrmException, Failure {
++    validateOwnerControlFor(id);
++    List<Search> searches = db.searches().byType(id.getType().getCode(),
++      id.get()).toList();
++    List<Search> visible = new ArrayList<Search>(searches.size());
++    for(Search s : searches) {
++      try {
++        SearchControl c = searchControlFactory.validateFor(s.getKey());
++        if (c.isVisible()) {
++          visible.add(s);
++        }
++      } catch (Exception e) {}
++    }
++    return visible;
++  }
++}
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SearchServiceImpl.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SearchServiceImpl.java
+new file mode 100644
+index 0000000..cd669dc
+--- /dev/null
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SearchServiceImpl.java
+@@ -0,0 +1,174 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.httpd.rpc;
++
++import com.google.gerrit.common.data.OwnerInfo;
++import com.google.gerrit.common.data.SearchService;
++import com.google.gerrit.common.errors.NoSuchEntityException;
++import com.google.gerrit.reviewdb.Owner;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.reviewdb.Search;
++import com.google.gerrit.server.IdentifiedUser;
++import com.google.gerrit.server.OwnerControl;
++import com.google.gerrit.server.OwnerUtil;
++import com.google.gerrit.server.account.NoSuchGroupException;
++import com.google.gerrit.server.project.NoSuchProjectException;
++import com.google.gerrit.server.query.SearchControl;
++import com.google.gwt.user.client.rpc.AsyncCallback;
++import com.google.gwtjsonrpc.client.VoidResult;
++import com.google.gwtorm.client.OrmDuplicateKeyException;
++import com.google.gwtorm.client.OrmException;
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++import java.util.Collections;
++import java.util.Set;
++
++public class SearchServiceImpl extends OwnerBaseServiceImplementation implements
++    SearchService {
++  private final Provider<IdentifiedUser> identifiedUser;
++  private final SearchControl.Factory searchControlFactory;
++
++  @Inject
++  SearchServiceImpl(final Provider<ReviewDb> schema,
++      final Provider<IdentifiedUser> identifiedUser,
++      final OwnerControl.Factory ownerControlFactory,
++      final OwnerUtil ownerUtil,
++      final SearchControl.Factory searchControlFactory) {
++    super(schema, identifiedUser, ownerControlFactory, ownerUtil);
++    this.identifiedUser = identifiedUser;
++    this.searchControlFactory = searchControlFactory;
++  }
++
++  @Override
++  public void createSearch(final Search search,
++      final AsyncCallback<String> callback) {
++    run(callback, new Action<String>() {
++      public String run(final ReviewDb db) throws OrmException, Failure {
++        if (! isLoggedIn()) {
++          throw new Failure(new Exception("You must be logged in to save a search"));
++        }
++        if (! "".equals(search.getName())) {
++          return insert(db, search);
++        }
++
++        for (int n = 0; true; n++) {
++          try {
++            search.getKey().set("Untitled" + (n == 0 ? "" : n));
++            return insert(db, search);
++          } catch (OrmDuplicateKeyException e) {}
++        }
++      }
++    });
++  }
++
++  private String insert(final ReviewDb db, final Search search)
++      throws OrmException, Failure {
++    Owner.Id id = search.getKey().getOwnerId();
++    OwnerInfo owner = getOwnerInfo(id);
++    search.setOwnerId(owner.getId());
++    if (!search.isValid()) {
++      throw new Failure(new Exception("Invalid search key"));
++    }
++    SearchControl c = validateSearchControlFor(search.getKey(),
++      searchControlFactory);
++    if (!c.canEdit()) {
++      throw new Failure(new Exception("Permission denied inserting search"));
++    }
++    db.searches().insert(Collections.singleton(search));
++
++    if (owner.getType() == Owner.Type.SITE) {
++      return search.getName();
++    }
++    return owner.getOwnerForLink() + "," + search.getName();
++  }
++
++  @Override
++  public void changeSearch(final Search.Key key, final Search search,
++      final AsyncCallback<String> callback) {
++    run(callback, new Action<String>() {
++      public String run(final ReviewDb db) throws OrmException, Failure {
++        if (! isLoggedIn()) {
++          throw new Failure(new Exception("You must be logged in to edit a search"));
++        }
++        Owner.Id id = search.getKey().getOwnerId();
++        OwnerInfo owner = getOwnerInfo(id);
++        search.setOwnerId(owner.getId());
++        SearchControl c = validateSearchControlFor(search.getKey(),
++          searchControlFactory);
++        if (!c.canEdit()) {
++          throw new Failure(new Exception("Permission denied editing search"));
++        }
++
++        if (key.equals(search.getKey())) {
++          final Search orig = db.searches().get(search.getKey());
++          orig.setDescription(search.getDescription());
++          orig.setQuery(search.getQuery());
++          db.searches().update(Collections.singleton(orig));
++        } else {
++          if (!search.isValid()) {
++            throw new Failure(new Exception("Invalid changed search key"));
++          }
++          db.searches().insert(Collections.singleton(search));
++          delete(db, key);
++        }
++        if (owner.getType() == Owner.Type.SITE) {
++          return search.getName();
++        }
++        return owner.getOwnerForLink() + "," + search.getName();
++      }
++    });
++  }
++
++  @Override
++  public void deleteSearches(final Set<Search.Key> keys,
++      final AsyncCallback<VoidResult> callback) {
++    run(callback, new Action<VoidResult>() {
++      public VoidResult run(final ReviewDb db) throws OrmException, Failure {
++        if (! isLoggedIn()) {
++          throw new Failure(new Exception("You must be logged in to delete a search"));
++        }
++        for (Search.Key k : keys) {
++          k.setOwnerId(getOwnerInfo(k.getOwnerId()).getId());
++          delete(db, k);
++        }
++        return VoidResult.INSTANCE;
++      }
++    });
++  }
++
++  private void delete(final ReviewDb db, final Search.Key key)
++    throws OrmException, Failure {
++    SearchControl c = validateSearchControlFor(key, searchControlFactory);
++    if (!c.canEdit()) {
++      throw new Failure(new Exception("Permission denied deleting search"));
++    }
++    final Search search = db.searches().get(key);
++    db.searches().delete(Collections.singleton(search));
++  }
++
++  public static SearchControl validateSearchControlFor(Search.Key key,
++      SearchControl.Factory factory) throws Failure {
++    try {
++      return factory.validateFor(key);
++    } catch (NoSuchEntityException e) {
++      throw new Failure(e);
++    } catch (NoSuchGroupException e) {
++      throw new Failure(e);
++    } catch (NoSuchProjectException e) {
++      throw new Failure(e);
++    }
++  }
++}
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/UiRpcModule.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/UiRpcModule.java
+index 7de332a..1b5db82 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/UiRpcModule.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/UiRpcModule.java
+@@ -28,6 +28,8 @@ public class UiRpcModule extends RpcServletModule {
+   @Override
+   protected void configureServlets() {
+     rpc(ChangeListServiceImpl.class);
++    rpc(SearchServiceImpl.class);
++    rpc(SearchListServiceImpl.class);
+     rpc(SuggestServiceImpl.class);
+     rpc(SystemInfoServiceImpl.class);
+ 
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/AccountGroupAccess.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/AccountGroupAccess.java
+index 62dc93c..461a5d1 100644
+--- a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/AccountGroupAccess.java
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/AccountGroupAccess.java
+@@ -25,6 +25,10 @@ public interface AccountGroupAccess extends
+   @PrimaryKey("groupId")
+   AccountGroup get(AccountGroup.Id id) throws OrmException;
+ 
++  @Query("WHERE name = ?")
++  ResultSet<AccountGroup> byName(AccountGroup.NameKey name)
++      throws OrmException;
++
+   @Query("WHERE externalName = ?")
+   ResultSet<AccountGroup> byExternalName(AccountGroup.ExternalNameKey name)
+       throws OrmException;
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/OwnerControl.java b/gerrit-server/src/main/java/com/google/gerrit/server/OwnerControl.java
+new file mode 100644
+index 0000000..69a6337
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/OwnerControl.java
+@@ -0,0 +1,159 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.server;
++
++import com.google.gerrit.common.errors.NoSuchEntityException;
++import com.google.gerrit.reviewdb.Account;
++import com.google.gerrit.reviewdb.AccountGroup;
++import com.google.gerrit.reviewdb.Owner;
++import com.google.gerrit.server.CurrentUser;
++import com.google.gerrit.server.IdentifiedUser;
++import com.google.gerrit.server.account.GroupControl;
++import com.google.gerrit.server.account.NoSuchGroupException;
++import com.google.gerrit.server.project.NoSuchProjectException;
++import com.google.gerrit.server.project.ProjectControl;
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++/** Access control management for owners. */
++public class OwnerControl {
++  public static class Factory {
++    private final Provider<CurrentUser> user;
++    private final ProjectControl.Factory projectControlFactory;
++    private final GroupControl.Factory groupControlFactory;
++
++    @Inject
++    Factory(final Provider<CurrentUser> cu,
++        final ProjectControl.Factory projectControlFactory,
++        final GroupControl.Factory groupControlFactory) {
++      user = cu;
++      this.projectControlFactory = projectControlFactory;
++      this.groupControlFactory = groupControlFactory;
++    }
++
++    public OwnerControl controlFor(final Owner.Id owner)
++        throws NoSuchEntityException, NoSuchProjectException,
++        NoSuchGroupException {
++      switch(owner.getType()) {
++        case GROUP:
++           final GroupControl gc = groupControlFactory.validateFor(
++              owner.getAccountGroupId());
++            return new OwnerControl(gc, user.get(), owner);
++        case PROJECT:
++            final ProjectControl pc = projectControlFactory.validateFor(
++              owner.getProjectNameKey(),
++              ProjectControl.OWNER | ProjectControl.VISIBLE);
++            return new OwnerControl(pc, user.get(), owner);
++      }
++      return new OwnerControl(user.get(), owner);
++    }
++
++    public OwnerControl validateFor(final Owner.Id owner)
++        throws NoSuchEntityException, NoSuchProjectException,
++        NoSuchGroupException {
++      final OwnerControl c = controlFor(owner);
++      if (!c.isVisible()) {
++        throw new NoSuchEntityException();
++      }
++      return c;
++    }
++  }
++
++  private final CurrentUser user;
++  private final Owner.Id owner;
++  private ProjectControl pc = null;
++  private GroupControl gc = null;
++
++  OwnerControl(final ProjectControl pc, final CurrentUser who,
++      final Owner.Id owner) {
++    this(who, owner);
++    this.pc = pc;
++  }
++
++  OwnerControl(final GroupControl gc, final CurrentUser who,
++      final Owner.Id owner) {
++    this(who, owner);
++    this.gc = gc;
++  }
++
++  OwnerControl(final CurrentUser who, final Owner.Id owner) {
++    user = who;
++    this.owner = owner;
++  }
++
++  public CurrentUser getCurrentUser() {
++    return user;
++  }
++
++  /** Can this user see this owner? */
++  public boolean isVisible() {
++    switch(owner.getType()) {
++      case USER:    return true;
++      case GROUP:   return gc.isVisible();
++      case PROJECT: return pc.isVisible();
++      case SITE:    return true;
++    }
++    return false;
++  }
++
++  public boolean isOwner() {
++    switch(owner.getType()) {
++      case USER:
++          if (user instanceof IdentifiedUser) {
++            return owner.getAccountId().equals(
++              ((IdentifiedUser) user).getAccountId());
++          }
++          break;
++      case GROUP:
++          return user.getEffectiveGroups().contains(owner.getAccountGroupId());
++      case PROJECT:
++          return pc.isOwner();
++      case SITE:
++          return user.isAdministrator();
++    }
++    return false;
++  }
++
++  public boolean canEdit() {
++    switch(owner.getType()) {
++      case USER:
++        if (user instanceof IdentifiedUser) {
++          return owner.getAccountId().equals(
++            ((IdentifiedUser) user).getAccountId());
++        }
++        break;
++      case GROUP:
++          return user.getEffectiveGroups().contains(owner.getAccountGroupId());
++      case PROJECT:
++          return pc.isOwnerAnyRef();
++      case SITE:
++          return user.isAdministrator();
++    }
++    return false;
++  }
++}
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/OwnerUtil.java b/gerrit-server/src/main/java/com/google/gerrit/server/OwnerUtil.java
+new file mode 100644
+index 0000000..9cabf00
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/OwnerUtil.java
+@@ -0,0 +1,143 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.server;
++
++import com.google.gerrit.common.data.OwnerInfo;
++import com.google.gerrit.common.errors.NoSuchEntityException;
++import com.google.gerrit.common.errors.NoSuchAccountException;
++import com.google.gerrit.reviewdb.Account;
++import com.google.gerrit.reviewdb.AccountGroup;
++import com.google.gerrit.reviewdb.Owner;
++import com.google.gerrit.reviewdb.Project;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.server.account.AccountCache;
++import com.google.gerrit.server.account.AccountResolver;
++import com.google.gerrit.server.account.AccountState;
++import com.google.gerrit.server.account.NoSuchGroupException;
++import com.google.gerrit.server.project.NoSuchProjectException;
++import com.google.gwtorm.client.OrmException;
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++import java.util.List;
++
++public class OwnerUtil {
++  private final Provider<ReviewDb> schema;
++  private final Provider<CurrentUser> currentUser;
++  private final AccountCache accountCache;
++  private final AccountResolver accountResolver;
++
++  @Inject
++  OwnerUtil(final Provider<ReviewDb> schema,
++      final Provider<CurrentUser> currentUser,
++      final AccountCache accountCache,
++      final AccountResolver accountResolver) {
++    this.schema = schema;
++    this.currentUser = currentUser;
++    this.accountCache = accountCache;
++    this.accountResolver = accountResolver;
++  }
++
++  public OwnerInfo getOwnerInfo(final Owner.Id id)
++      throws OrmException, NoSuchEntityException, NoSuchAccountException,
++      NoSuchGroupException, NoSuchProjectException {
++    try {
++      switch(id.getType()) {
++        case USER:    return new OwnerInfo(getAccount(id));
++        case GROUP:   return new OwnerInfo(getAccountGroup(id));
++        case PROJECT: return new OwnerInfo(getProject(id));
++        case SITE:    return new OwnerInfo();
++      }
++    } catch (NullPointerException npe) {
++      switch(id.getType()) {
++        case USER:    throw new NoSuchAccountException(id.get());
++        case GROUP:   throw new NoSuchGroupException(new AccountGroup.NameKey(id.get()));
++        case PROJECT: throw new NoSuchProjectException(id.getProjectNameKey());
++      }
++    }
++    throw new NoSuchEntityException();
++  }
++
++  private Account getAccount(final Owner.Id id) throws OrmException {
++    IdentifiedUser user = getCurrentIdentifiedUser();
++    if ("".equals(id.get()) && user != null) {
++      return user.getAccount();
++    }
++
++    Account a = null;
++    try {
++      a = accountCache.get(id.getAccountId()).getAccount();
++    } catch (NumberFormatException e) { }
++
++    if (a == null) {
++      AccountState as = accountCache.getByUsername(id.get());
++      if (as != null) {
++        a = as.getAccount();
++      }
++    }
++
++    if (a == null) {
++      a = accountResolver.find(id.get());
++    }
++    return a;
++  }
++
++  private AccountGroup getAccountGroup(final Owner.Id id)
++      throws OrmException {
++    ReviewDb db = schema.get();
++    AccountGroup grp = null;
++
++    try {
++      grp = db.accountGroups().get(id.getAccountGroupId());
++    } catch (NumberFormatException e) { }
++
++    if (grp == null) {
++      AccountGroup.NameKey gkey = new AccountGroup.NameKey(id.get());
++      List<AccountGroup> groups = db.accountGroups().byName(gkey).toList();
++      if (groups.size() > 0) {
++        grp = groups.get(0);
++      }
++    }
++    return grp;
++  }
++
++  private Project getProject(final Owner.Id id)
++      throws OrmException {
++    return schema.get().projects().get(new Project.NameKey(id.get()));
++  }
++
++  protected IdentifiedUser getCurrentIdentifiedUser() {
++    try {
++      CurrentUser u = currentUser.get();
++      if (u instanceof IdentifiedUser) {
++        return (IdentifiedUser) u;
++      }
++    } catch(Exception e) {}
++    return null;
++  }
++}
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/query/SearchControl.java b/gerrit-server/src/main/java/com/google/gerrit/server/query/SearchControl.java
+new file mode 100644
+index 0000000..dd0296e
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/query/SearchControl.java
+@@ -0,0 +1,83 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.server.query;
++
++import com.google.gerrit.common.errors.NoSuchEntityException;
++import com.google.gerrit.reviewdb.Search;
++import com.google.gerrit.server.OwnerControl;
++import com.google.gerrit.server.account.NoSuchGroupException;
++import com.google.gerrit.server.project.NoSuchProjectException;
++import com.google.gerrit.server.project.ProjectControl;
++import com.google.inject.Inject;
++
++/** Access control management for saved searches. */
++public class SearchControl {
++  public static class Factory {
++    private final OwnerControl.Factory ownerControlFactory;
++
++    @Inject
++    Factory(final OwnerControl.Factory ownerControlFactory) {
++      this.ownerControlFactory = ownerControlFactory;
++    }
++
++    public SearchControl controlFor(final Search.Key key)
++        throws NoSuchEntityException, NoSuchProjectException,
++        NoSuchGroupException {
++      return new SearchControl(ownerControlFactory.controlFor(key.getOwnerId()));
++    }
++
++    public SearchControl validateFor(final Search.Key key)
++        throws NoSuchEntityException, NoSuchProjectException,
++        NoSuchGroupException {
++      final SearchControl c = controlFor(key);
++      if (!c.isVisible()) {
++        throw new NoSuchEntityException();
++      }
++      return c;
++    }
++  }
++
++  private OwnerControl oc;
++
++  SearchControl(OwnerControl c) {
++    this.oc = c;
++  }
++
++  /** Can this user see this search? */
++  public boolean isVisible() {
++    return oc.isVisible();
++  }
++
++  public boolean isOwner() {
++    return oc.isOwner();
++  }
++
++  public boolean canEdit() {
++    return oc.canEdit();
++  }
++}
+-- 
+1.7.4.1
+

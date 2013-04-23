@@ -1,0 +1,176 @@
+From ea58807b9a947bf0a4eba31c04977582430137ed Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Fri, 23 Jul 2010 10:23:03 -0600
+Subject: [PATCH] Use a template to set the subject line.
+
+Add an admin editable ChangeSubject.vm template used to
+format the subject header in change emails.
+---
+ .../gerrit/pgm/init/SitePathInitializer.java       |   11 +++
+ .../com/google/gerrit/server/mail/ChangeEmail.java |   17 +----
+ .../com/google/gerrit/server/mail/ChangeSubject.vm |   79 ++++++++++++++++++++
+ 3 files changed, 91 insertions(+), 16 deletions(-)
+ create mode 100644 gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeSubject.vm
+
+diff --git a/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java b/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java
+index 74e7548..9e5eb28 100644
+--- a/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java
++++ b/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java
+@@ -25,11 +25,13 @@ import static com.google.gerrit.pgm.init.InitUtil.version;
+ import com.google.gerrit.pgm.Init;
+ import com.google.gerrit.pgm.util.ConsoleUI;
+ import com.google.gerrit.server.config.SitePaths;
++import com.google.gerrit.server.mail.OutgoingEmail;
+ import com.google.inject.Binding;
+ import com.google.inject.Inject;
+ import com.google.inject.Injector;
+ import com.google.inject.TypeLiteral;
+ 
++import java.io.File;
+ import java.util.ArrayList;
+ import java.util.List;
+ 
+@@ -66,6 +68,7 @@ public class SitePathInitializer {
+     mkdir(site.etc_dir);
+     mkdir(site.lib_dir);
+     mkdir(site.logs_dir);
++    mkdir(site.mail_dir);
+     mkdir(site.static_dir);
+ 
+     for (InitStep step : steps) {
+@@ -82,11 +85,19 @@ public class SitePathInitializer {
+     extract(site.gerrit_sh, Init.class, "gerrit.sh");
+     chmod(0755, site.gerrit_sh);
+ 
++    extractMailExample("ChangeSubject.vm");
++
+     if (!ui.isBatch()) {
+       System.err.println();
+     }
+   }
+ 
++  private void extractMailExample (String orig) throws Exception {
++    File ex = new File(site.mail_dir, "/" + orig + ".example");
++    extract(ex, OutgoingEmail.class, orig);
++    chmod(0444, ex);
++  }
++
+   private static List<InitStep> stepsOf(final Injector injector) {
+     final ArrayList<InitStep> r = new ArrayList<InitStep>();
+     for (Binding<InitStep> b : all(injector)) {
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+index fd31f16..44183d0 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+@@ -208,22 +208,7 @@ public abstract class ChangeEmail extends OutgoingEmail {
+   }
+ 
+   private void setChangeSubjectHeader() {
+-    final StringBuilder subj = new StringBuilder();
+-    subj.append("[");
+-    subj.append(change.getDest().getShortName());
+-    subj.append("] ");
+-    subj.append("Change ");
+-    subj.append(change.getKey().abbreviate());
+-    subj.append(": (");
+-    subj.append(projectName);
+-    subj.append(") ");
+-    if (change.getSubject().length() > 60) {
+-      subj.append(change.getSubject().substring(0, 60));
+-      subj.append("...");
+-    } else {
+-      subj.append(change.getSubject());
+-    }
+-    setHeader("Subject", subj.toString());
++    setHeader("Subject", velocifyFile("ChangeSubject.vm"));
+   }
+ 
+   /** Get a link to the change; null if the server doesn't know its own address. */
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeSubject.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeSubject.vm
+new file mode 100644
+index 0000000..a14aa6a
+--- /dev/null
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeSubject.vm
+@@ -0,0 +1,79 @@
++## Copyright (c) 2010, Code Aurora Forum. All rights reserved.
++##
++## Redistribution and use in source and binary forms, with or without
++## modification, are permitted provided that the following conditions are
++## met:
++##     * Redistributions of source code must retain the above copyright
++##       notice, this list of conditions and the following disclaimer.
++##     * Redistributions in binary form must reproduce the above
++##       copyright notice, this list of conditions and the following
++##       disclaimer in the documentation and/or other materials provided
++##       with the distribution.
++##     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++##       contributors may be used to endorse or promote products derived
++##       from this software without specific prior written permission.
++##
++## THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++## WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++## MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++## ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++## BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++## CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++## SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++## BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++## WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++## OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++## IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++##
++##
++## Template Type:
++## -------------
++## This is a velocity template, see: http://velocity.apache.org/
++##
++## Template File Names and extensions:
++## ----------------------------------
++## Gerrit will use templates ending in ".vm" but will ignore templates ending
++## in ".vm.example".  If a .vm template does not exist, the default internal
++## gerrit template which is the same as the .vm.example will be used.  If you
++## want to override the default template, copy the .vm.exmaple file to a .vm
++## file and edit it appropriately.
++##
++## Template Purposes;
++## -----------------
++## The ChangeSubject.vm template will determine the contents of the email
++## subject line for ALL emails related to changes.
++##
++## Template Resources:
++## ------------------
++## Writting templates for gerrit emails is likely to require some basic
++## knowledge of the class structure to be useful, so browsing the source
++## code might be necessary.  All outgoing emails have the following
++## variables available to them:
++##
++##  $email          a reference to the class constructing the current email.
++##                  With this reference it is possible to call any public
++##                  method on the email class.
++##
++##  $messageClass   a String containing the messageClass
++##
++##  StringUtils     a reference to the apaache StringUtils class.  This can
++##                  be very usefull for formatting strings.
++##
++##
++## All change related emails have the following additional variables available
++## to them:
++##
++##  $change         a reference to the current change object
++##
++##  $branch         a reference to the bracn of this change
++##
++##  $projectName    the name of this change's project
++##
++##  $patchSet       a reference to the current patchSet
++##
++##  $patchSetInfo   a reference to the current patchSetInfo
++##
++#macro(elipses $length $str)
++#if($str.length > $length)${str.substr(0,$length)}...#else$str#end
++#end
++[$branch.shortName] Change $change.key.abbreviate(): ($projectName) #elipses(60, $change.subject)
+-- 
+1.7.1.1
+

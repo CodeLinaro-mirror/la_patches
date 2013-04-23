@@ -1,0 +1,29 @@
+From 04846fe4862d4121bbe37afbe823d19028cf8786 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Mon, 19 Mar 2012 13:01:11 -0600
+Subject: [PATCH] Fix index error when message array is blank
+
+This error occurs when running the gitlog2asciidoc.py
+script on Gerrit from v2.2.1 to v2.2.2.1.
+
+Change-Id: I7e9bca2f087765336fdb1f092c3b1453123d25f0
+---
+ tools/gitlog2asciidoc.py |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/tools/gitlog2asciidoc.py b/tools/gitlog2asciidoc.py
+index 3080289..bb904cb 100755
+--- a/tools/gitlog2asciidoc.py
++++ b/tools/gitlog2asciidoc.py
+@@ -73,7 +73,7 @@ for line in stdout_value.splitlines(True):
+     else:
+         if line == '\n':
+             # Don't add extra blank line if last one is already blank
+-            if message[-1] != '+\n':
++            if message != [] and message[-1] != '+\n':
+                 message.append('+\n')
+         else:
+             message.append(line)
+-- 
+1.7.8
+

@@ -1,0 +1,51 @@
+From 52c886179cba2524e93739529effcad536b6b5d5 Mon Sep 17 00:00:00 2001
+From: Raviteja Sunkara <raviteja@codeaurora.org>
+Date: Fri, 22 Mar 2013 17:03:41 +0530
+Subject: [PATCH] add null check to patchset object while creating descendent
+ changes.
+
+Without this fix, there had been a NullPointerException due to
+database inconsistency(assumed it was caused because of a gerrit crash)
+
+Change-Id: I0f7ac7dd9356afdd9021cd9db9e574edc8bcd1aa
+---
+ .../google/gerrit/server/events/EventFactory.java  |   23 +++++++++++++++----
+ 1 files changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java b/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java
+index bc4d998..d556e73 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java
+@@ -188,11 +188,24 @@ public class EventFactory {
+           }
+         }
+ 
+-        final RevId revId = db.patchSets().get(psId).getRevision();
+-        for (PatchSetAncestor a : db.patchSetAncestors().descendantsOf(revId)) {
+-          final PatchSet p = db.patchSets().get(a.getPatchSet());
+-          final Change c = db.changes().get(p.getId().getParentKey());
+-          ca.neededBy.add(newNeededBy(c, p));
++        final PatchSet ps = db.patchSets().get(psId);
++        if (ps == null) {
++          log.error("Error while generating the list of descendants for"
++              + " PatchSet " + psId + ": Cannot find PatchSet entry in"
++              + " database.");
++        } else {
++          final RevId revId = ps.getRevision();
++          for (PatchSetAncestor a : db.patchSetAncestors().descendantsOf(revId)) {
++            final PatchSet p = db.patchSets().get(a.getPatchSet());
++            if (p == null) {
++              log.error("Error while generating the list of descendants for"
++                  + " revision " + revId.get() + ": Cannot find PatchSet entry in"
++                  + " database for " + a.getPatchSet());
++              continue;
++            }
++            final Change c = db.changes().get(p.getId().getParentKey());
++            ca.neededBy.add(newNeededBy(c, p));
++          }
+         }
+       } finally {
+         db.close();
+-- 
+1.7.8.3
+

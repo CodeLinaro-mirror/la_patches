@@ -1,0 +1,35 @@
+From a8c4bd115841cb89ab083e027c18359cfdc03101 Mon Sep 17 00:00:00 2001
+From: Raviteja Sunkara <raviteja@codeaurora.org>
+Date: Wed, 22 Feb 2012 20:25:39 +0530
+Subject: [PATCH] Users who starred a change should receive all the emails
+ about a change.
+
+The "emailOnlyAuthors" feature silences emails about actions performed by
+users in some groups. The emails for any actions in these groups are sent
+only to change authors. With this commit, if a user has starred a change,
+it would override this "silencing" and send them an email even if they are
+not an author of that change. This provides users with an easy way to opt
+in again on specific change emails.
+
+Change-Id: Id1afb7068fece58a9336cddfbc46f9c4bbad98f2
+Bug: issue 904
+---
+ .../com/google/gerrit/server/mail/ChangeEmail.java |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+index 822bd51..342571a 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+@@ -296,7 +296,7 @@ public abstract class ChangeEmail extends OutgoingEmail {
+       //
+       for (StarredChange w : args.db.get().starredChanges().byChange(
+           change.getId())) {
+-        add(RecipientType.BCC, w.getAccountId());
++        super.add(RecipientType.BCC, w.getAccountId());
+       }
+     } catch (OrmException err) {
+       // Just don't BCC everyone. Better to send a partial message to those
+-- 
+1.7.7.1
+

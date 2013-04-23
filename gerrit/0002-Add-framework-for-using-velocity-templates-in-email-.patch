@@ -1,0 +1,419 @@
+From f22f7ef34a3f756ba4f5f3faa004414ba32d8653 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Tue, 20 Jul 2010 14:16:20 -0600
+Subject: [PATCH] Add framework for using velocity templates in email classes
+
+Setup the velocity context and add basic objects to it.  Add
+a few velocity helper functions, but do not use any of it.
+Allows default email templates to be in the war file and to
+be overridden by placing an appropriately named template in
+<site>/etc/mail.
+
+Change-Id: I45cdbbcd19929ce52c54a5c9b8ee510b52681ed3
+---
+ Documentation/licenses.txt                         |    1 +
+ gerrit-server/pom.xml                              |   11 +++
+ .../gerrit/server/config/GerritGlobalModule.java   |   42 +++++++++++
+ .../com/google/gerrit/server/config/SitePaths.java |    2 +
+ .../com/google/gerrit/server/mail/ChangeEmail.java |   31 ++++----
+ .../google/gerrit/server/mail/EmailArguments.java  |    6 +-
+ .../google/gerrit/server/mail/OutgoingEmail.java   |   78 ++++++++++++++------
+ 7 files changed, 131 insertions(+), 40 deletions(-)
+
+diff --git a/Documentation/licenses.txt b/Documentation/licenses.txt
+index 63db123..fe8cb99 100644
+--- a/Documentation/licenses.txt
++++ b/Documentation/licenses.txt
+@@ -30,6 +30,7 @@ Apache Log4J                <<apache2,Apache License 2.0>>
+ Apache MINA                 <<apache2,Apache License 2.0>>
+ Apache Tomact Servlet API   <<apache2,Apache License 2.0>>
+ Apache SSHD                 <<apache2,Apache License 2.0>>, see also <<sshd,NOTICE>>
++Apache Velocity             <<apache2,Apache License 2.0>>
+ Apache Xerces               <<apache2,Apache License 2.0>>
+ OpenID4Java                 <<apache2,Apache License 2.0>>
+ Neko HTML                   <<apache2,Apache License 2.0>>
+diff --git a/gerrit-server/pom.xml b/gerrit-server/pom.xml
+index db8093c..8f5d75a 100644
+--- a/gerrit-server/pom.xml
++++ b/gerrit-server/pom.xml
+@@ -34,6 +34,17 @@ limitations under the License.
+ 
+   <dependencies>
+     <dependency>
++      <groupId>log4j</groupId>
++      <artifactId>log4j</artifactId>
++    </dependency>
++
++    <dependency>
++      <groupId>org.apache.velocity</groupId>
++      <artifactId>velocity</artifactId>
++      <version>1.6.4</version>
++    </dependency>
++
++    <dependency>
+       <groupId>org.eclipse.jgit</groupId>
+       <artifactId>org.eclipse.jgit</artifactId>
+     </dependency>
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/config/GerritGlobalModule.java b/gerrit-server/src/main/java/com/google/gerrit/server/config/GerritGlobalModule.java
+index fa2aaad..9dc88fc 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/config/GerritGlobalModule.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/config/GerritGlobalModule.java
+@@ -17,6 +17,7 @@ package com.google.gerrit.server.config;
+ import static com.google.inject.Scopes.SINGLETON;
+ 
+ import com.google.gerrit.common.data.ApprovalTypes;
++import com.google.gerrit.lifecycle.LifecycleListener;
+ import com.google.gerrit.lifecycle.LifecycleModule;
+ import com.google.gerrit.reviewdb.AccountGroup;
+ import com.google.gerrit.reviewdb.AuthType;
+@@ -37,6 +38,7 @@ import com.google.gerrit.server.account.GroupCacheImpl;
+ import com.google.gerrit.server.account.Realm;
+ import com.google.gerrit.server.auth.ldap.LdapModule;
+ import com.google.gerrit.server.cache.CachePool;
++import com.google.gerrit.server.config.SitePaths;
+ import com.google.gerrit.server.events.EventFactory;
+ import com.google.gerrit.server.git.ChangeMergeQueue;
+ import com.google.gerrit.server.git.GitRepositoryManager;
+@@ -63,15 +65,54 @@ import com.google.gerrit.server.workflow.FunctionState;
+ import com.google.inject.Inject;
+ import com.google.inject.TypeLiteral;
+ 
++import org.apache.velocity.app.Velocity;
++import org.apache.velocity.runtime.RuntimeConstants;
++
+ import org.eclipse.jgit.lib.Config;
+ import org.eclipse.jgit.lib.PersonIdent;
+ 
++import java.util.Properties;
+ import java.util.Set;
+ 
++
+ /** Starts global state with standard dependencies. */
+ public class GerritGlobalModule extends FactoryModule {
+   private final AuthType loginType;
+ 
++  public static class VelocityLifecycle implements LifecycleListener {
++    private final SitePaths site;
++
++    @Inject
++    VelocityLifecycle(final SitePaths site) {
++      this.site = site;
++    }
++
++    @Override
++    public void start() {
++      String rl = "resource.loader";
++      String pkg = "org.apache.velocity.runtime.resource.loader";
++      Properties p = new Properties();
++
++      p.setProperty(rl, "file, class");
++      p.setProperty("file." + rl + ".class", pkg + ".FileResourceLoader");
++      p.setProperty("file." + rl + ".path", site.mail_dir.getAbsolutePath());
++      p.setProperty("class." + rl + ".class", pkg + ".ClasspathResourceLoader");
++      p.setProperty(RuntimeConstants.RUNTIME_LOG_LOGSYSTEM_CLASS,
++              "org.apache.velocity.runtime.log.SimpleLog4JLogSystem" );
++      p.setProperty("runtime.log.logsystem.log4j.category", "velocity");
++
++      try {
++        Velocity.init(p);
++      } catch(Exception e) {
++        throw new RuntimeException(e);
++      }
++    }
++
++    @Override
++    public void stop() {
++    }
++  }
++
+   @Inject
+   GerritGlobalModule(final AuthConfig authConfig,
+       @GerritServerConfig final Config config) {
+@@ -147,6 +188,7 @@ public class GerritGlobalModule extends FactoryModule {
+         listener().to(LocalDiskRepositoryManager.Lifecycle.class);
+         listener().to(CachePool.Lifecycle.class);
+         listener().to(WorkQueue.Lifecycle.class);
++        listener().to(VelocityLifecycle.class);
+       }
+     });
+   }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/config/SitePaths.java b/gerrit-server/src/main/java/com/google/gerrit/server/config/SitePaths.java
+index 1faa672..c3a5fb7 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/config/SitePaths.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/config/SitePaths.java
+@@ -28,6 +28,7 @@ public final class SitePaths {
+   public final File etc_dir;
+   public final File lib_dir;
+   public final File logs_dir;
++  public final File mail_dir;
+   public final File hooks_dir;
+   public final File static_dir;
+ 
+@@ -61,6 +62,7 @@ public final class SitePaths {
+     etc_dir = new File(site_path, "etc");
+     lib_dir = new File(site_path, "lib");
+     logs_dir = new File(site_path, "logs");
++    mail_dir = new File(etc_dir, "mail");
+     hooks_dir = new File(site_path, "hooks");
+     static_dir = new File(site_path, "static");
+ 
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+index e7c463c..fa10784 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+@@ -23,10 +23,7 @@ import com.google.gerrit.reviewdb.PatchSet;
+ import com.google.gerrit.reviewdb.PatchSetApproval;
+ import com.google.gerrit.reviewdb.PatchSetInfo;
+ import com.google.gerrit.reviewdb.StarredChange;
+-import com.google.gerrit.reviewdb.UserIdentity;
+ import com.google.gerrit.server.IdentifiedUser;
+-import com.google.gerrit.server.account.AccountState;
+-import com.google.gerrit.server.mail.EmailHeader.AddressList;
+ import com.google.gerrit.server.patch.PatchList;
+ import com.google.gerrit.server.patch.PatchListEntry;
+ import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
+@@ -37,22 +34,11 @@ import com.google.gerrit.server.query.change.ChangeData;
+ import com.google.gerrit.server.query.change.ChangeQueryBuilder;
+ import com.google.gwtorm.client.OrmException;
+ 
+-import org.eclipse.jgit.util.SystemReader;
+-import org.slf4j.Logger;
+-import org.slf4j.LoggerFactory;
+-
+-import java.net.MalformedURLException;
+-import java.net.URL;
+ import java.util.ArrayList;
+-import java.util.Collection;
+ import java.util.Collections;
+ import java.util.Date;
+ import java.util.HashSet;
+-import java.util.Iterator;
+-import java.util.LinkedHashMap;
+ import java.util.List;
+-import java.util.Map;
+-import java.util.Random;
+ import java.util.Set;
+ import java.util.TreeSet;
+ 
+@@ -88,7 +74,7 @@ public abstract class ChangeEmail extends OutgoingEmail {
+   }
+ 
+   /** Format the message body by calling {@link #appendText(String)}. */
+-  protected void format() {
++  protected void format() throws EmailException {
+     formatChange();
+     if (getChangeUrl() != null) {
+       openFooter();
+@@ -133,11 +119,10 @@ public abstract class ChangeEmail extends OutgoingEmail {
+   }
+ 
+   /** Format the message body by calling {@link #appendText(String)}. */
+-  protected abstract void formatChange();
++  protected abstract void formatChange() throws EmailException;
+ 
+   /** Setup the message headers and envelope (TO, CC, BCC). */
+   protected void init() {
+-    super.init();
+     if (args.projectCache != null) {
+       projectState = args.projectCache.get(change.getProject());
+       projectName =
+@@ -163,6 +148,8 @@ public abstract class ChangeEmail extends OutgoingEmail {
+       }
+     }
+ 
++    super.init();
++
+     if (changeMessage != null && changeMessage.getWrittenOn() != null) {
+       setHeader("Date", new Date(changeMessage.getWrittenOn().getTime()));
+     }
+@@ -442,4 +429,14 @@ public abstract class ChangeEmail extends OutgoingEmail {
+         || projectState.controlFor(args.identifiedUserFactory.create(to))
+             .controlFor(change).isVisible();
+   }
++
++  @Override
++  protected void setupVelocityContext() {
++    super.setupVelocityContext();
++    velocityContext.put("change", change);
++    velocityContext.put("branch", change.getDest());
++    velocityContext.put("projectName", projectName);
++    velocityContext.put("patchSet", patchSet);
++    velocityContext.put("patchSetInfo", patchSetInfo);
++  }
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/EmailArguments.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/EmailArguments.java
+index 8a7ffd6..f2ab9fa 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/EmailArguments.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/EmailArguments.java
+@@ -20,6 +20,7 @@ import com.google.gerrit.server.IdentifiedUser;
+ import com.google.gerrit.server.IdentifiedUser.GenericFactory;
+ import com.google.gerrit.server.account.AccountCache;
+ import com.google.gerrit.server.config.CanonicalWebUrl;
++import com.google.gerrit.server.config.SitePaths;
+ import com.google.gerrit.server.config.WildProjectName;
+ import com.google.gerrit.server.git.GitRepositoryManager;
+ import com.google.gerrit.server.patch.PatchListCache;
+@@ -47,6 +48,7 @@ class EmailArguments {
+   final ChangeQueryBuilder.Factory queryBuilder;
+   final Provider<ChangeQueryRewriter> queryRewriter;
+   final Provider<ReviewDb> db;
++  final SitePaths site;
+ 
+   @Inject
+   EmailArguments(GitRepositoryManager server, ProjectCache projectCache,
+@@ -57,7 +59,8 @@ class EmailArguments {
+       @CanonicalWebUrl @Nullable Provider<String> urlProvider,
+       @WildProjectName Project.NameKey wildProject,
+       ChangeQueryBuilder.Factory queryBuilder,
+-      Provider<ChangeQueryRewriter> queryRewriter, Provider<ReviewDb> db) {
++      Provider<ChangeQueryRewriter> queryRewriter, Provider<ReviewDb> db,
++      SitePaths site) {
+     this.server = server;
+     this.projectCache = projectCache;
+     this.accountCache = accountCache;
+@@ -71,5 +74,6 @@ class EmailArguments {
+     this.queryBuilder = queryBuilder;
+     this.queryRewriter = queryRewriter;
+     this.db = db;
++    this.site = site;
+   }
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
+index fe66636..63c221a 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
+@@ -15,45 +15,31 @@
+ package com.google.gerrit.server.mail;
+ 
+ import com.google.gerrit.reviewdb.Account;
+-import com.google.gerrit.reviewdb.AccountGroup;
+-import com.google.gerrit.reviewdb.AccountProjectWatch;
+-import com.google.gerrit.reviewdb.Change;
+-import com.google.gerrit.reviewdb.ChangeMessage;
+-import com.google.gerrit.reviewdb.PatchSet;
+-import com.google.gerrit.reviewdb.PatchSetApproval;
+-import com.google.gerrit.reviewdb.PatchSetInfo;
+-import com.google.gerrit.reviewdb.StarredChange;
+ import com.google.gerrit.reviewdb.UserIdentity;
+-import com.google.gerrit.server.IdentifiedUser;
+ import com.google.gerrit.server.account.AccountState;
+ import com.google.gerrit.server.mail.EmailHeader.AddressList;
+-import com.google.gerrit.server.patch.PatchList;
+-import com.google.gerrit.server.patch.PatchListEntry;
+-import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
+-import com.google.gerrit.server.project.ProjectState;
+-import com.google.gerrit.server.query.Predicate;
+-import com.google.gerrit.server.query.QueryParseException;
+-import com.google.gerrit.server.query.change.ChangeData;
+-import com.google.gerrit.server.query.change.ChangeQueryBuilder;
+-import com.google.gwtorm.client.OrmException;
++
++import org.apache.commons.lang.StringUtils;
++import org.apache.velocity.app.Velocity;
++import org.apache.velocity.exception.ResourceNotFoundException;
++import org.apache.velocity.VelocityContext;
+ 
+ import org.eclipse.jgit.util.SystemReader;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
++import java.io.StringWriter;
+ import java.net.MalformedURLException;
+ import java.net.URL;
+ import java.util.ArrayList;
+ import java.util.Collection;
+-import java.util.Collections;
+ import java.util.Date;
+ import java.util.HashSet;
+ import java.util.Iterator;
+ import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
+-import java.util.Set;
+-import java.util.TreeSet;
++
+ 
+ /** Sends an email to one or more interested parties. */
+ public abstract class OutgoingEmail {
+@@ -68,6 +54,7 @@ public abstract class OutgoingEmail {
+   private final List<Address> smtpRcptTo = new ArrayList<Address>();
+   private Address smtpFromAddress;
+   private StringBuilder body;
++  protected VelocityContext velocityContext;
+ 
+   protected final EmailArguments args;
+   protected Account.Id fromId;
+@@ -134,10 +121,12 @@ public abstract class OutgoingEmail {
+   }
+ 
+   /** Format the message body by calling {@link #appendText(String)}. */
+-  protected abstract void format();
++  protected abstract void format() throws EmailException;
+ 
+   /** Setup the message headers and envelope (TO, CC, BCC). */
+   protected void init() {
++    setupVelocityContext();
++
+     smtpFromAddress = args.fromAddressGenerator.from(fromId);
+     setHeader("Date", new Date());
+     headers.put("From", new EmailHeader.AddressList(smtpFromAddress));
+@@ -209,6 +198,12 @@ public abstract class OutgoingEmail {
+     return args.urlProvider.get();
+   }
+ 
++  /** Set a header in the outgoing message using a template. */
++  protected void setVHeader(final String name, final String value) throws
++      EmailException {
++    setHeader(name, velocify(value));
++  }
++
+   /** Set a header in the outgoing message. */
+   protected void setHeader(final String name, final String value) {
+     headers.put(name, new EmailHeader.String(value));
+@@ -336,4 +331,43 @@ public abstract class OutgoingEmail {
+     }
+     return new Address(a.getFullName(), e);
+   }
++
++  protected void setupVelocityContext() {
++    velocityContext = new VelocityContext();
++
++    velocityContext.put("email", this);
++    velocityContext.put("messageClass", messageClass);
++    velocityContext.put("StringUtils", StringUtils.class);
++  }
++
++  protected String velocify(String tpl) throws EmailException {
++    try {
++      StringWriter w = new StringWriter();
++      Velocity.evaluate(velocityContext, w, "OutgoingEmail", tpl);
++      return w.toString();
++    } catch(Exception e) {
++      throw new EmailException("Velocity template "+ tpl.toString(), e);
++    }
++  }
++
++  protected String velocifyFile(String name) throws EmailException {
++    Exception eo;
++
++    try {
++      StringWriter w = new StringWriter();
++      Velocity.mergeTemplate(name, velocityContext, w);
++      return w.toString();
++    } catch(ResourceNotFoundException e) {
++      try {
++        StringWriter w = new StringWriter();
++        String pkg = "com/google/gerrit/server/mail/";
++        Velocity.mergeTemplate(pkg + name, velocityContext, w);
++        return w.toString();
++      } catch(Exception e2) {
++        throw new EmailException("Velocity WAR template" + name + ".\n", e2);
++      }
++    } catch(Exception e) {
++      throw new EmailException("Velocity template " + name + ".\n", e);
++    }
++  }
+ }
+-- 
+1.7.2
+

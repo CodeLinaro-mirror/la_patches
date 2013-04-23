@@ -1,0 +1,236 @@
+From 481783b24df271ad2fe748767b7fb37870981289 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Thu, 13 Jan 2011 13:16:20 -0700
+Subject: [PATCH] Add ownerin and reviewerin search predicates
+
+These predicates make it possible to search for changes
+which are owned or reviewed by users in a specific group.
+
+Bug: issue 722
+Change-Id: Ibc60a4e9345f7425d449f4bdaa611184986405eb
+---
+ Documentation/user-search.txt                      |   12 ++++-
+ .../server/query/change/ChangeQueryBuilder.java    |   22 +++++++
+ .../server/query/change/OwnerinPredicate.java      |   58 +++++++++++++++++++
+ .../server/query/change/ReviewerinPredicate.java   |   59 ++++++++++++++++++++
+ 4 files changed, 150 insertions(+), 1 deletions(-)
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/query/change/OwnerinPredicate.java
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/query/change/ReviewerinPredicate.java
+
+diff --git a/Documentation/user-search.txt b/Documentation/user-search.txt
+index 5b2f81e..ece640c 100644
+--- a/Documentation/user-search.txt
++++ b/Documentation/user-search.txt
+@@ -17,7 +17,7 @@ Description                 Default Query
+ All > Open                  status:open '(or is:open)'
+ All > Merged                status:merged
+ All > Abandoned             status:abandoned
+-My > Dafts                  has:draft
++My > Drafts                 has:draft
+ My > Watched Changes        status:open is:watched
+ My > Starred Changes        is:starred
+ Open changes in Foo         status:open project:Foo
+@@ -74,11 +74,21 @@ owner:'USER'::
+ +
+ Changes originally submitted by 'USER'.
+ 
++[[ownerin]]
++ownerin:'GROUP'::
+++
++Changes originally submitted by a user in 'GROUP'.
++
+ [[reviewer]]
+ reviewer:'USER'::
+ +
+ Changes that have been, or need to be, reviewed by 'USER'.
+ 
++[[reviewerin]]
++reviewerin:'GROUP'::
+++
++Changes that have been, or need to be, reviewed by a user in 'GROUP'.
++
+ [[commit]]
+ commit:'SHA1'::
+ +
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/query/change/ChangeQueryBuilder.java b/gerrit-server/src/main/java/com/google/gerrit/server/query/change/ChangeQueryBuilder.java
+index 5cd05a8..ccabb0a 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/query/change/ChangeQueryBuilder.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/query/change/ChangeQueryBuilder.java
+@@ -78,9 +78,11 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
+   public static final String FIELD_LIMIT = "limit";
+   public static final String FIELD_MESSAGE = "message";
+   public static final String FIELD_OWNER = "owner";
++  public static final String FIELD_OWNERIN = "ownerin";
+   public static final String FIELD_PROJECT = "project";
+   public static final String FIELD_REF = "ref";
+   public static final String FIELD_REVIEWER = "reviewer";
++  public static final String FIELD_REVIEWERIN = "reviewerin";
+   public static final String FIELD_STARREDBY = "starredby";
+   public static final String FIELD_STATUS = "status";
+   public static final String FIELD_TOPIC = "topic";
+@@ -383,6 +385,16 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
+   }
+ 
+   @Operator
++  public Predicate<ChangeData> ownerin(String group) throws QueryParseException,
++      OrmException {
++    AccountGroup g = args.groupCache.get(new AccountGroup.NameKey(group));
++    if (g == null) {
++      throw error("Group " + group + " not found");
++    }
++    return new OwnerinPredicate(args.dbProvider, args.userFactory, g.getId());
++  }
++
++  @Operator
+   public Predicate<ChangeData> reviewer(String who)
+       throws QueryParseException, OrmException {
+     Set<Account.Id> m = args.accountResolver.findAll(who);
+@@ -401,6 +413,16 @@ public class ChangeQueryBuilder extends QueryBuilder<ChangeData> {
+   }
+ 
+   @Operator
++  public Predicate<ChangeData> reviewerin(String group)
++      throws QueryParseException, OrmException {
++    AccountGroup g = args.groupCache.get(new AccountGroup.NameKey(group));
++    if (g == null) {
++      throw error("Group " + group + " not found");
++    }
++    return new ReviewerinPredicate(args.dbProvider, args.userFactory, g.getId());
++  }
++
++  @Operator
+   public Predicate<ChangeData> tr(String trackingId) {
+     return new TrackingIdPredicate(args.dbProvider, trackingId);
+   }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/query/change/OwnerinPredicate.java b/gerrit-server/src/main/java/com/google/gerrit/server/query/change/OwnerinPredicate.java
+new file mode 100644
+index 0000000..87f3a04
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/query/change/OwnerinPredicate.java
+@@ -0,0 +1,58 @@
++// Copyright (C) 2011 The Android Open Source Project
++// Copyright (c) 2011, Code Aurora Forum. All rights reserved.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.server.query.change;
++
++import com.google.gerrit.reviewdb.AccountGroup;
++import com.google.gerrit.reviewdb.Change;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.server.IdentifiedUser;
++import com.google.gerrit.server.query.OperatorPredicate;
++import com.google.gwtorm.client.OrmException;
++import com.google.inject.Provider;
++
++class OwnerinPredicate extends OperatorPredicate<ChangeData> {
++  private final Provider<ReviewDb> dbProvider;
++  private final IdentifiedUser.GenericFactory userFactory;
++  private final AccountGroup.Id id;
++
++  OwnerinPredicate(Provider<ReviewDb> dbProvider,
++    IdentifiedUser.GenericFactory userFactory, AccountGroup.Id id) {
++    super(ChangeQueryBuilder.FIELD_OWNERIN, id.toString());
++    this.dbProvider = dbProvider;
++    this.userFactory = userFactory;
++    this.id = id;
++  }
++
++  AccountGroup.Id getAccountGroupId() {
++    return id;
++  }
++
++  @Override
++  public boolean match(final ChangeData object) throws OrmException {
++    final Change change = object.change(dbProvider);
++    if (change == null) {
++      return false;
++    }
++    final IdentifiedUser owner = userFactory.create(dbProvider,
++      change.getOwner());
++    return owner.getEffectiveGroups().contains(id);
++  }
++
++  @Override
++  public int getCost() {
++    return 2;
++  }
++}
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/query/change/ReviewerinPredicate.java b/gerrit-server/src/main/java/com/google/gerrit/server/query/change/ReviewerinPredicate.java
+new file mode 100644
+index 0000000..420df80
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/query/change/ReviewerinPredicate.java
+@@ -0,0 +1,59 @@
++// Copyright (C) 2011 The Android Open Source Project
++// Copyright (c) 2011, Code Aurora Forum. All rights reserved.
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.server.query.change;
++
++import com.google.gerrit.reviewdb.AccountGroup;
++import com.google.gerrit.reviewdb.PatchSetApproval;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.server.IdentifiedUser;
++import com.google.gerrit.server.query.OperatorPredicate;
++import com.google.gwtorm.client.OrmException;
++import com.google.inject.Provider;
++
++class ReviewerinPredicate extends OperatorPredicate<ChangeData> {
++  private final Provider<ReviewDb> dbProvider;
++  private final IdentifiedUser.GenericFactory userFactory;
++  private final AccountGroup.Id id;
++
++  ReviewerinPredicate(Provider<ReviewDb> dbProvider,
++    IdentifiedUser.GenericFactory userFactory, AccountGroup.Id id) {
++    super(ChangeQueryBuilder.FIELD_REVIEWERIN, id.toString());
++    this.dbProvider = dbProvider;
++    this.userFactory = userFactory;
++    this.id = id;
++  }
++
++  AccountGroup.Id getAccountGroupId() {
++    return id;
++  }
++
++  @Override
++  public boolean match(final ChangeData object) throws OrmException {
++    for (PatchSetApproval p : object.approvals(dbProvider)) {
++      final IdentifiedUser reviewer = userFactory.create(dbProvider,
++        p.getAccountId());
++      if (reviewer.getEffectiveGroups().contains(id)) {
++        return true;
++      }
++    }
++    return false;
++  }
++
++  @Override
++  public int getCost() {
++    return 3;
++  }
++}
+-- 
+1.7.3.5
+

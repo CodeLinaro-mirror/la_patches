@@ -1,0 +1,65 @@
+From 7260ea77baf4c9238e4c0306e7846dbf7b21ceb8 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Wed, 28 Nov 2012 11:57:00 -0700
+Subject: [PATCH] Fix odd ProjectScreen display
+
+The ProjectScreens originally inherited from MenuScreen
+which no longer made sense if we no longer had any menus.
+However, the MenuScreen also wrapped its main content in
+a FlowPanel and HorizontalPanel which influenced the main
+layouts.  Re-add those 2 panels directly to ProjectScreen
+to get the same layout effect as previously.
+
+Change-Id: Ib19259d37f3d7195a7937429e81f2139b9f2065a
+---
+ .../google/gerrit/client/admin/ProjectScreen.java  |   15 +++++++++++++++
+ 1 files changed, 15 insertions(+), 0 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java
+index d8e53c8..928a6bc 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java
+@@ -16,6 +16,9 @@ package com.google.gerrit.client.admin;
+ 
+ import com.google.gerrit.client.ui.Screen;
+ import com.google.gerrit.reviewdb.client.Project;
++import com.google.gwt.user.client.ui.FlowPanel;
++import com.google.gwt.user.client.ui.HorizontalPanel;
++import com.google.gwt.user.client.ui.Widget;
+ 
+ public abstract class ProjectScreen extends Screen {
+   public static final String INFO = "info";
+@@ -24,9 +27,11 @@ public abstract class ProjectScreen extends Screen {
+   public static final String DASHBOARDS = "dashboards";
+ 
+   private final Project.NameKey name;
++  private final FlowPanel body;
+ 
+   public ProjectScreen(final Project.NameKey toShow) {
+     name = toShow;
++    body = new FlowPanel();
+   }
+ 
+   public Project.NameKey getProjectKey() {
+@@ -34,8 +39,18 @@ public abstract class ProjectScreen extends Screen {
+   }
+ 
+   @Override
++  protected void add(final Widget w) {
++    body.add(w);
++  }
++
++
++  @Override
+   protected void onInitUI() {
+     super.onInitUI();
+     setPageTitle(Util.M.project(name.get()));
++
++    HorizontalPanel hp = new HorizontalPanel();
++    hp.add(body);
++    super.add(hp);
+   }
+ }
+-- 
+1.7.8
+

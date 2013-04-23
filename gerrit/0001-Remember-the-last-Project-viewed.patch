@@ -1,0 +1,75 @@
+From c94b0c5d0bfaaba6474b1c45ac8fd0c2086a7d28 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Wed, 5 Dec 2012 12:23:49 -0700
+Subject: [PATCH] Remember the last Project viewed
+
+Remember the last project viewed when navigating away from
+a ProjectScreen.  If there is a remembered project, then
+do not hide the extra project links.  This makes it easy
+to navigate to the project list accidentally (or any other
+screen and still return to the last project viewed.
+
+Change-Id: I364a4ee46c05c85c285b39543dcf1de517ca4db5
+---
+ .../main/java/com/google/gerrit/client/Gerrit.java |   10 ++++++++--
+ .../google/gerrit/client/admin/ProjectScreen.java  |   11 +++++++++++
+ 2 files changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java
+index db280ac..3802296 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java
+@@ -809,10 +809,16 @@ public class Gerrit implements EntryPoint {
+         @Override
+         public void onScreenLoad(ScreenLoadEvent event) {
+           Screen screen = event.getScreen();
++          Project.NameKey projectKey;
+           if (screen instanceof ProjectScreen) {
+-            Project.NameKey projectKey = ((ProjectScreen)screen).getProjectKey();
+-            setTargetHistoryToken(Dispatcher.toProjectAdmin(projectKey, panel));
++            projectKey = ((ProjectScreen)screen).getProjectKey();
++          } else {
++            projectKey = ProjectScreen.getSavedKey();
++          }
++
++          if (projectKey != null) {
+             setVisible(true);
++            setTargetHistoryToken(Dispatcher.toProjectAdmin(projectKey, panel));
+           } else {
+             setVisible(false);
+           }
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java
+index 3e0fa00..fdf3ab8 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectScreen.java
+@@ -24,11 +24,16 @@ public abstract class ProjectScreen extends Screen {
+   public static final String DASHBOARDS = "dashboards";
+ 
+   protected static String savedPanel;
++  protected static Project.NameKey savedKey;
+ 
+   public static String getSavedPanel() {
+     return savedPanel;
+   }
+ 
++  public static Project.NameKey getSavedKey() {
++    return savedKey;
++  }
++
+   private final Project.NameKey name;
+ 
+   public ProjectScreen(final Project.NameKey toShow) {
+@@ -44,4 +49,10 @@ public abstract class ProjectScreen extends Screen {
+     super.onInitUI();
+     setPageTitle(Util.M.project(name.get()));
+   }
++
++  @Override
++  protected void onLoad() {
++    super.onLoad();
++    savedKey = name;
++  }
+ }
+-- 
+1.7.8
+

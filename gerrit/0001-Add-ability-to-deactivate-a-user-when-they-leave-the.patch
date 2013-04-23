@@ -1,0 +1,471 @@
+From d49b645a4caeba57ab84ca2f932b1f9a2051070c Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Mon, 9 Aug 2010 17:41:31 -0600
+Subject: [PATCH] Add ability to deactivate a user when they leave the project.
+
+Add a inactive column to the Account object.  Use the inactive
+status to disable the user's web and ssh logins, sending
+emails to the user on behalf of gerrit, adding the user as a
+reviewer or to a group, and making the user appear in the
+"add reviewer" and group "add member" auto completion boxes.
+
+Change-Id: Ib002788ebf8204dfea608d9f5ac3a5cdff20f817
+---
+ .../google/gerrit/common/data/ReviewerResult.java  |    3 +
+ .../google/gerrit/common/data/SuggestService.java  |    2 +-
+ .../common/errors/InactiveAccountException.java    |   26 ++++++++++
+ .../com/google/gerrit/client/GerritConstants.java  |    2 +
+ .../gerrit/client/GerritConstants.properties       |    2 +
+ .../gerrit/client/changes/ApprovalTable.java       |    4 ++
+ .../gerrit/client/changes/ChangeMessages.java      |    1 +
+ .../client/changes/ChangeMessages.properties       |    1 +
+ .../google/gerrit/client/rpc/GerritCallback.java   |    9 ++++
+ .../gerrit/client/ui/AccountSuggestOracle.java     |    3 +-
+ .../gerrit/httpd/rpc/SuggestServiceImpl.java       |   21 ++++++--
+ .../httpd/rpc/account/GroupAdminServiceImpl.java   |    4 ++
+ .../google/gerrit/httpd/rpc/patch/AddReviewer.java |    5 ++
+ .../java/com/google/gerrit/reviewdb/Account.java   |   12 +++++
+ .../gerrit/server/account/AccountManager.java      |   13 ++++--
+ .../google/gerrit/server/mail/OutgoingEmail.java   |    2 +-
+ .../google/gerrit/server/schema/SchemaVersion.java |    2 +-
+ .../com/google/gerrit/server/schema/Schema_41.java |   49 ++++++++++++++++++++
+ .../com/google/gerrit/sshd/DatabasePubKeyAuth.java |    5 ++
+ 19 files changed, 153 insertions(+), 13 deletions(-)
+ create mode 100644 gerrit-common/src/main/java/com/google/gerrit/common/errors/InactiveAccountException.java
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_41.java
+
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/ReviewerResult.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/ReviewerResult.java
+index 19772fc..678ec79 100644
+--- a/gerrit-common/src/main/java/com/google/gerrit/common/data/ReviewerResult.java
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/ReviewerResult.java
+@@ -50,6 +50,9 @@ public class ReviewerResult {
+       /** Name supplied does not match to a registered account. */
+       ACCOUNT_NOT_FOUND,
+ 
++      /** The account is inactive. */
++      ACCOUNT_INACTIVE,
++
+       /** The account is not permitted to see the change. */
+       CHANGE_NOT_VISIBLE,
+ 
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/SuggestService.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/SuggestService.java
+index 164df43..9dae169 100644
+--- a/gerrit-common/src/main/java/com/google/gerrit/common/data/SuggestService.java
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/SuggestService.java
+@@ -28,7 +28,7 @@ public interface SuggestService extends RemoteJsonService {
+   void suggestProjectNameKey(String query, int limit,
+       AsyncCallback<List<Project.NameKey>> callback);
+ 
+-  void suggestAccount(String query, int limit,
++  void suggestAccount(String query, Boolean enabled, int limit,
+       AsyncCallback<List<AccountInfo>> callback);
+ 
+   void suggestAccountGroup(String query, int limit,
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/errors/InactiveAccountException.java b/gerrit-common/src/main/java/com/google/gerrit/common/errors/InactiveAccountException.java
+new file mode 100644
+index 0000000..6ae5eb6
+--- /dev/null
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/errors/InactiveAccountException.java
+@@ -0,0 +1,26 @@
++// Copyright (C) 2010 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.common.errors;
++
++/** Error indicating the account is currently inactive. */
++public class InactiveAccountException extends Exception {
++  private static final long serialVersionUID = 1L;
++
++  public static final String MESSAGE = "Account Inactive: ";
++
++  public InactiveAccountException(String who) {
++    super(MESSAGE + who);
++  }
++}
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritConstants.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritConstants.java
+index 3f263d2..b32a32d 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritConstants.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritConstants.java
+@@ -46,6 +46,8 @@ public interface GerritConstants extends Constants {
+   String nameAlreadyUsedBody();
+   String noSuchAccountTitle();
+ 
++  String inactiveAccountBody();
++
+   String menuAll();
+   String menuAllOpen();
+   String menuAllMerged();
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritConstants.properties b/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritConstants.properties
+index 83a06e4..3363015 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritConstants.properties
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/GerritConstants.properties
+@@ -29,6 +29,8 @@ notFoundBody = The page you requested was not found.
+ nameAlreadyUsedBody = The name is already in use.
+ noSuchAccountTitle = Code Review - Unknown User
+ 
++inactiveAccountBody = This user is currently inactive.
++
+ menuAll = All
+ menuAllOpen = Open
+ menuAllMerged = Merged
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ApprovalTable.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ApprovalTable.java
+index f850a33..23dd635 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ApprovalTable.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ApprovalTable.java
+@@ -188,6 +188,10 @@ public class ApprovalTable extends Composite {
+                     r.append(Util.M.accountNotFound(e.getName()));
+                     break;
+ 
++                  case ACCOUNT_INACTIVE:
++                    r.append(Util.M.accountInactive(e.getName()));
++                    break;
++
+                   case CHANGE_NOT_VISIBLE:
+                     r.append(Util.M.changeNotVisibleTo(e.getName()));
+                     break;
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeMessages.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeMessages.java
+index 51e2bc5..fd7c363 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeMessages.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeMessages.java
+@@ -47,6 +47,7 @@ public interface ChangeMessages extends Messages {
+   String changeQueryPageTitle(String query);
+ 
+   String accountNotFound(String who);
++  String accountInactive(String who);
+   String changeNotVisibleTo(String who);
+ 
+   String anonymousDownload(String protocol);
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeMessages.properties b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeMessages.properties
+index 5d2d3a5..80f9dab 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeMessages.properties
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/ChangeMessages.properties
+@@ -28,6 +28,7 @@ changeQueryWindowTitle = {0}
+ changeQueryPageTitle = Search for {0}
+ 
+ accountNotFound = {0} is not a registered user.
++accountInactive = {0} is not an active user.
+ changeNotVisibleTo = {0} cannot access the change.
+ 
+ anonymousDownload = Anonymous {0}
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/rpc/GerritCallback.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/rpc/GerritCallback.java
+index fa028d7..f29742a 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/rpc/GerritCallback.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/rpc/GerritCallback.java
+@@ -17,6 +17,7 @@ package com.google.gerrit.client.rpc;
+ import com.google.gerrit.client.ErrorDialog;
+ import com.google.gerrit.client.Gerrit;
+ import com.google.gerrit.client.NotSignedInDialog;
++import com.google.gerrit.common.errors.InactiveAccountException;
+ import com.google.gerrit.common.errors.NameAlreadyUsedException;
+ import com.google.gerrit.common.errors.NoSuchAccountException;
+ import com.google.gerrit.common.errors.NoSuchEntityException;
+@@ -37,6 +38,9 @@ public abstract class GerritCallback<T> implements AsyncCallback<T> {
+     } else if (isNoSuchEntity(caught)) {
+       new ErrorDialog(Gerrit.C.notFoundBody()).center();
+ 
++    } else if (isInactiveAccount(caught)) {
++      new ErrorDialog(Gerrit.C.inactiveAccountBody()).center();
++
+     } else if (isNoSuchAccount(caught)) {
+       final String msg = caught.getMessage();
+       final String who = msg.substring(NoSuchAccountException.MESSAGE.length());
+@@ -71,6 +75,11 @@ public abstract class GerritCallback<T> implements AsyncCallback<T> {
+         && caught.getMessage().equals(NoSuchEntityException.MESSAGE);
+   }
+ 
++  protected static boolean isInactiveAccount(final Throwable caught) {
++    return caught instanceof RemoteJsonException
++        && caught.getMessage().startsWith(InactiveAccountException.MESSAGE);
++  }
++
+   private static boolean isNoSuchAccount(final Throwable caught) {
+     return caught instanceof RemoteJsonException
+         && caught.getMessage().startsWith(NoSuchAccountException.MESSAGE);
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/AccountSuggestOracle.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/AccountSuggestOracle.java
+index 441878f..6222452 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/AccountSuggestOracle.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/AccountSuggestOracle.java
+@@ -30,7 +30,8 @@ public class AccountSuggestOracle extends HighlightSuggestOracle {
+   public void onRequestSuggestions(final Request req, final Callback callback) {
+     RpcStatus.hide(new Runnable() {
+       public void run() {
+-        SuggestUtil.SVC.suggestAccount(req.getQuery(), req.getLimit(),
++        SuggestUtil.SVC.suggestAccount(req.getQuery(), new Boolean(true),
++            req.getLimit(),
+             new GerritCallback<List<AccountInfo>>() {
+               public void onSuccess(final List<AccountInfo> result) {
+                 final ArrayList<AccountSuggestion> r =
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SuggestServiceImpl.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SuggestServiceImpl.java
+index f9721f8..7328848 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SuggestServiceImpl.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/SuggestServiceImpl.java
+@@ -33,6 +33,7 @@ import com.google.inject.Provider;
+ import java.util.ArrayList;
+ import java.util.LinkedHashMap;
+ import java.util.List;
++import java.util.Map;
+ 
+ class SuggestServiceImpl extends BaseServiceImplementation implements
+     SuggestService {
+@@ -74,8 +75,8 @@ class SuggestServiceImpl extends BaseServiceImplementation implements
+     });
+   }
+ 
+-  public void suggestAccount(final String query, final int limit,
+-      final AsyncCallback<List<AccountInfo>> callback) {
++  public void suggestAccount(final String query, final Boolean active,
++      final int limit, final AsyncCallback<List<AccountInfo>> callback) {
+     run(callback, new Action<List<AccountInfo>>() {
+       public List<AccountInfo> run(final ReviewDb db) throws OrmException {
+         final String a = query;
+@@ -86,12 +87,12 @@ class SuggestServiceImpl extends BaseServiceImplementation implements
+         final LinkedHashMap<Account.Id, AccountInfo> r =
+             new LinkedHashMap<Account.Id, AccountInfo>();
+         for (final Account p : db.accounts().suggestByFullName(a, b, n)) {
+-          r.put(p.getId(), new AccountInfo(p));
++          addSuggestion(r, p, new AccountInfo(p), active);
+         }
+         if (r.size() < n) {
+           for (final Account p : db.accounts().suggestByPreferredEmail(a, b,
+               n - r.size())) {
+-            r.put(p.getId(), new AccountInfo(p));
++            addSuggestion(r, p, new AccountInfo(p), active);
+           }
+         }
+         if (r.size() < n) {
+@@ -101,7 +102,7 @@ class SuggestServiceImpl extends BaseServiceImplementation implements
+               final Account p = accountCache.get(e.getAccountId()).getAccount();
+               final AccountInfo info = new AccountInfo(p);
+               info.setPreferredEmail(e.getEmailAddress());
+-              r.put(e.getAccountId(), info);
++              addSuggestion(r, p, info, active);
+             }
+           }
+         }
+@@ -110,6 +111,16 @@ class SuggestServiceImpl extends BaseServiceImplementation implements
+     });
+   }
+ 
++  private void addSuggestion(Map map, Account account, AccountInfo info,
++      Boolean active) {
++    if(active != null) {
++      if(active.booleanValue() != account.isActive()) {
++        return;
++      }
++    }
++    map.put(account.getId(), info);
++  }
++
+   public void suggestAccountGroup(final String query, final int limit,
+       final AsyncCallback<List<AccountGroupName>> callback) {
+     run(callback, new Action<List<AccountGroupName>>() {
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/GroupAdminServiceImpl.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/GroupAdminServiceImpl.java
+index 4e4f82e..1e4458d 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/GroupAdminServiceImpl.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/GroupAdminServiceImpl.java
+@@ -16,6 +16,7 @@ package com.google.gerrit.httpd.rpc.account;
+ 
+ import com.google.gerrit.common.data.GroupAdminService;
+ import com.google.gerrit.common.data.GroupDetail;
++import com.google.gerrit.common.errors.InactiveAccountException;
+ import com.google.gerrit.common.errors.NameAlreadyUsedException;
+ import com.google.gerrit.common.errors.NoSuchAccountException;
+ import com.google.gerrit.common.errors.NoSuchEntityException;
+@@ -221,6 +222,9 @@ class GroupAdminServiceImpl extends BaseServiceImplementation implements
+         }
+ 
+         final Account a = findAccount(nameOrEmail);
++        if(!a.isActive()) {
++          throw new Failure(new InactiveAccountException(a.getFullName()));
++        }
+         if (!control.canAdd(a.getId())) {
+           throw new Failure(new NoSuchEntityException());
+         }
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/patch/AddReviewer.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/patch/AddReviewer.java
+index ae36388..9d508e2 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/patch/AddReviewer.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/patch/AddReviewer.java
+@@ -94,6 +94,11 @@ class AddReviewer extends Handler<ReviewerResult> {
+             ReviewerResult.Error.Type.ACCOUNT_NOT_FOUND, nameOrEmail));
+         continue;
+       }
++      if (!account.isActive()) {
++        result.addError(new ReviewerResult.Error(
++            ReviewerResult.Error.Type.ACCOUNT_INACTIVE, nameOrEmail));
++        continue;
++      }
+ 
+       final IdentifiedUser user = identifiedUserFactory.create(account.getId());
+       if (!control.forUser(user).isVisible()) {
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Account.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Account.java
+index f428a22..43b7b17 100644
+--- a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Account.java
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Account.java
+@@ -129,6 +129,10 @@ public final class Account {
+   @Column(id = 6, name = Column.NONE)
+   protected AccountGeneralPreferences generalPreferences;
+ 
++  /** Is this user active */
++  @Column(id = 7)
++  protected boolean inactive;
++
+   /** <i>computed</i> the username selected from the identities. */
+   protected String userName;
+ 
+@@ -198,6 +202,14 @@ public final class Account {
+     contactFiledOn = new Timestamp(System.currentTimeMillis());
+   }
+ 
++  public boolean isActive() {
++    return ! inactive;
++  }
++
++  public void setActive(boolean active) {
++    inactive = ! active;
++  }
++
+   /** @return the computed user name for this account */
+   public String getUserName() {
+     return userName;
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/account/AccountManager.java b/gerrit-server/src/main/java/com/google/gerrit/server/account/AccountManager.java
+index 24ddd27..83a5eed 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/account/AccountManager.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/account/AccountManager.java
+@@ -100,7 +100,7 @@ public class AccountManager {
+    * @param who identity of the user, with any details we received about them.
+    * @return the result of authenticating the user.
+    * @throws AccountException the account does not exist, and cannot be created,
+-   *         or exists, but cannot be located.
++   *         or exists, but cannot be located, or is inactive.
+    */
+   public AuthResult authenticate(AuthRequest who) throws AccountException {
+     who = realm.authenticate(who);
+@@ -114,9 +114,14 @@ public class AccountManager {
+           //
+           return create(db, who);
+ 
+-        } else {
+-          // Account exists, return the identity to the caller.
+-          //
++        } else { // Account exists
++
++          Account act = db.accounts().get(id.getAccountId());
++          if (act == null || !act.isActive()) {
++            throw new AccountException("Authentication error, account inactive");
++          }
++
++          // return the identity to the caller.
+           update(db, who, id);
+           return new AuthResult(id.getAccountId(), key, false);
+         }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
+index fe66636..451d097 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
+@@ -331,7 +331,7 @@ public abstract class OutgoingEmail {
+   private Address toAddress(final Account.Id id) {
+     final Account a = args.accountCache.get(id).getAccount();
+     final String e = a.getPreferredEmail();
+-    if (e == null) {
++    if (!a.isActive() || e == null) {
+       return null;
+     }
+     return new Address(a.getFullName(), e);
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java b/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
+index 2f8d4ca..78edbc3 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
+@@ -32,7 +32,7 @@ import java.util.List;
+ /** A version of the database schema. */
+ public abstract class SchemaVersion {
+   /** The current schema version. */
+-  private static final Class<? extends SchemaVersion> C = Schema_40.class;
++  private static final Class<? extends SchemaVersion> C = Schema_41.class;
+ 
+   public static class Module extends AbstractModule {
+     @Override
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_41.java b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_41.java
+new file mode 100644
+index 0000000..61ae51c
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_41.java
+@@ -0,0 +1,49 @@
++// Copyright (C) 2010 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.server.schema;
++
++import com.google.gerrit.reviewdb.AccountProjectWatch;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gwtorm.client.OrmException;
++import com.google.gwtorm.jdbc.JdbcSchema;
++import com.google.gwtorm.schema.sql.DialectH2;
++import com.google.gwtorm.schema.sql.DialectMySQL;
++import com.google.gwtorm.schema.sql.DialectPostgreSQL;
++import com.google.gwtorm.schema.sql.SqlDialect;
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++import java.sql.SQLException;
++import java.sql.Statement;
++
++public class Schema_41 extends SchemaVersion {
++  @Inject
++  Schema_41(Provider<Schema_40> prior) {
++    super(prior);
++  }
++
++  @Override
++  protected void migrateData(ReviewDb db, UpdateUI ui) throws SQLException,
++      OrmException {
++    // Set to "*" the filter field of the previously watched projects
++    //
++    Statement stmt = ((JdbcSchema) db).getConnection().createStatement();
++    try {
++      stmt.execute("ALTER TABLE account ADD COLUMN (inactive)");
++    } finally {
++      stmt.close();
++    }
++  }
++}
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/DatabasePubKeyAuth.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/DatabasePubKeyAuth.java
+index 6c96b70..ebe483c 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/DatabasePubKeyAuth.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/DatabasePubKeyAuth.java
+@@ -135,6 +135,11 @@ class DatabasePubKeyAuth implements PublickeyAuthenticator {
+       }
+     }
+ 
++    if(!createUser(sd, key).getAccount().isActive()) {
++      sd.authenticationError(username, "inactive-account");
++      return false;
++    }
++
+     return success(username, session, sd, createUser(sd, key));
+   }
+ 
+-- 
+1.7.2
+

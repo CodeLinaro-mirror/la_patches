@@ -1,0 +1,280 @@
+From 5e1b202a4f18b7320ba16be60234cb6d0c49683f Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Tue, 24 May 2011 18:27:59 -0600
+Subject: [PATCH] Add error messages for abandon and restore when in bad state
+
+The abandon and restore routines can fail if the change
+is in the wrong state (abandoned already, or open still).
+These failure lead to internal NPEs.  Instead, create a
+new exception and give a reason for the failure to the user.
+
+Change-Id: Id7861d75e535c439c12329f7e891797c5b1f6eca
+---
+ .../httpd/rpc/changedetail/AbandonChange.java      |    4 +-
+ .../httpd/rpc/changedetail/RestoreChange.java      |    4 +-
+ .../java/com/google/gerrit/server/ChangeUtil.java  |   63 +++++++++++---------
+ .../project/InvalidChangeOperationException.java   |   29 +++++++++
+ .../google/gerrit/sshd/commands/ReviewCommand.java |   42 +++++++------
+ 5 files changed, 93 insertions(+), 49 deletions(-)
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/project/InvalidChangeOperationException.java
+
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/AbandonChange.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/AbandonChange.java
+index d2f59f5..8eb1bbe 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/AbandonChange.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/AbandonChange.java
+@@ -27,6 +27,7 @@ import com.google.gerrit.server.mail.AbandonedSender;
+ import com.google.gerrit.server.mail.EmailException;
+ import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
+ import com.google.gerrit.server.project.ChangeControl;
++import com.google.gerrit.server.project.InvalidChangeOperationException;
+ import com.google.gerrit.server.project.NoSuchChangeException;
+ import com.google.gwtorm.client.OrmException;
+ import com.google.inject.Inject;
+@@ -71,7 +72,8 @@ class AbandonChange extends Handler<ChangeDetail> {
+ 
+   @Override
+   public ChangeDetail call() throws NoSuchChangeException, OrmException,
+-      EmailException, NoSuchEntityException, PatchSetInfoNotAvailableException {
++      EmailException, NoSuchEntityException, InvalidChangeOperationException,
++      PatchSetInfoNotAvailableException {
+ 
+     final Change.Id changeId = patchSetId.getParentKey();
+     final ChangeControl control = changeControlFactory.validateFor(changeId);
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/RestoreChange.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/RestoreChange.java
+index f951439..fa8785a 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/RestoreChange.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/RestoreChange.java
+@@ -25,6 +25,7 @@ import com.google.gerrit.server.mail.AbandonedSender;
+ import com.google.gerrit.server.mail.EmailException;
+ import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
+ import com.google.gerrit.server.project.ChangeControl;
++import com.google.gerrit.server.project.InvalidChangeOperationException;
+ import com.google.gerrit.server.project.NoSuchChangeException;
+ import com.google.gwtorm.client.OrmException;
+ import com.google.inject.Inject;
+@@ -69,7 +70,8 @@ class RestoreChange extends Handler<ChangeDetail> {
+ 
+   @Override
+   public ChangeDetail call() throws NoSuchChangeException, OrmException,
+-      EmailException, NoSuchEntityException, PatchSetInfoNotAvailableException {
++      EmailException, NoSuchEntityException, InvalidChangeOperationException,
++      PatchSetInfoNotAvailableException {
+ 
+     final Change.Id changeId = patchSetId.getParentKey();
+     final ChangeControl control = changeControlFactory.validateFor(changeId);
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+index 6886d2c..2498669 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+@@ -34,6 +34,7 @@ import com.google.gerrit.server.git.MergeQueue;
+ import com.google.gerrit.server.git.ReplicationQueue;
+ import com.google.gerrit.server.patch.PatchSetInfoFactory;
+ import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
++import com.google.gerrit.server.project.InvalidChangeOperationException;
+ import com.google.gerrit.server.project.NoSuchChangeException;
+ import com.google.gerrit.server.mail.AbandonedSender;
+ import com.google.gerrit.server.mail.EmailException;
+@@ -212,7 +213,7 @@ public class ChangeUtil {
+       final IdentifiedUser user, final String message, final ReviewDb db,
+       final AbandonedSender.Factory abandonedSenderFactory,
+       final ChangeHookRunner hooks) throws NoSuchChangeException,
+-      EmailException, OrmException {
++      InvalidChangeOperationException, EmailException, OrmException {
+     final Change.Id changeId = patchSetId.getParentKey();
+     final PatchSet patch = db.patchSets().get(patchSetId);
+     if (patch == null) {
+@@ -245,22 +246,25 @@ public class ChangeUtil {
+       }
+     });
+ 
+-    if (updatedChange != null) {
+-      db.changeMessages().insert(Collections.singleton(cmsg));
++    if (updatedChange == null) {
++      throw new InvalidChangeOperationException(changeId,
++          "Change is no longer open");
++    }
+ 
+-      final List<PatchSetApproval> approvals =
+-          db.patchSetApprovals().byChange(changeId).toList();
+-      for (PatchSetApproval a : approvals) {
+-        a.cache(updatedChange);
+-      }
+-      db.patchSetApprovals().update(approvals);
++    db.changeMessages().insert(Collections.singleton(cmsg));
+ 
+-      // Email the reviewers
+-      final AbandonedSender cm = abandonedSenderFactory.create(updatedChange);
+-      cm.setFrom(user.getAccountId());
+-      cm.setChangeMessage(cmsg);
+-      cm.send();
++    final List<PatchSetApproval> approvals =
++        db.patchSetApprovals().byChange(changeId).toList();
++    for (PatchSetApproval a : approvals) {
++      a.cache(updatedChange);
+     }
++    db.patchSetApprovals().update(approvals);
++
++    // Email the reviewers
++    final AbandonedSender cm = abandonedSenderFactory.create(updatedChange);
++    cm.setFrom(user.getAccountId());
++    cm.setChangeMessage(cmsg);
++    cm.send();
+ 
+     hooks.doChangeAbandonedHook(updatedChange, user.getAccount(), message);
+   }
+@@ -371,7 +375,7 @@ public class ChangeUtil {
+       final IdentifiedUser user, final String message, final ReviewDb db,
+       final AbandonedSender.Factory abandonedSenderFactory,
+       final ChangeHookRunner hooks) throws NoSuchChangeException,
+-      EmailException, OrmException {
++      InvalidChangeOperationException, EmailException, OrmException {
+     final Change.Id changeId = patchSetId.getParentKey();
+     final PatchSet patch = db.patchSets().get(patchSetId);
+     if (patch == null) {
+@@ -404,22 +408,25 @@ public class ChangeUtil {
+       }
+     });
+ 
+-    if (updatedChange != null) {
+-      db.changeMessages().insert(Collections.singleton(cmsg));
++    if (updatedChange == null) {
++      throw new InvalidChangeOperationException(changeId,
++          "Change is not abandonned or patchset is not latest");
++    }
+ 
+-      final List<PatchSetApproval> approvals =
+-          db.patchSetApprovals().byChange(changeId).toList();
+-      for (PatchSetApproval a : approvals) {
+-        a.cache(updatedChange);
+-      }
+-      db.patchSetApprovals().update(approvals);
++    db.changeMessages().insert(Collections.singleton(cmsg));
+ 
+-      // Email the reviewers
+-      final AbandonedSender cm = abandonedSenderFactory.create(updatedChange);
+-      cm.setFrom(user.getAccountId());
+-      cm.setChangeMessage(cmsg);
+-      cm.send();
++    final List<PatchSetApproval> approvals =
++        db.patchSetApprovals().byChange(changeId).toList();
++    for (PatchSetApproval a : approvals) {
++      a.cache(updatedChange);
+     }
++    db.patchSetApprovals().update(approvals);
++
++    // Email the reviewers
++    final AbandonedSender cm = abandonedSenderFactory.create(updatedChange);
++    cm.setFrom(user.getAccountId());
++    cm.setChangeMessage(cmsg);
++    cm.send();
+ 
+     hooks.doChangeRestoreHook(updatedChange, user.getAccount(), message);
+   }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/project/InvalidChangeOperationException.java b/gerrit-server/src/main/java/com/google/gerrit/server/project/InvalidChangeOperationException.java
+new file mode 100644
+index 0000000..3959d4d
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/project/InvalidChangeOperationException.java
+@@ -0,0 +1,29 @@
++// Copyright (C) 2009 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.server.project;
++
++import com.google.gerrit.reviewdb.Change;
++
++/** Indicates the change does not exist. */
++public class InvalidChangeOperationException extends Exception {
++  private static final long serialVersionUID = 1L;
++
++  public String msg;
++
++  public InvalidChangeOperationException(final Change.Id key, String msg) {
++    super(msg);
++    this.msg = msg;
++  }
++}
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java
+index 0a6033b..c2e2094 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java
+@@ -34,6 +34,7 @@ import com.google.gerrit.server.mail.EmailException;
+ import com.google.gerrit.server.patch.PublishComments;
+ import com.google.gerrit.server.project.CanSubmitResult;
+ import com.google.gerrit.server.project.ChangeControl;
++import com.google.gerrit.server.project.InvalidChangeOperationException;
+ import com.google.gerrit.server.project.NoSuchChangeException;
+ import com.google.gerrit.server.project.ProjectControl;
+ import com.google.gerrit.server.workflow.FunctionState;
+@@ -202,9 +203,8 @@ public class ReviewCommand extends BaseCommand {
+     });
+   }
+ 
+-  private void approveOne(final PatchSet.Id patchSetId)
+-      throws NoSuchChangeException, UnloggedFailure, OrmException,
+-             EmailException {
++  private void approveOne(final PatchSet.Id patchSetId) throws
++      NoSuchChangeException, UnloggedFailure, OrmException, EmailException {
+ 
+     final Change.Id changeId = patchSetId.getParentKey();
+     ChangeControl changeControl = changeControlFactory.validateFor(changeId);
+@@ -224,25 +224,29 @@ public class ReviewCommand extends BaseCommand {
+ 
+     publishCommentsFactory.create(patchSetId, changeComment, aps).call();
+ 
+-    if (abandonChange) {
+-      if (changeControl.canAbandon()) {
+-        ChangeUtil.abandon(patchSetId, currentUser, changeComment, db,
+-          abandonedSenderFactory, hooks);
+-      } else {
+-        throw error("Not permitted to abandon change");
++    try {
++      if (abandonChange) {
++        if (changeControl.canAbandon()) {
++          ChangeUtil.abandon(patchSetId, currentUser, changeComment, db,
++              abandonedSenderFactory, hooks);
++        } else {
++          throw error("Not permitted to abandon change");
++        }
+       }
+-    }
+ 
+-    if (restoreChange) {
+-      if (changeControl.canRestore()) {
+-        ChangeUtil.restore(patchSetId, currentUser, changeComment, db,
+-          abandonedSenderFactory, hooks);
+-      } else {
+-        throw error("Not permitted to restore change");
+-      }
+-      if (submitChange) {
+-        changeControl = changeControlFactory.validateFor(changeId);
++      if (restoreChange) {
++        if (changeControl.canRestore()) {
++          ChangeUtil.restore(patchSetId, currentUser, changeComment, db,
++              abandonedSenderFactory, hooks);
++        } else {
++          throw error("Not permitted to restore change");
++        }
++        if (submitChange) {
++          changeControl = changeControlFactory.validateFor(changeId);
++        }
+       }
++    } catch (InvalidChangeOperationException e) {
++      throw error(e.msg);
+     }
+ 
+     if (submitChange) {
+-- 
+1.7.4.1
+

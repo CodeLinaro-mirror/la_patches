@@ -1,0 +1,525 @@
+From 5cfc9f4c40128be2dda3a68c02f326f0927aefbd Mon Sep 17 00:00:00 2001
+From: Raviteja Sunkara <raviteja@codeaurora.org>
+Date: Wed, 16 Mar 2011 17:12:49 +0530
+Subject: [PATCH] Refactor AbandonChangeDialog and RestoreChangeDialog classes
+
+Change-Id: Ibc4ede4d5c5deb4b743828cfdc690871518354ab
+---
+ .../gerrit/client/changes/AbandonChangeDialog.java |  134 -----------------
+ .../changes/CommentedChangeActionDialog.java       |  150 ++++++++++++++++++++
+ .../changes/PatchSetComplexDisclosurePanel.java    |   44 ++++---
+ .../gerrit/client/changes/RestoreChangeDialog.java |  135 ------------------
+ 4 files changed, 176 insertions(+), 287 deletions(-)
+ delete mode 100644 gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/AbandonChangeDialog.java
+ create mode 100644 gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/CommentedChangeActionDialog.java
+ delete mode 100644 gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/RestoreChangeDialog.java
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/AbandonChangeDialog.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/AbandonChangeDialog.java
+deleted file mode 100644
+index bc63fc0..0000000
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/AbandonChangeDialog.java
++++ /dev/null
+@@ -1,134 +0,0 @@
+-// Copyright (C) 2009 The Android Open Source Project
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-package com.google.gerrit.client.changes;
+-
+-import com.google.gerrit.client.Gerrit;
+-import com.google.gerrit.client.rpc.GerritCallback;
+-import com.google.gerrit.client.ui.SmallHeading;
+-import com.google.gerrit.common.data.ChangeDetail;
+-import com.google.gerrit.reviewdb.PatchSet;
+-import com.google.gwt.event.dom.client.ClickEvent;
+-import com.google.gwt.event.dom.client.ClickHandler;
+-import com.google.gwt.event.logical.shared.CloseEvent;
+-import com.google.gwt.event.logical.shared.CloseHandler;
+-import com.google.gwt.user.client.DOM;
+-import com.google.gwt.user.client.rpc.AsyncCallback;
+-import com.google.gwt.user.client.ui.Button;
+-import com.google.gwt.user.client.ui.FlowPanel;
+-import com.google.gwt.user.client.ui.PopupPanel;
+-import com.google.gwtexpui.globalkey.client.GlobalKey;
+-import com.google.gwtexpui.globalkey.client.NpTextArea;
+-import com.google.gwtexpui.user.client.AutoCenterDialogBox;
+-
+-public class AbandonChangeDialog extends AutoCenterDialogBox implements CloseHandler<PopupPanel>{
+-  private final FlowPanel panel;
+-  private final NpTextArea message;
+-  private final Button sendButton;
+-  private final Button cancelButton;
+-  private final PatchSet.Id psid;
+-  private final AsyncCallback<ChangeDetail> callback;
+-
+-  private boolean buttonClicked = false;
+-
+-  public AbandonChangeDialog(final PatchSet.Id psi,
+-      final AsyncCallback<ChangeDetail> callback) {
+-    super(/* auto hide */false, /* modal */true);
+-    setGlassEnabled(true);
+-
+-    psid = psi;
+-    this.callback = callback;
+-    addStyleName(Gerrit.RESOURCES.css().abandonChangeDialog());
+-    setText(Util.C.abandonChangeTitle());
+-
+-    panel = new FlowPanel();
+-    add(panel);
+-
+-    panel.add(new SmallHeading(Util.C.headingAbandonMessage()));
+-
+-    final FlowPanel mwrap = new FlowPanel();
+-    mwrap.setStyleName(Gerrit.RESOURCES.css().abandonMessage());
+-    panel.add(mwrap);
+-
+-    message = new NpTextArea();
+-    message.setCharacterWidth(60);
+-    message.setVisibleLines(10);
+-    message.setSpellCheck(true);
+-    mwrap.add(message);
+-
+-    final FlowPanel buttonPanel = new FlowPanel();
+-    panel.add(buttonPanel);
+-
+-    sendButton = new Button(Util.C.buttonAbandonChangeSend());
+-    sendButton.addClickHandler(new ClickHandler() {
+-      @Override
+-      public void onClick(final ClickEvent event) {
+-        sendButton.setEnabled(false);
+-        cancelButton.setEnabled(false);
+-        Util.MANAGE_SVC.abandonChange(psid, message.getText().trim(),
+-            new GerritCallback<ChangeDetail>() {
+-              public void onSuccess(ChangeDetail result) {
+-                buttonClicked = true;
+-                if (callback != null) {
+-                  callback.onSuccess(result);
+-                }
+-                hide();
+-              }
+-
+-              @Override
+-              public void onFailure(Throwable caught) {
+-                sendButton.setEnabled(true);
+-                cancelButton.setEnabled(true);
+-                super.onFailure(caught);
+-              }
+-            });
+-      }
+-    });
+-    buttonPanel.add(sendButton);
+-
+-    cancelButton = new Button(Util.C.buttonAbandonChangeCancel());
+-    DOM.setStyleAttribute(cancelButton.getElement(), "marginLeft", "300px");
+-    cancelButton.addClickHandler(new ClickHandler() {
+-      @Override
+-      public void onClick(final ClickEvent event) {
+-        buttonClicked = true;
+-        if (callback != null) {
+-          callback.onFailure(null);
+-        }
+-        hide();
+-      }
+-    });
+-    buttonPanel.add(cancelButton);
+-
+-    addCloseHandler(this);
+-  }
+-
+-  @Override
+-  public void center() {
+-    super.center();
+-    GlobalKey.dialog(this);
+-    message.setFocus(true);
+-  }
+-
+-  @Override
+-  public void onClose(CloseEvent<PopupPanel> event) {
+-    if (!buttonClicked) {
+-      // the dialog was closed without one of the buttons being pressed
+-      // e.g. the user pressed ESC to close the dialog
+-      if (callback != null) {
+-        callback.onFailure(null);
+-      }
+-    }
+-  }
+-}
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/CommentedChangeActionDialog.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/CommentedChangeActionDialog.java
+new file mode 100644
+index 0000000..5540b71
+--- /dev/null
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/CommentedChangeActionDialog.java
+@@ -0,0 +1,150 @@
++// Copyright (C) 2009 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.client.changes;
++
++import com.google.gerrit.client.Gerrit;
++import com.google.gerrit.client.rpc.GerritCallback;
++import com.google.gerrit.client.ui.SmallHeading;
++import com.google.gerrit.common.data.ChangeDetail;
++import com.google.gerrit.reviewdb.PatchSet;
++import com.google.gwt.event.dom.client.ClickEvent;
++import com.google.gwt.event.dom.client.ClickHandler;
++import com.google.gwt.event.logical.shared.CloseEvent;
++import com.google.gwt.event.logical.shared.CloseHandler;
++import com.google.gwt.user.client.DOM;
++import com.google.gwt.user.client.rpc.AsyncCallback;
++import com.google.gwt.user.client.ui.Button;
++import com.google.gwt.user.client.ui.FlowPanel;
++import com.google.gwt.user.client.ui.PopupPanel;
++import com.google.gwtexpui.globalkey.client.GlobalKey;
++import com.google.gwtexpui.globalkey.client.NpTextArea;
++import com.google.gwtexpui.user.client.AutoCenterDialogBox;
++
++public abstract class CommentedChangeActionDialog extends AutoCenterDialogBox implements CloseHandler<PopupPanel>{
++  private final FlowPanel panel;
++  private final NpTextArea message;
++  private final Button sendButton;
++  private final Button cancelButton;
++  private final PatchSet.Id psid;
++  private final AsyncCallback<ChangeDetail> callback;
++
++  private boolean buttonClicked = false;
++
++  public CommentedChangeActionDialog(final PatchSet.Id psi,
++      final AsyncCallback<ChangeDetail> callback, final String dialogTitle,
++      final String dialogHeading, final String buttonSend,
++      final String buttonCancel, final String dialogStyle,
++      final String messageStyle) {
++    super(/* auto hide */false, /* modal */true);
++    setGlassEnabled(true);
++
++    psid = psi;
++    this.callback = callback;
++    addStyleName(dialogStyle);
++    setText(dialogTitle);
++
++    panel = new FlowPanel();
++    add(panel);
++
++    panel.add(new SmallHeading(dialogHeading));
++
++    final FlowPanel mwrap = new FlowPanel();
++    mwrap.setStyleName(messageStyle);
++    panel.add(mwrap);
++
++    message = new NpTextArea();
++    message.setCharacterWidth(60);
++    message.setVisibleLines(10);
++    DOM.setElementPropertyBoolean(message.getElement(), "spellcheck", true);
++    mwrap.add(message);
++
++    final FlowPanel buttonPanel = new FlowPanel();
++    panel.add(buttonPanel);
++    sendButton = new Button(buttonSend);
++    sendButton.addClickHandler(new ClickHandler() {
++      @Override
++      public void onClick(final ClickEvent event) {
++        sendButton.setEnabled(false);
++        cancelButton.setEnabled(false);
++        onSend();
++      }
++    });
++    buttonPanel.add(sendButton);
++
++    cancelButton = new Button(buttonCancel);
++    DOM.setStyleAttribute(cancelButton.getElement(), "marginLeft", "300px");
++    cancelButton.addClickHandler(new ClickHandler() {
++      @Override
++      public void onClick(final ClickEvent event) {
++        buttonClicked = true;
++        if (callback != null) {
++          callback.onFailure(null);
++        }
++        hide();
++      }
++    });
++    buttonPanel.add(cancelButton);
++
++    addCloseHandler(this);
++  }
++
++  @Override
++  public void center() {
++    super.center();
++    GlobalKey.dialog(this);
++    message.setFocus(true);
++  }
++
++  @Override
++  public void onClose(CloseEvent<PopupPanel> event) {
++    if (!buttonClicked) {
++      // the dialog was closed without one of the buttons being pressed
++      // e.g. the user pressed ESC to close the dialog
++      if (callback != null) {
++        callback.onFailure(null);
++      }
++    }
++  }
++
++  public abstract void onSend();
++
++  public PatchSet.Id getPatchSetId() {
++    return psid;
++  }
++
++  public String getMessageText() {
++    return message.getText().trim();
++  }
++
++  public GerritCallback<ChangeDetail> createCallback() {
++    return new GerritCallback<ChangeDetail>(){
++      @Override
++      public void onSuccess(ChangeDetail result) {
++        buttonClicked = true;
++        if (callback != null) {
++          callback.onSuccess(result);
++        }
++        hide();
++      }
++
++      @Override
++      public void onFailure(Throwable caught) {
++        sendButton.setEnabled(true);
++        cancelButton.setEnabled(true);
++        super.onFailure(caught);
++      }
++    };
++  }
++}
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchSetComplexDisclosurePanel.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchSetComplexDisclosurePanel.java
+index 2c62565..e41d572 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchSetComplexDisclosurePanel.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/PatchSetComplexDisclosurePanel.java
+@@ -401,16 +401,14 @@ class PatchSetComplexDisclosurePanel extends ComplexDisclosurePanel implements O
+         @Override
+         public void onClick(final ClickEvent event) {
+           b.setEnabled(false);
+-          new AbandonChangeDialog(patchSet.getId(),
+-              new AsyncCallback<ChangeDetail>() {
+-                public void onSuccess(ChangeDetail result) {
+-                  changeScreen.update(result);
+-                }
+-
+-                public void onFailure(Throwable caught) {
+-                  b.setEnabled(true);
++          new CommentedChangeActionDialog(patchSet.getId(), createCommentedCallback(b),
++              Util.C.abandonChangeTitle(), Util.C.headingAbandonMessage(),
++              Util.C.buttonAbandonChangeSend(), Util.C.buttonAbandonChangeCancel(),
++              Gerrit.RESOURCES.css().abandonChangeDialog(), Gerrit.RESOURCES.css().abandonMessage()) {
++                public void onSend() {
++                  Util.MANAGE_SVC.abandonChange(getPatchSetId() , getMessageText(), createCallback());
+                 }
+-              }).center();
++              }.center();
+         }
+       });
+       actionsPanel.add(b);
+@@ -422,16 +420,14 @@ class PatchSetComplexDisclosurePanel extends ComplexDisclosurePanel implements O
+         @Override
+         public void onClick(final ClickEvent event) {
+           b.setEnabled(false);
+-          new RestoreChangeDialog(patchSet.getId(),
+-              new AsyncCallback<ChangeDetail>() {
+-                public void onSuccess(ChangeDetail result) {
+-                  changeScreen.update(result);
++          new CommentedChangeActionDialog(patchSet.getId(), createCommentedCallback(b),
++              Util.C.restoreChangeTitle(), Util.C.headingRestoreMessage(),
++              Util.C.buttonRestoreChangeSend(), Util.C.buttonRestoreChangeCancel(),
++              Gerrit.RESOURCES.css().abandonChangeDialog(), Gerrit.RESOURCES.css().abandonMessage()) {
++                public void onSend() {
++                  Util.MANAGE_SVC.restoreChange(getPatchSetId(), getMessageText(), createCallback());
+                 }
+-
+-                public void onFailure(Throwable caught) {
+-                  b.setEnabled(true);
+-                }
+-              }).center();
++              }.center();
+         }
+       });
+       actionsPanel.add(b);
+@@ -541,4 +537,16 @@ class PatchSetComplexDisclosurePanel extends ComplexDisclosurePanel implements O
+       patchTable.setActive(active);
+     }
+   }
++
++  private AsyncCallback<ChangeDetail> createCommentedCallback(final Button b) {
++    return new AsyncCallback<ChangeDetail>() {
++      public void onSuccess(ChangeDetail result) {
++        changeScreen.update(result);
++      }
++
++      public void onFailure(Throwable caught) {
++        b.setEnabled(true);
++      }
++    };
++  }
+ }
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/RestoreChangeDialog.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/RestoreChangeDialog.java
+deleted file mode 100644
+index 69d7c1f..0000000
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/changes/RestoreChangeDialog.java
++++ /dev/null
+@@ -1,135 +0,0 @@
+-// Copyright (C) 2009 The Android Open Source Project
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-package com.google.gerrit.client.changes;
+-
+-import com.google.gerrit.client.Gerrit;
+-import com.google.gerrit.client.rpc.GerritCallback;
+-import com.google.gerrit.client.ui.SmallHeading;
+-import com.google.gerrit.common.data.ChangeDetail;
+-import com.google.gerrit.reviewdb.PatchSet;
+-import com.google.gwt.event.dom.client.ClickEvent;
+-import com.google.gwt.event.dom.client.ClickHandler;
+-import com.google.gwt.event.logical.shared.CloseEvent;
+-import com.google.gwt.event.logical.shared.CloseHandler;
+-import com.google.gwt.user.client.DOM;
+-import com.google.gwt.user.client.rpc.AsyncCallback;
+-import com.google.gwt.user.client.ui.Button;
+-import com.google.gwt.user.client.ui.FlowPanel;
+-import com.google.gwt.user.client.ui.PopupPanel;
+-import com.google.gwtexpui.globalkey.client.GlobalKey;
+-import com.google.gwtexpui.globalkey.client.NpTextArea;
+-import com.google.gwtexpui.user.client.AutoCenterDialogBox;
+-
+-public class RestoreChangeDialog extends AutoCenterDialogBox implements CloseHandler<PopupPanel>{
+-  private final FlowPanel panel;
+-  private final NpTextArea message;
+-  private final Button sendButton;
+-  private final Button cancelButton;
+-  private final PatchSet.Id psid;
+-  private final AsyncCallback<ChangeDetail> callback;
+-
+-  private boolean buttonClicked = false;
+-
+-  public RestoreChangeDialog(final PatchSet.Id psi,
+-      final AsyncCallback<ChangeDetail> callback) {
+-    super(/* auto hide */false, /* modal */true);
+-    setGlassEnabled(true);
+-
+-    psid = psi;
+-    this.callback = callback;
+-    addStyleName(Gerrit.RESOURCES.css().abandonChangeDialog());
+-    setText(Util.C.restoreChangeTitle());
+-
+-    panel = new FlowPanel();
+-    add(panel);
+-
+-    panel.add(new SmallHeading(Util.C.headingRestoreMessage()));
+-
+-    final FlowPanel mwrap = new FlowPanel();
+-    mwrap.setStyleName(Gerrit.RESOURCES.css().abandonMessage());
+-    panel.add(mwrap);
+-
+-    message = new NpTextArea();
+-    message.setCharacterWidth(60);
+-    message.setVisibleLines(10);
+-    DOM.setElementPropertyBoolean(message.getElement(), "spellcheck", true);
+-    mwrap.add(message);
+-
+-    final FlowPanel buttonPanel = new FlowPanel();
+-    panel.add(buttonPanel);
+-
+-    sendButton = new Button(Util.C.buttonRestoreChangeSend());
+-    sendButton.addClickHandler(new ClickHandler() {
+-      @Override
+-      public void onClick(final ClickEvent event) {
+-        sendButton.setEnabled(false);
+-        cancelButton.setEnabled(false);
+-        Util.MANAGE_SVC.restoreChange(psid, message.getText().trim(),
+-            new GerritCallback<ChangeDetail>() {
+-              @Override
+-              public void onSuccess(ChangeDetail result) {
+-                buttonClicked = true;
+-                if (callback != null) {
+-                  callback.onSuccess(result);
+-                }
+-                hide();
+-              }
+-
+-              @Override
+-              public void onFailure(Throwable caught) {
+-                sendButton.setEnabled(true);
+-                cancelButton.setEnabled(true);
+-                super.onFailure(caught);
+-              }
+-            });
+-      }
+-    });
+-    buttonPanel.add(sendButton);
+-
+-    cancelButton = new Button(Util.C.buttonRestoreChangeCancel());
+-    DOM.setStyleAttribute(cancelButton.getElement(), "marginLeft", "300px");
+-    cancelButton.addClickHandler(new ClickHandler() {
+-      @Override
+-      public void onClick(final ClickEvent event) {
+-        buttonClicked = true;
+-        if (callback != null) {
+-          callback.onFailure(null);
+-        }
+-        hide();
+-      }
+-    });
+-    buttonPanel.add(cancelButton);
+-
+-    addCloseHandler(this);
+-  }
+-
+-  @Override
+-  public void center() {
+-    super.center();
+-    GlobalKey.dialog(this);
+-    message.setFocus(true);
+-  }
+-
+-  @Override
+-  public void onClose(CloseEvent<PopupPanel> event) {
+-    if (!buttonClicked) {
+-      // the dialog was closed without one of the buttons being pressed
+-      // e.g. the user pressed ESC to close the dialog
+-      if (callback != null) {
+-        callback.onFailure(null);
+-      }
+-    }
+-  }
+-}
+-- 
+1.7.4.1
+
