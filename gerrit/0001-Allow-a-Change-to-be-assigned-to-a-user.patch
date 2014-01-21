@@ -1,0 +1,167 @@
+From fc4ab9fdfa185552c2f665b2fc6462b4b24bda9a Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Fri, 2 Dec 2011 13:15:40 -0700
+Subject: [PATCH] Allow a Change to be assigned to a user.
+
+Add an assigned field to a Change which can hold a
+user id.  Also add a utility method to assign a
+user to a Change, and record the assignment in a
+comment on the Change.  This change does not actually
+make use of the assign method, services to do so
+should be built upon this change.
+
+Change-Id: Idf47843c09375b6b4dccd95eb9e2185590e6082b
+---
+ .../java/com/google/gerrit/reviewdb/Change.java    |   11 +++++
+ .../java/com/google/gerrit/server/ChangeUtil.java  |   42 ++++++++++++++++++++
+ .../google/gerrit/server/schema/SchemaVersion.java |    2 +-
+ .../com/google/gerrit/server/schema/Schema_60.java |    2 +-
+ .../com/google/gerrit/server/schema/Schema_61.java |   25 ++++++++++++
+ 5 files changed, 80 insertions(+), 2 deletions(-)
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_61.java
+
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Change.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Change.java
+index fc544fa..c32d53a 100644
+--- a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Change.java
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Change.java
+@@ -386,6 +386,9 @@ public final class Change {
+   @Column(id = 16)
+   protected boolean mergeable;
+ 
++  @Column(id = 17, notNull = false, name = "assigned_account_id")
++  protected Account.Id assigned;
++
+   protected Change() {
+   }
+ 
+@@ -523,4 +526,12 @@ public final class Change {
+   public void setMergeable(boolean mergeable) {
+     this.mergeable = mergeable;
+   }
++
++  public Account.Id getAssigned() {
++    return assigned;
++  }
++
++  public void setAssigned(Account.Id assigned) {
++    this.assigned = assigned;
++  }
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+index 7aca649..7ad22a3 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+@@ -17,6 +17,7 @@ package com.google.gerrit.server;
+ import static com.google.gerrit.reviewdb.ApprovalCategory.SUBMIT;
+ 
+ import com.google.gerrit.common.ChangeHookRunner;
++import com.google.gerrit.reviewdb.Account;
+ import com.google.gerrit.reviewdb.Change;
+ import com.google.gerrit.reviewdb.ChangeMessage;
+ import com.google.gerrit.reviewdb.PatchSet;
+@@ -531,6 +532,47 @@ public class ChangeUtil {
+     db.patchSets().delete(Collections.singleton(patch));
+   }
+ 
++  public static void assign(final Change.Id changeId, final IdentifiedUser user,
++      final Account.Id toId, final String message, final ReviewDb db)
++      throws NoSuchChangeException, InvalidChangeOperationException,
++      OrmException {
++    final ChangeMessage cmsg =
++        new ChangeMessage(new ChangeMessage.Key(changeId, ChangeUtil
++            .messageUUID(db)), user.getAccountId());
++
++    final StringBuilder msgBuf = new StringBuilder();
++    if (toId != null) {
++      msgBuf.append("Assigned Change to " + ChangeMessage.formatUser(toId));
++    } else {
++      msgBuf.append("Unassigned Change");
++    }
++
++    if (message != null && message.length() > 0) {
++      msgBuf.append("\n\n");
++      msgBuf.append(message);
++    }
++    cmsg.setMessage(msgBuf.toString());
++
++    final Change updatedChange = db.changes().atomicUpdate(changeId,
++        new AtomicUpdate<Change>() {
++      @Override
++      public Change update(Change change) {
++        if (change.getStatus().isOpen()) {
++          change.setAssigned(toId);
++          ChangeUtil.updated(change);
++          return change;
++        } else {
++          return null;
++        }
++      }
++    });
++
++    if (updatedChange == null) {
++      throw new InvalidChangeOperationException("Change is no longer open");
++    }
++    db.changeMessages().insert(Collections.singleton(cmsg));
++  }
++
+   private static <T extends ReplyToChangeSender> void updatedChange(
+       final ReviewDb db, final IdentifiedUser user, final Change change,
+       final ChangeMessage cmsg, ReplyToChangeSender.Factory<T> senderFactory,
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java b/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
+index de3c8e6..d7ae35c 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
+@@ -32,7 +32,7 @@ import java.util.List;
+ /** A version of the database schema. */
+ public abstract class SchemaVersion {
+   /** The current schema version. */
+-  private static final Class<? extends SchemaVersion> C = Schema_60.class;
++  private static final Class<? extends SchemaVersion> C = Schema_61.class;
+ 
+   public static class Module extends AbstractModule {
+     @Override
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_60.java b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_60.java
+index eec7256..3c5e99a 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_60.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_60.java
+@@ -68,4 +68,4 @@ public class Schema_60 extends SchemaVersion {
+       db.changeMessages().update(updates);
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_61.java b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_61.java
+new file mode 100644
+index 0000000..3d2106e
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_61.java
+@@ -0,0 +1,25 @@
++// Copyright (C) 2012 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.server.schema;
++
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++public class Schema_61 extends SchemaVersion {
++  @Inject
++  Schema_61(Provider<Schema_60> prior) {
++    super(prior);
++  }
++}
+-- 
+1.7.8
+

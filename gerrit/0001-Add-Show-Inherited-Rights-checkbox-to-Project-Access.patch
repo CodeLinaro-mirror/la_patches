@@ -1,0 +1,100 @@
+From 267d405ba98d4ec0f4a29b8bc93a3bc2f15480f1 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Mon, 21 Mar 2011 14:25:23 -0600
+Subject: [PATCH] Add "Show Inherited Rights" checkbox to Project Access Screen
+
+The new "Show Inherited Rights" checkbox on the Project
+Access Screen makes it possible to hide any inherited
+access rights, to only display access rights specific
+to the current project.
+
+Change-Id: Id93254d7f139f7ce53fc92c535a05ba60f72284e
+---
+ .../google/gerrit/client/admin/AdminConstants.java |    1 +
+ .../gerrit/client/admin/AdminConstants.properties  |    1 +
+ .../gerrit/client/admin/ProjectAccessScreen.java   |   30 +++++++++++++++++--
+ 3 files changed, 28 insertions(+), 4 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.java
+index bb82678..e2af6ee 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.java
+@@ -48,6 +48,7 @@ public interface AdminConstants extends Constants {
+   String headingCreateGroup();
+   String headingAccessRights();
+   String headingAgreements();
++  String headingShowInherited();
+ 
+   String projectSubmitType_FAST_FORWARD_ONLY();
+   String projectSubmitType_MERGE_ALWAYS();
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.properties b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.properties
+index 1b31d7b..49060bd 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.properties
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.properties
+@@ -29,6 +29,7 @@ headingExternalGroup = Selected External Group
+ headingCreateGroup = Create New Group
+ headingAccessRights = Access Rights
+ headingAgreements = Contributor Agreements
++headingShowInherited = Show Inherited Rights
+ 
+ projectSubmitType_FAST_FORWARD_ONLY = Fast Forward Only
+ projectSubmitType_MERGE_IF_NECESSARY = Merge If Necessary
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
+index 547e81f..0e117f1 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
+@@ -35,6 +35,7 @@ import com.google.gwt.event.logical.shared.ValueChangeEvent;
+ import com.google.gwt.event.logical.shared.ValueChangeHandler;
+ import com.google.gwt.user.client.ui.Button;
+ import com.google.gwt.user.client.ui.CheckBox;
++import com.google.gwt.user.client.ui.Grid;
+ import com.google.gwt.user.client.ui.Panel;
+ import com.google.gwt.user.client.ui.VerticalPanel;
+ import com.google.gwt.user.client.ui.FlexTable.FlexCellFormatter;
+@@ -82,11 +83,24 @@ public class ProjectAccessScreen extends ProjectScreen {
+   }
+ 
+   private void initParent() {
+-    parentPanel = new VerticalPanel();
+-    parentPanel.add(new SmallHeading(Util.C.headingParentProjectName()));
+-
+     parentName = new Hyperlink("", "");
+-    parentPanel.add(parentName);
++
++    final CheckBox show = new CheckBox();
++    show.setChecked(true);
++    show.addClickHandler(new ClickHandler() {
++      public void onClick(ClickEvent event) {
++        rights.showInherited(show.isChecked());
++      }
++    });
++
++    Grid g = new Grid(2, 3);
++    g.setWidget(0, 0, new SmallHeading(Util.C.headingParentProjectName()));
++    g.setWidget(1, 0, parentName);
++    g.setWidget(1, 1, show);
++    g.setText(1, 2, Util.C.headingShowInherited());
++
++    parentPanel = new VerticalPanel();
++    parentPanel.add(g);
+     add(parentPanel);
+   }
+ 
+@@ -274,6 +288,14 @@ public class ProjectAccessScreen extends ProjectScreen {
+       setRowItem(row, right);
+     }
+ 
++    public void showInherited(boolean visible) {
++      for (int r = 0; r < table.getRowCount(); r++) {
++        if (table.getWidget(r, 2) instanceof Hyperlink) {
++          table.getRowFormatter().setVisible(r, visible);
++        }
++      }
++    }
++
+     private void formatValue(final SafeHtmlBuilder m, final short v,
+         final ApprovalCategoryValue e) {
+       m.openSpan();
+-- 
+1.7.4.1
+

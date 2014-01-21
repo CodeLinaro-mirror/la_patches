@@ -1,0 +1,105 @@
+From 232e40a4936df0e4c26a2343d8e955a79d58aeee Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Tue, 31 Jan 2012 19:20:21 -0700
+Subject: [PATCH] Factor out approvals change status syncing
+
+The Change Status is cached in the approvals table
+for performance reasons, so the approvals must be
+updated whenever the change status changes.  This
+update is done in a few places and is likely not
+ever obvious why the update is being done.  Make
+a function to do the update which makes the code
+self documenting all while sharing the
+implementation.  Create an new ApprovalsUtil class
+for this function which can be a good place for
+more approval manipulating functions in the future.
+
+Change-Id: If92f3757963048a141003304f2c96036c915ab89
+---
+ .../com/google/gerrit/server/ApprovalsUtil.java    |   36 ++++++++++++++++++++
+ .../java/com/google/gerrit/server/ChangeUtil.java  |    7 +---
+ .../google/gerrit/server/git/ReceiveCommits.java   |    7 +---
+ 3 files changed, 38 insertions(+), 12 deletions(-)
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/ApprovalsUtil.java
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/ApprovalsUtil.java b/gerrit-server/src/main/java/com/google/gerrit/server/ApprovalsUtil.java
+new file mode 100644
+index 0000000..c5e1bfb
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/ApprovalsUtil.java
+@@ -0,0 +1,36 @@
++// Copyright (C) 2009 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.server;
++
++import com.google.gerrit.reviewdb.Change;
++import com.google.gerrit.reviewdb.PatchSetApproval;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gwtorm.client.OrmException;
++
++import java.util.List;
++
++public class ApprovalsUtil {
++  /* Resync the change status which is cached in the approvals table for
++     performance reasons*/
++  public static void syncChangeStatus(final ReviewDb db, final Change change)
++      throws OrmException {
++    final List<PatchSetApproval> approvals =
++        db.patchSetApprovals().byChange(change.getId()).toList();
++    for (PatchSetApproval a : approvals) {
++      a.cache(change);
++    }
++    db.patchSetApprovals().update(approvals);
++  }
++}
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+index 3ff336e..b4ce6f5 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+@@ -403,12 +403,7 @@ public class ChangeUtil {
+     }
+     db.changeMessages().insert(Collections.singleton(cmsg));
+ 
+-    final List<PatchSetApproval> approvals =
+-        db.patchSetApprovals().byChange(change.getId()).toList();
+-    for (PatchSetApproval a : approvals) {
+-      a.cache(change);
+-    }
+-    db.patchSetApprovals().update(approvals);
++    ApprovalsUtil.syncChangeStatus(db, change);
+ 
+     // Email the reviewers
+     final ReplyToChangeSender cm = senderFactory.create(change);
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/git/ReceiveCommits.java b/gerrit-server/src/main/java/com/google/gerrit/server/git/ReceiveCommits.java
+index 3c9e4da..b60c8ac 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/git/ReceiveCommits.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/git/ReceiveCommits.java
+@@ -1830,12 +1830,7 @@ public class ReceiveCommits implements PreReceiveHook, PostReceiveHook {
+     change.setStatus(Change.Status.MERGED);
+     ChangeUtil.updated(change);
+ 
+-    final List<PatchSetApproval> approvals =
+-        db.patchSetApprovals().byChange(change.getId()).toList();
+-    for (PatchSetApproval a : approvals) {
+-      a.cache(change);
+-    }
+-    db.patchSetApprovals().update(approvals);
++    ApprovalsUtil.syncChangeStatus(db, change);
+ 
+     final StringBuilder msgBuf = new StringBuilder();
+     msgBuf.append("Change has been successfully pushed");
+-- 
+1.7.8
+

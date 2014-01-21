@@ -1,0 +1,54 @@
+From df89f998d5c0fa5802a70482d4582b6313a018e4 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Thu, 22 Jul 2010 14:20:57 -0600
+Subject: [PATCH] Don't bother setting Message-ID to a random string.
+
+If the Message-ID is not set to a specific regenerable string,
+don't bother to set it since the smtp server will add the
+header for us.
+---
+ .../google/gerrit/server/mail/OutgoingEmail.java   |   14 --------------
+ 1 files changed, 0 insertions(+), 14 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
+index bfedbaf..8f34d9e 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
+@@ -52,7 +52,6 @@ import java.util.Iterator;
+ import java.util.LinkedHashMap;
+ import java.util.List;
+ import java.util.Map;
+-import java.util.Random;
+ import java.util.Set;
+ import java.util.TreeSet;
+ 
+@@ -63,7 +62,6 @@ public abstract class OutgoingEmail {
+   private static final String HDR_TO = "To";
+   private static final String HDR_CC = "CC";
+ 
+-  private static final Random RNG = new Random();
+   protected String messageClass;
+   private final HashSet<Account.Id> rcptTo = new HashSet<Account.Id>();
+   private final Map<String, EmailHeader> headers;
+@@ -131,18 +129,6 @@ public abstract class OutgoingEmail {
+         }
+       }
+ 
+-      if (headers.get("Message-ID").isEmpty()) {
+-        final StringBuilder rndid = new StringBuilder();
+-        rndid.append("<");
+-        rndid.append(System.currentTimeMillis());
+-        rndid.append("-");
+-        rndid.append(Integer.toString(RNG.nextInt(999999), 36));
+-        rndid.append("@");
+-        rndid.append(SystemReader.getInstance().getHostname());
+-        rndid.append(">");
+-        setHeader("Message-ID", rndid.toString());
+-      }
+-
+       args.emailSender.send(smtpFromAddress, smtpRcptTo, headers, body.toString());
+     }
+   }
+-- 
+1.7.1.1
+

@@ -1,0 +1,598 @@
+From a2c4ffbf526ae5f1b4ee7d44400a299042988077 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Thu, 3 Feb 2011 17:47:05 -0700
+Subject: [PATCH 1/7] Add a Search db object for saving custom searches
+
+The new Search db object allows 4 different types of
+saved searches:  user, group, project and site.  All
+four types are saved in the same db table.
+
+Change-Id: I2fd0f84f689d36323b0228c1f1ad50838efc40ce
+---
+ .../java/com/google/gerrit/reviewdb/Owner.java     |  291 ++++++++++++++++++++
+ .../java/com/google/gerrit/reviewdb/ReviewDb.java  |    3 +
+ .../java/com/google/gerrit/reviewdb/Search.java    |  161 +++++++++++
+ .../com/google/gerrit/reviewdb/SearchAccess.java   |   44 +++
+ .../google/gerrit/server/schema/SchemaVersion.java |    2 +-
+ .../com/google/gerrit/server/schema/Schema_48.java |   25 ++
+ 6 files changed, 525 insertions(+), 1 deletions(-)
+ create mode 100644 gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Owner.java
+ create mode 100644 gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Search.java
+ create mode 100644 gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/SearchAccess.java
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_48.java
+
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Owner.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Owner.java
+new file mode 100644
+index 0000000..c98c5e1
+--- /dev/null
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Owner.java
+@@ -0,0 +1,291 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.reviewdb;
++
++import com.google.gwtorm.client.Column;
++import com.google.gwtorm.client.StringKey;
++
++public class Owner {
++
++  /** unique identification of this Owner. */
++  public static class Id extends StringKey<com.google.gwtorm.client.Key<?>> {
++    private static final long serialVersionUID = 1L;
++
++    @Column(id = 1)
++    protected char type;
++
++    @Column(id = 2)
++    protected String id = "";
++
++    public Id(final Type type, final String id) {
++      setType(type);
++      set(id);
++    }
++
++    public Id(final Account.Id owner) {
++      this(Owner.Type.USER, owner.toString());
++    }
++
++    public Id(final AccountGroup.Id owner) {
++      this(Owner.Type.GROUP, owner.toString());
++    }
++
++    public Id(final Project.NameKey owner) {
++      this(Owner.Type.PROJECT, owner.toString());
++    }
++
++    public Id() {
++      this(Owner.Type.SITE, "");
++    }
++
++    @Override
++    public com.google.gwtorm.client.Key<?> getParentKey() {
++      switch(getType()) {
++        case USER:    return getAccountId();
++        case GROUP:   return getAccountGroupId();
++        case PROJECT: return getProjectNameKey();
++      }
++      return null;
++    }
++
++    @Override
++    public String get() {
++      return id;
++    }
++
++    @Override
++    public void set(final String id) {
++      this.id = notNull(id);
++    }
++
++    public Type getType() {
++      return Owner.Type.forCode(type);
++    }
++
++    protected void setType(final Type type) {
++      this.type = type.getCode();
++    }
++
++    public Account.Id getAccountId() {
++      return Account.Id.parse(get());
++    }
++
++    public AccountGroup.Id getAccountGroupId() {
++      return AccountGroup.Id.parse(get());
++    }
++
++    public Project.NameKey getProjectNameKey() {
++      return Project.NameKey.parse(get());
++    }
++
++    @Override
++    public boolean equals(final Object other) {
++      if (other instanceof Id) {
++        Id id = (Id) other;
++        return getType() == id.getType() && get().equals(id.get());
++      }
++      return false;
++    }
++  }
++
++  public static enum Type {
++    USER('U', "user"),
++
++    GROUP('G', "group"),
++
++    PROJECT('P', "project"),
++
++    SITE('S', "site");
++
++    private final char code;
++    private String id;
++
++
++    private Type(final char c, final String id) {
++      code = c;
++      this.id = id;
++    }
++
++    public char getCode() {
++      return code;
++    }
++
++    public String getId() {
++      return id;
++    }
++
++    public static Type forCode(final char c) {
++      for (final Type s : Type.values()) {
++        if (s.code == c) {
++          return s;
++        }
++      }
++      return null;
++    }
++
++    public static Type forId(final String id) {
++      for (final Type s : Type.values()) {
++        if (s.id.equals(id)) {
++          return s;
++        }
++      }
++      return null;
++    }
++  }
++
++  public static class OwnedKey extends StringKey<Owner.Id> {
++    private static final long serialVersionUID = 1L;
++
++    @Column(id = 1)
++    protected Owner.Id owner;
++
++    @Column(id = 2)
++    protected String name = "";
++
++    public OwnedKey() {
++      setOwnerId(new Owner.Id());
++      set("");
++    }
++
++    public OwnedKey(final Owner.Id owner, final String name) {
++      setOwnerId(owner);
++      set(name);
++    }
++
++    public OwnedKey(final Owner.Type type, final String owner, final String name) {
++      this(new Owner.Id(type, owner), name);
++    }
++
++    public OwnedKey(final Account.Id owner, final String name) {
++      this(new Owner.Id(owner), name);
++    }
++
++    public OwnedKey(final AccountGroup.Id owner, final String name) {
++      this(new Owner.Id(owner), name);
++    }
++
++    public OwnedKey(final Project.NameKey owner, final String name) {
++      this(new Owner.Id(owner), name);
++    }
++
++    public OwnedKey(final String name) { // SITE
++      this(new Owner.Id(), name);
++    }
++
++    @Override
++    public String get() {
++      return name;
++    }
++
++    @Override
++    public void set(final String name) {
++      this.name = notNull(name);
++    }
++
++    public Owner.Type getType() {
++      return owner.getType();
++    }
++
++    public String getOwner() {
++      return owner.get();
++    }
++
++    public Owner.Id getOwnerId() {
++      return owner;
++    }
++
++    public void setOwnerId(Owner.Id id) {
++      owner = id;
++    }
++
++    @Override
++    public Owner.Id getParentKey() {
++      return owner;
++    }
++
++    @Override
++    public boolean equals(final Object other) {
++      if (other instanceof OwnedKey) {
++        OwnedKey k = (OwnedKey) other;
++
++        if (name.equals(k.name)) {
++          if (getOwner() == null) {
++            return k.getOwner() == null;
++          }
++          return getOwner().equals(k.getOwner());
++        }
++      }
++      return false;
++    }
++
++    public boolean isValid() {
++      if (getType() == Owner.Type.SITE) {
++        return isValidName(name);
++      }
++      return getParentKey() != null && isValidName(name);
++    }
++
++    public static boolean isValidName(String name) {
++      return name != null && name.matches("[-_A-z0-9]+");
++    }
++  }
++
++  private Id id;
++
++  protected Owner() {  // Do not use, only for JSON
++  }
++
++  protected Owner(Type type) {
++    this(new Id(type, null));
++  }
++
++  protected Owner(Type type, String idStr) {
++    this(new Id(type, idStr));
++  }
++
++  public Owner(Id id) {
++    setId(id);
++  }
++
++  public Id getId() {
++    return id;
++  }
++
++  protected void setId(Id id) {
++    id.getType(); // throw an excpetion if id is null!
++    this.id = id;
++  }
++
++  public Type getType() {
++    return getId().getType();
++  }
++
++  public static String notNull(String s) {
++    return s == null ? "" : s;
++  }
++}
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ReviewDb.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ReviewDb.java
+index f9b3cfa..ea47447 100644
+--- a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ReviewDb.java
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ReviewDb.java
+@@ -112,6 +112,9 @@ public interface ReviewDb extends Schema {
+   RefRightAccess refRights();
+ 
+   @Relation
++  SearchAccess searches();
++
++  @Relation
+   TrackingIdAccess trackingIds();
+ 
+   /** Create the next unique id for an {@link Account}. */
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Search.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Search.java
+new file mode 100644
+index 0000000..56f3c89
+--- /dev/null
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Search.java
+@@ -0,0 +1,161 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.reviewdb;
++
++import com.google.gwtorm.client.Column;
++import com.google.gwtorm.client.StringKey;
++
++public final class Search {
++
++  /** unique identification of this Search. */
++  public static class Key extends Owner.OwnedKey {
++    private static final long serialVersionUID = 1L;
++
++    protected Key() {
++      super();
++    }
++
++    public Key(final Owner.Id owner, final String name) {
++      super(owner, name);
++    }
++
++    public Key(final Owner.Type type, final String owner, final String name) {
++      super(type, owner, name);
++    }
++
++    public Key(final Account.Id owner, final String name) {
++      super(owner, name);
++    }
++
++    public Key(final AccountGroup.Id owner, final String name) {
++      super(owner, name);
++    }
++
++    public Key(final Project.NameKey owner, final String name) {
++      super(owner, name);
++    }
++
++    public Key(final String name) { // SITE
++      super(name);
++    }
++  }
++
++  /** unique identifier of the search  */
++  @Column(id = 1)
++  protected Key key;
++
++  @Column(id = 2, length = Integer.MAX_VALUE, notNull = false)
++  protected String description = "";
++
++  @Column(id = 3, length = Integer.MAX_VALUE, notNull = false)
++  protected String query = "";
++
++  protected Search() {
++  }
++
++  public Search(final Key key, final String description, final String query) {
++    setKey(key);
++    setDescription(description);
++    setQuery(query);
++  }
++
++  public Search(final Key key) {
++    this(key, "", "");
++  }
++
++  public Key getKey() {
++    return key;
++  }
++
++  public void setKey(final Key key) {
++    this.key = key;
++  }
++
++  public String getName() {
++    if (getKey() == null) {
++      return "";
++    }
++    return getKey().get();
++  }
++
++  public Owner.Type getType() {
++    if (getKey() == null) {
++      return null;
++    }
++    return getKey().getType();
++  }
++
++  public String getOwner() {
++    if (getKey() == null) {
++      return "";
++    }
++    return getKey().getOwner();
++  }
++
++  public Owner.Id getOwnerId() {
++    if (getKey() == null) {
++      return null;
++    }
++    return getKey().getOwnerId();
++  }
++
++  public void setOwnerId(Owner.Id id) {
++    if (getKey() == null) {
++      setKey(new Key(id, ""));
++    } else {
++      getKey().setOwnerId(id);
++    }
++  }
++
++  public String getDescription() {
++    return description;
++  }
++
++  public void setDescription(final String d) {
++    description = notNull(d);
++  }
++
++  public String getQuery() {
++    return query;
++  }
++
++  public void setQuery(String query) {
++    this.query = notNull(query);
++  }
++
++  public boolean isValid() {
++    if (getKey() == null) {
++      return false;
++    }
++    return getKey().isValid();
++  }
++
++  public static String notNull(String s) {
++    return s == null ? "" : s;
++  }
++}
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/SearchAccess.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/SearchAccess.java
+new file mode 100644
+index 0000000..97bafbe
+--- /dev/null
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/SearchAccess.java
+@@ -0,0 +1,44 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.reviewdb;
++
++import com.google.gwtorm.client.Access;
++import com.google.gwtorm.client.OrmException;
++import com.google.gwtorm.client.PrimaryKey;
++import com.google.gwtorm.client.Query;
++import com.google.gwtorm.client.ResultSet;
++
++/** Access interface for {@link Search}. */
++public interface SearchAccess extends Access<Search, Search.Key> {
++  /** Locate a search by our locally generated identity. */
++  @PrimaryKey("key")
++  Search byKey(Search.Key key) throws OrmException;
++
++  @Query("WHERE key.owner.type = ? AND key.owner.id = ?")
++  ResultSet<Search> byType(char t, String id) throws OrmException;
++}
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java b/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
+index b7328b5..1fb5e02 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
+@@ -32,7 +32,7 @@ import java.util.List;
+ /** A version of the database schema. */
+ public abstract class SchemaVersion {
+   /** The current schema version. */
+-  private static final Class<? extends SchemaVersion> C = Schema_47.class;
++  private static final Class<? extends SchemaVersion> C = Schema_48.class;
+ 
+   public static class Module extends AbstractModule {
+     @Override
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_48.java b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_48.java
+new file mode 100644
+index 0000000..a80e664
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_48.java
+@@ -0,0 +1,25 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.server.schema;
++
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++public class Schema_48 extends SchemaVersion {
++  @Inject
++  Schema_48(Provider<Schema_47> prior) {
++    super(prior);
++  }
++}
+-- 
+1.7.4.1
+

@@ -1,0 +1,75 @@
+From 03288a31320426e4d756744b962c9e6d790d81bd Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Tue, 4 Dec 2012 11:44:03 -0700
+Subject: [PATCH] Fix Project Links
+
+The project Links were broken when they were moved to the
+top MenuBar.  The "go" worked, but the tokenHistory was
+wrong so the links didn't work when opening in separate
+tabs and it appeared wrong on mouseovers.
+
+Change-Id: Ide675eb27fa0bd697a4b0da13a389de35a6a1d1d
+---
+ .../main/java/com/google/gerrit/client/Gerrit.java |   11 +++++++----
+ .../com/google/gerrit/client/ui/LinkMenuItem.java  |    6 +++++-
+ 2 files changed, 12 insertions(+), 5 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java
+index 817892f..fc0825a 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/Gerrit.java
+@@ -33,6 +33,7 @@ import com.google.gerrit.client.ui.LinkMenuItem;
+ import com.google.gerrit.client.ui.MorphingTabPanel;
+ import com.google.gerrit.client.ui.PatchLink;
+ import com.google.gerrit.client.ui.Screen;
++import com.google.gerrit.client.ui.ScreenLoadEvent;
+ import com.google.gerrit.common.ClientVersion;
+ import com.google.gerrit.common.PageLinks;
+ import com.google.gerrit.common.auth.SignInMode;
+@@ -816,11 +817,13 @@ public class Gerrit implements EntryPoint {
+       final String panel) {
+     m.addHideableItem(new LinkMenuItem(text, "") {
+         @Override
+-        public void go() {
+-          if (projectKey != null) {
+-            display(Dispatcher.toProjectAdmin(projectKey, panel));
++        public void onScreenLoad(ScreenLoadEvent event) {
++          Screen screen = event.getScreen();
++          if (screen instanceof ProjectScreen) {
++            Project.NameKey projectKey = ((ProjectScreen)screen).getProjectKey();
++            setTargetHistoryToken(Dispatcher.toProjectAdmin(projectKey, panel));
+           }
+-          AnchorElement.as(getElement()).blur();
++          super.onScreenLoad(event);
+         }
+       });
+   }
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/LinkMenuItem.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/LinkMenuItem.java
+index 3173d72..f61d79c 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/LinkMenuItem.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/LinkMenuItem.java
+@@ -18,11 +18,12 @@ import com.google.gerrit.client.Gerrit;
+ import com.google.gwt.aria.client.Roles;
+ import com.google.gwt.dom.client.AnchorElement;
+ 
+-public class LinkMenuItem extends InlineHyperlink {
++public class LinkMenuItem extends InlineHyperlink implements ScreenLoadHandler {
+   public LinkMenuItem(final String text, final String targetHistoryToken) {
+     super(text, targetHistoryToken);
+     setStyleName(Gerrit.RESOURCES.css().menuItem());
+     Roles.getMenuitemRole().set(getElement());
++    Gerrit.EVENT_BUS.addHandler(ScreenLoadEvent.TYPE, this);
+   }
+ 
+   @Override
+@@ -30,4 +31,7 @@ public class LinkMenuItem extends InlineHyperlink {
+     super.go();
+     AnchorElement.as(getElement()).blur();
+   }
++
++  public void onScreenLoad(ScreenLoadEvent event) {
++  }
+ }
+-- 
+1.7.8
+

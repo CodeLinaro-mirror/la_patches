@@ -1,0 +1,91 @@
+From b51ea9665a628f1ee1cc922412545521c41ff793 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Wed, 27 Jul 2011 13:10:18 -0600
+Subject: [PATCH] Refactored the Parameter parsing in ParameterizedString
+
+Move the Parameter specific string parsing into that class.
+Simplify the parsing a bit: eliminate the use of NOOPs,
+and only parse the string with split and lists. Documented
+some of the expected input and output strings.
+
+Change-Id: I1092120ad78a253ddac2937822e1e4610882e499
+---
+ .../gerrit/common/data/ParameterizedString.java    |   47 ++++++++++----------
+ 1 files changed, 23 insertions(+), 24 deletions(-)
+
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/ParameterizedString.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/ParameterizedString.java
+index 68676cf..caf6760 100644
+--- a/gerrit-common/src/main/java/com/google/gerrit/common/data/ParameterizedString.java
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/ParameterizedString.java
+@@ -15,6 +15,7 @@
+ package com.google.gerrit.common.data;
+ 
+ import java.util.ArrayList;
++import java.util.Arrays;
+ import java.util.Collections;
+ import java.util.HashMap;
+ import java.util.List;
+@@ -62,28 +63,9 @@ public class ParameterizedString {
+       raw.append(pattern.substring(i, b));
+       ops.add(new Constant(pattern.substring(i, b)));
+ 
+-      String expr = pattern.substring(b + 2, e);
+-      String parameterName = "";
+-      List<Function> functions = new ArrayList<Function>();
+-      if (!expr.contains(".")) {
+-        parameterName = expr;
+-      } else {
+-        int firstDot = expr.indexOf('.');
+-        parameterName = expr.substring(0, firstDot);
+-        String actionsStr = expr.substring(firstDot + 1);
+-        String[] actions = actionsStr.split("\\.");
+-
+-        for (String action : actions) {
+-          Function function = FUNCTIONS.get(action);
+-          if (function == null) {
+-            function = NOOP;
+-          }
+-          functions.add(function);
+-        }
+-      }
++      // "${parameter[.functions...]}" -> "parameter[.functions...]"
++      final Parameter p = new Parameter(pattern.substring(b + 2, e));
+ 
+-      final Parameter p =
+-          new Parameter(parameterName, Collections.unmodifiableList(functions));
+       raw.append("{" + prs.size() + "}");
+       prs.add(p);
+       ops.add(p);
+@@ -184,9 +166,26 @@ public class ParameterizedString {
+     private final String name;
+     private final List<Function> functions;
+ 
+-    Parameter(final String name, final List<Function> functions) {
+-      this.name = name;
+-      this.functions = functions;
++    Parameter(final String parameter) {
++      // "parameter[.functions...]" -> (parameter, functions...)
++      final List<String> names = Arrays.asList(parameter.split("\\."));
++
++      final List<Function> functs = new ArrayList(names.size());
++
++      if (names.isEmpty()) {
++        name = "";
++      } else {
++        name = names.get(0);
++
++        for (String fname : names.subList(1, names.size())) {
++          final Function function = FUNCTIONS.get(fname);
++          if (function != null) {
++            functs.add(function);
++          }
++        }
++      }
++
++      functions = Collections.unmodifiableList(functs);
+     }
+ 
+     @Override
+-- 
+1.7.3.1
+

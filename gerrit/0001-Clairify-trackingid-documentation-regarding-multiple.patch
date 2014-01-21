@@ -1,0 +1,32 @@
+From 9af42eabc6a716fa0a0a441c29bb5f041e9e02ba Mon Sep 17 00:00:00 2001
+From: Kevin Degi <kdegi@codeaurora.org>
+Date: Mon, 1 Aug 2011 15:54:42 -0600
+Subject: [PATCH] Clairify trackingid documentation regarding multiple footer tags.
+
+Multiple 'footer' tags may be used in a single trackingid entity
+in the gerrit config file. This should be clear in the
+documentation.
+
+Change-Id: I65c42b46c70ae68b7e6740139e841f29e8210794
+---
+ Documentation/config-gerrit.txt |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/Documentation/config-gerrit.txt b/Documentation/config-gerrit.txt
+index b8ba2c2..0751bc6 100644
+--- a/Documentation/config-gerrit.txt
++++ b/Documentation/config-gerrit.txt
+@@ -1957,7 +1957,9 @@ bug:<tracking id>.
+ [[trackingid.name.footer]]trackingid.<name>.footer::
+ +
+ A prefix tag that identify the footer line to parse for tracking ids.
+-Several trakingid entries can have the same footer tag.
++Several trackingid entries can have the same footer tag. A single
++trackingid entry can have multiple footer tags. If multiple footer
++tags are specified, each tag will be parsed separately.
+ (the trailing ":" is optional)
+ 
+ [[trackingid.name.match]]trackingid.<name>.match::
+-- 
+1.7.4.1
+

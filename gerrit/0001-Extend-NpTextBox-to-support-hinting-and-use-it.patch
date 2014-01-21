@@ -1,0 +1,603 @@
+From 5b030adcbd13d841ea08f5ce07a4813aa620fefe Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Fri, 20 Aug 2010 13:50:55 -0600
+Subject: [PATCH] Extend NpTextBox to support hinting and use it.
+
+Create a new class: HintTextBox. This class extends NpTextBox
+and can display a hint text when the text field would be
+blank.  This class will keep track of whether the hint is
+currently being displayed or not and set the style to
+hintStyleName if the hint is currently displayed.  This class
+will also modify the getText() method to never return the
+hintText unless a user enters this text manually.  Use this
+new class everywhere where hinting was previously implemented
+manually.
+
+Change-Id: Ie4c0d891a2045e292b68139c956713127d92d0be
+---
+ .../java/com/google/gerrit/client/SearchPanel.java |   37 +-----
+ .../client/account/MyWatchedProjectsScreen.java    |   57 ++-------
+ .../gerrit/client/admin/ProjectAccessScreen.java   |   35 ++----
+ .../gerrit/client/admin/ProjectBranchesScreen.java |   58 ++-------
+ .../com/google/gerrit/client/ui/AddMemberBox.java  |   33 +----
+ .../com/google/gerrit/client/ui/HintTextBox.java   |  130 ++++++++++++++++++++
+ 6 files changed, 173 insertions(+), 177 deletions(-)
+ create mode 100644 gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/HintTextBox.java
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/SearchPanel.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/SearchPanel.java
+index 2d3d2e8..7f75b7e 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/SearchPanel.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/SearchPanel.java
+@@ -15,6 +15,7 @@
+ package com.google.gerrit.client;
+ 
+ import com.google.gerrit.client.changes.QueryScreen;
++import com.google.gerrit.client.ui.HintTextBox;
+ import com.google.gerrit.common.PageLinks;
+ import com.google.gerrit.reviewdb.Change;
+ import com.google.gwt.event.dom.client.BlurEvent;
+@@ -35,7 +36,7 @@ import com.google.gwtexpui.globalkey.client.KeyCommand;
+ import com.google.gwtexpui.globalkey.client.NpTextBox;
+ 
+ class SearchPanel extends Composite {
+-  private final NpTextBox searchBox;
++  private final HintTextBox searchBox;
+   private HandlerRegistration regFocus;
+ 
+   SearchPanel() {
+@@ -43,28 +44,10 @@ class SearchPanel extends Composite {
+     initWidget(body);
+     setStyleName(Gerrit.RESOURCES.css().searchPanel());
+ 
+-    searchBox = new NpTextBox();
++    searchBox = new HintTextBox();
+     searchBox.setVisibleLength(70);
+-    searchBox.setText(Gerrit.C.searchHint());
+-    searchBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-    searchBox.addFocusHandler(new FocusHandler() {
+-      @Override
+-      public void onFocus(FocusEvent event) {
+-        if (Gerrit.C.searchHint().equals(searchBox.getText())) {
+-          searchBox.setText("");
+-          searchBox.removeStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-        }
+-      }
+-    });
+-    searchBox.addBlurHandler(new BlurHandler() {
+-      @Override
+-      public void onBlur(BlurEvent event) {
+-        if ("".equals(searchBox.getText())) {
+-          searchBox.setText(Gerrit.C.searchHint());
+-          searchBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-        }
+-      }
+-    });
++    searchBox.setHintText(Gerrit.C.searchHint());
++    searchBox.setHintStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+     searchBox.addKeyPressHandler(new KeyPressHandler() {
+       @Override
+       public void onKeyPress(final KeyPressEvent event) {
+@@ -93,13 +76,7 @@ class SearchPanel extends Composite {
+   }
+ 
+   void setText(final String query) {
+-    if (query == null || query.equals("")) {
+-      searchBox.setText(Gerrit.C.searchHint());
+-      searchBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-    } else {
+-      searchBox.setText(query);
+-      searchBox.removeStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-    }
++    searchBox.setText(query);
+   }
+ 
+   @Override
+@@ -129,7 +106,7 @@ class SearchPanel extends Composite {
+ 
+   private void doSearch() {
+     final String query = searchBox.getText().trim();
+-    if (query.length() == 0 || Gerrit.C.searchHint().equals(query)) {
++    if ("".equals(query)) {
+       return;
+     }
+ 
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/account/MyWatchedProjectsScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/account/MyWatchedProjectsScreen.java
+index 28099bf..861152c 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/account/MyWatchedProjectsScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/account/MyWatchedProjectsScreen.java
+@@ -18,6 +18,7 @@ import com.google.gerrit.client.Gerrit;
+ import com.google.gerrit.client.rpc.GerritCallback;
+ import com.google.gerrit.client.rpc.ScreenLoadCallback;
+ import com.google.gerrit.client.ui.FancyFlexTable;
++import com.google.gerrit.client.ui.HintTextBox;
+ import com.google.gerrit.client.ui.ProjectLink;
+ import com.google.gerrit.client.ui.ProjectNameSuggestOracle;
+ import com.google.gerrit.common.data.AccountProjectWatchInfo;
+@@ -44,7 +45,6 @@ import com.google.gwt.user.client.ui.SuggestBox;
+ import com.google.gwt.user.client.ui.FlexTable.FlexCellFormatter;
+ import com.google.gwt.user.client.ui.HTMLTable.CellFormatter;
+ import com.google.gwt.user.client.ui.SuggestOracle.Suggestion;
+-import com.google.gwtexpui.globalkey.client.NpTextBox;
+ import com.google.gwtjsonrpc.client.VoidResult;
+ 
+ import java.util.HashSet;
+@@ -54,9 +54,9 @@ public class MyWatchedProjectsScreen extends SettingsScreen {
+   private WatchTable watches;
+ 
+   private Button addNew;
+-  private NpTextBox nameBox;
++  private HintTextBox nameBox;
+   private SuggestBox nameTxt;
+-  private NpTextBox filterTxt;
++  private HintTextBox filterTxt;
+   private Button delSel;
+   private boolean submitOnSelection;
+ 
+@@ -65,29 +65,11 @@ public class MyWatchedProjectsScreen extends SettingsScreen {
+     super.onInitUI();
+ 
+     {
+-      nameBox = new NpTextBox();
++      nameBox = new HintTextBox();
+       nameTxt = new SuggestBox(new ProjectNameSuggestOracle(), nameBox);
+       nameBox.setVisibleLength(50);
+-      nameBox.setText(Util.C.defaultProjectName());
+-      nameBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-      nameBox.addFocusHandler(new FocusHandler() {
+-        @Override
+-        public void onFocus(FocusEvent event) {
+-          if (Util.C.defaultProjectName().equals(nameBox.getText())) {
+-            nameBox.setText("");
+-            nameBox.removeStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-          }
+-        }
+-      });
+-      nameBox.addBlurHandler(new BlurHandler() {
+-        @Override
+-        public void onBlur(BlurEvent event) {
+-          if ("".equals(nameBox.getText())) {
+-            nameBox.setText(Util.C.defaultProjectName());
+-            nameBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-          }
+-        }
+-      });
++      nameBox.setHintText(Util.C.defaultProjectName());
++      nameBox.setHintStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+       nameBox.addKeyPressHandler(new KeyPressHandler() {
+         @Override
+         public void onKeyPress(KeyPressEvent event) {
+@@ -112,28 +94,10 @@ public class MyWatchedProjectsScreen extends SettingsScreen {
+         }
+       });
+ 
+-      filterTxt = new NpTextBox();
++      filterTxt = new HintTextBox();
+       filterTxt.setVisibleLength(50);
+-      filterTxt.setText(Util.C.defaultFilter());
+-      filterTxt.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-      filterTxt.addFocusHandler(new FocusHandler() {
+-        @Override
+-        public void onFocus(FocusEvent event) {
+-          if (Util.C.defaultFilter().equals(filterTxt.getText())) {
+-            filterTxt.setText("");
+-            filterTxt.removeStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-          }
+-        }
+-      });
+-      filterTxt.addBlurHandler(new BlurHandler() {
+-        @Override
+-        public void onBlur(BlurEvent event) {
+-          if ("".equals(filterTxt.getText())) {
+-            filterTxt.setText(Util.C.defaultFilter());
+-            filterTxt.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-          }
+-        }
+-      });
++      filterTxt.setHintText(Util.C.defaultFilter());
++      filterTxt.setHintStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+       filterTxt.addKeyPressHandler(new KeyPressHandler() {
+         @Override
+         public void onKeyPress(KeyPressEvent event) {
+@@ -188,8 +152,7 @@ public class MyWatchedProjectsScreen extends SettingsScreen {
+ 
+   void doAddNew() {
+     final String projectName = nameTxt.getText();
+-    if (projectName == null || projectName.length() == 0
+-        || Util.C.defaultProjectName().equals(projectName)) {
++    if ("".equals(projectName)) {
+       return;
+     }
+ 
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
+index 14449f9..999adaa 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
+@@ -14,6 +14,8 @@
+ 
+ package com.google.gerrit.client.admin;
+ 
++import com.google.gerrit.client.ui.HintTextBox;
++
+ import com.google.gerrit.client.Dispatcher;
+ import com.google.gerrit.client.Gerrit;
+ import com.google.gerrit.client.rpc.GerritCallback;
+@@ -69,7 +71,7 @@ public class ProjectAccessScreen extends ProjectScreen {
+   private ListBox catBox;
+   private ListBox rangeMinBox;
+   private ListBox rangeMaxBox;
+-  private NpTextBox nameTxtBox;
++  private HintTextBox nameTxtBox;
+   private SuggestBox nameTxt;
+   private NpTextBox referenceTxt;
+   private FlowPanel addPanel;
+@@ -157,34 +159,16 @@ public class ProjectAccessScreen extends ProjectScreen {
+     addGrid.setText(0, 0, Util.C.columnApprovalCategory() + ":");
+     addGrid.setWidget(0, 1, catBox);
+ 
+-    nameTxtBox = new NpTextBox();
++    nameTxtBox = new HintTextBox();
+     nameTxt = new SuggestBox(new AccountGroupSuggestOracle(), nameTxtBox);
+     nameTxtBox.setVisibleLength(50);
+-    nameTxtBox.setText(Util.C.defaultAccountGroupName());
+-    nameTxtBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-    nameTxtBox.addFocusHandler(new FocusHandler() {
+-      @Override
+-      public void onFocus(FocusEvent event) {
+-        if (Util.C.defaultAccountGroupName().equals(nameTxtBox.getText())) {
+-          nameTxtBox.setText("");
+-          nameTxtBox.removeStyleName(Gerrit.RESOURCES.css()
+-              .inputFieldTypeHint());
+-        }
+-      }
+-    });
+-    nameTxtBox.addBlurHandler(new BlurHandler() {
+-      @Override
+-      public void onBlur(BlurEvent event) {
+-        if ("".equals(nameTxtBox.getText())) {
+-          nameTxtBox.setText(Util.C.defaultAccountGroupName());
+-          nameTxtBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-        }
+-      }
+-    });
++    nameTxtBox.setHintText(Util.C.defaultAccountGroupName());
++    nameTxtBox.setHintStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
++
+     addGrid.setText(1, 0, Util.C.columnGroupName() + ":");
+     addGrid.setWidget(1, 1, nameTxt);
+ 
+-    referenceTxt = new NpTextBox();
++    referenceTxt = new HintTextBox();
+     referenceTxt.setVisibleLength(50);
+     referenceTxt.setText("");
+     referenceTxt.addKeyPressHandler(new KeyPressHandler() {
+@@ -317,8 +301,7 @@ public class ProjectAccessScreen extends ProjectScreen {
+     }
+ 
+     final String groupName = nameTxt.getText();
+-    if ("".equals(groupName)
+-        || Util.C.defaultAccountGroupName().equals(groupName)) {
++    if ("".equals(groupName)) {
+       return;
+     }
+ 
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectBranchesScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectBranchesScreen.java
+index 8bff3e5..7298847 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectBranchesScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectBranchesScreen.java
+@@ -20,6 +20,7 @@ import com.google.gerrit.client.Gerrit;
+ import com.google.gerrit.client.rpc.GerritCallback;
+ import com.google.gerrit.client.rpc.ScreenLoadCallback;
+ import com.google.gerrit.client.ui.FancyFlexTable;
++import com.google.gerrit.client.ui.HintTextBox;
+ import com.google.gerrit.common.data.GitwebLink;
+ import com.google.gerrit.common.data.ListBranchesResult;
+ import com.google.gerrit.common.errors.InvalidNameException;
+@@ -44,7 +45,6 @@ import com.google.gwt.user.client.ui.FlowPanel;
+ import com.google.gwt.user.client.ui.Grid;
+ import com.google.gwt.user.client.ui.HTML;
+ import com.google.gwt.user.client.ui.FlexTable.FlexCellFormatter;
+-import com.google.gwtexpui.globalkey.client.NpTextBox;
+ import com.google.gwtjsonrpc.client.RemoteJsonException;
+ 
+ import java.util.HashSet;
+@@ -55,8 +55,8 @@ public class ProjectBranchesScreen extends ProjectScreen {
+   private BranchesTable branches;
+   private Button delBranch;
+   private Button addBranch;
+-  private NpTextBox nameTxtBox;
+-  private NpTextBox irevTxtBox;
++  private HintTextBox nameTxtBox;
++  private HintTextBox irevTxtBox;
+   private FlowPanel addPanel;
+ 
+   public ProjectBranchesScreen(final Project.NameKey toShow) {
+@@ -97,28 +97,10 @@ public class ProjectBranchesScreen extends ProjectScreen {
+ 
+     final Grid addGrid = new Grid(2, 2);
+ 
+-    nameTxtBox = new NpTextBox();
++    nameTxtBox = new HintTextBox();
+     nameTxtBox.setVisibleLength(50);
+-    nameTxtBox.setText(Util.C.defaultBranchName());
+-    nameTxtBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-    nameTxtBox.addFocusHandler(new FocusHandler() {
+-      @Override
+-      public void onFocus(FocusEvent event) {
+-        if (Util.C.defaultBranchName().equals(nameTxtBox.getText())) {
+-          nameTxtBox.setText("");
+-          nameTxtBox.removeStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-        }
+-      }
+-    });
+-    nameTxtBox.addBlurHandler(new BlurHandler() {
+-      @Override
+-      public void onBlur(BlurEvent event) {
+-        if ("".equals(nameTxtBox.getText())) {
+-          nameTxtBox.setText(Util.C.defaultBranchName());
+-          nameTxtBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-        }
+-      }
+-    });
++    nameTxtBox.setHintText(Util.C.defaultBranchName());
++    nameTxtBox.setHintStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+     nameTxtBox.addKeyPressHandler(new KeyPressHandler() {
+       @Override
+       public void onKeyPress(KeyPressEvent event) {
+@@ -130,28 +112,10 @@ public class ProjectBranchesScreen extends ProjectScreen {
+     addGrid.setText(0, 0, Util.C.columnBranchName() + ":");
+     addGrid.setWidget(0, 1, nameTxtBox);
+ 
+-    irevTxtBox = new NpTextBox();
++    irevTxtBox = new HintTextBox();
+     irevTxtBox.setVisibleLength(50);
+-    irevTxtBox.setText(Util.C.defaultRevisionSpec());
+-    irevTxtBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-    irevTxtBox.addFocusHandler(new FocusHandler() {
+-      @Override
+-      public void onFocus(FocusEvent event) {
+-        if (Util.C.defaultRevisionSpec().equals(irevTxtBox.getText())) {
+-          irevTxtBox.setText("");
+-          irevTxtBox.removeStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-        }
+-      }
+-    });
+-    irevTxtBox.addBlurHandler(new BlurHandler() {
+-      @Override
+-      public void onBlur(BlurEvent event) {
+-        if ("".equals(irevTxtBox.getText())) {
+-          irevTxtBox.setText(Util.C.defaultRevisionSpec());
+-          irevTxtBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-        }
+-      }
+-    });
++    irevTxtBox.setHintText(Util.C.defaultRevisionSpec());
++    irevTxtBox.setHintStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+     irevTxtBox.addKeyPressHandler(new KeyPressHandler() {
+       @Override
+       public void onKeyPress(KeyPressEvent event) {
+@@ -190,13 +154,13 @@ public class ProjectBranchesScreen extends ProjectScreen {
+ 
+   private void doAddNewBranch() {
+     String branchName = nameTxtBox.getText();
+-    if ("".equals(branchName) || Util.C.defaultBranchName().equals(branchName)) {
++    if ("".equals(branchName)) {
+       nameTxtBox.setFocus(true);
+       return;
+     }
+ 
+     String rev = irevTxtBox.getText();
+-    if ("".equals(rev) || Util.C.defaultRevisionSpec().equals(rev)) {
++    if ("".equals(rev)) {
+       irevTxtBox.setText("HEAD");
+       DeferredCommand.addCommand(new Command() {
+         @Override
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/AddMemberBox.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/AddMemberBox.java
+index b5e3655..ca80b9f 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/AddMemberBox.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/AddMemberBox.java
+@@ -16,6 +16,7 @@ package com.google.gerrit.client.ui;
+ 
+ import com.google.gerrit.client.Gerrit;
+ import com.google.gerrit.client.admin.Util;
++import com.google.gerrit.client.ui.HintTextBox;
+ import com.google.gwt.event.dom.client.BlurEvent;
+ import com.google.gwt.event.dom.client.BlurHandler;
+ import com.google.gwt.event.dom.client.ClickEvent;
+@@ -32,42 +33,23 @@ import com.google.gwt.user.client.ui.Composite;
+ import com.google.gwt.user.client.ui.FlowPanel;
+ import com.google.gwt.user.client.ui.SuggestBox;
+ import com.google.gwt.user.client.ui.SuggestOracle.Suggestion;
+-import com.google.gwtexpui.globalkey.client.NpTextBox;
+ 
+ public class AddMemberBox extends Composite {
+   private final FlowPanel addPanel;
+   private final Button addMember;
+-  private final NpTextBox nameTxtBox;
++  private final HintTextBox nameTxtBox;
+   private final SuggestBox nameTxt;
+   private boolean submitOnSelection;
+ 
+   public AddMemberBox() {
+     addPanel = new FlowPanel();
+     addMember = new Button(Util.C.buttonAddGroupMember());
+-    nameTxtBox = new NpTextBox();
++    nameTxtBox = new HintTextBox();
+     nameTxt = new SuggestBox(new AccountSuggestOracle(), nameTxtBox);
+ 
+     nameTxtBox.setVisibleLength(50);
+-    nameTxtBox.setText(Util.C.defaultAccountName());
+-    nameTxtBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-    nameTxtBox.addFocusHandler(new FocusHandler() {
+-      @Override
+-      public void onFocus(final FocusEvent event) {
+-        if (Util.C.defaultAccountName().equals(nameTxtBox.getText())) {
+-          nameTxtBox.setText("");
+-          nameTxtBox.removeStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-        }
+-      }
+-    });
+-    nameTxtBox.addBlurHandler(new BlurHandler() {
+-      @Override
+-      public void onBlur(final BlurEvent event) {
+-        if ("".equals(nameTxtBox.getText())) {
+-          nameTxtBox.setText(Util.C.defaultAccountName());
+-          nameTxtBox.addStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+-        }
+-      }
+-    });
++    nameTxtBox.setHintText(Util.C.defaultAccountName());
++    nameTxtBox.setHintStyleName(Gerrit.RESOURCES.css().inputFieldTypeHint());
+     nameTxtBox.addKeyPressHandler(new KeyPressHandler() {
+       @Override
+       public void onKeyPress(KeyPressEvent event) {
+@@ -108,10 +90,7 @@ public class AddMemberBox extends Composite {
+ 
+   public String getText() {
+     String s = nameTxtBox.getText();
+-    if (s == null || s.equals(Util.C.defaultAccountName())) {
+-      s = "";
+-    }
+-    return s;
++    return s == null ? "" : s;
+   }
+ 
+   public void setEnabled(boolean enabled) {
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/HintTextBox.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/HintTextBox.java
+new file mode 100644
+index 0000000..52e80cb
+--- /dev/null
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/HintTextBox.java
+@@ -0,0 +1,130 @@
++// Copyright (C) 2010 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.client.ui;
++
++import com.google.gwt.event.dom.client.BlurEvent;
++import com.google.gwt.event.dom.client.BlurHandler;
++import com.google.gwt.event.dom.client.FocusEvent;
++import com.google.gwt.event.dom.client.FocusHandler;
++import com.google.gwt.event.shared.HandlerRegistration;
++import com.google.gwtexpui.globalkey.client.NpTextBox;
++
++public class HintTextBox extends NpTextBox {
++  private String hintText;
++  private String hintStyleName;
++  private boolean hintOn;
++  private HandlerRegistration hintFocusHandler;
++  private HandlerRegistration hintBlurHandler;
++
++  public String getText() {
++    if (hintOn) {
++      return "";
++    }
++    return super.getText();
++  }
++
++  public void setText(String text) {
++    focusHint();
++    super.setText(text);
++    blurHint();
++  }
++
++  public String getHintText() {
++    return hintText;
++  }
++
++  public void setHintText(String text) {
++    if (text == null) {
++
++      // Clearing Hints
++
++      if (hintText != null) { // was set
++        hintFocusHandler.removeHandler();
++        hintFocusHandler = null;
++        hintBlurHandler.removeHandler();
++        hintBlurHandler = null;
++        hintText = null;
++        focusHint();
++      }
++      return;
++    }
++
++    // Setting Hints
++
++    if (hintText == null) { // first time (was not already set)
++      hintText = text;
++
++      hintFocusHandler = addFocusHandler(new FocusHandler() {
++          @Override
++          public void onFocus(FocusEvent event) {
++            focusHint();
++          }
++        });
++
++      hintBlurHandler = addBlurHandler(new BlurHandler() {
++          @Override
++          public void onBlur(BlurEvent event) {
++            blurHint();
++          }
++        });
++
++      blurHint();
++      return;
++    }
++
++    // Changing Hint
++
++    hintText = text;
++    if (hintOn) {
++      super.setText(text);
++    }
++  }
++
++  public void setHintStyleName(String styleName) {
++    if (hintStyleName != null && hintOn) {
++      removeStyleName(hintStyleName);
++    }
++
++    hintStyleName = styleName;
++
++    if (styleName != null && hintOn) {
++      addStyleName(styleName);
++    }
++  }
++
++  public String getHintStyleName() {
++    return hintStyleName;
++  }
++
++  protected void blurHint() {
++    if ("".equals(super.getText()) && ! hintOn) {
++      super.setText(getHintText());
++      hintOn = true;
++      if (getHintStyleName() != null) {
++        addStyleName(getHintStyleName());
++      }
++    }
++  }
++
++  protected void focusHint() {
++    if (hintOn) {
++      super.setText("");
++      hintOn = false;
++      if (getHintStyleName() != null) {
++        removeStyleName(getHintStyleName());
++      }
++    }
++  }
++}
+-- 
+1.7.2.2
+

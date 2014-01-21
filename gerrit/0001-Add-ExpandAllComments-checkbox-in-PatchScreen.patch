@@ -1,0 +1,331 @@
+From 4dcadcc9146766489aa4d2ed07e351f44437851e Mon Sep 17 00:00:00 2001
+From: Raviteja Sunkara <raviteja@codeaurora.org>
+Date: Tue, 29 Mar 2011 14:49:15 +0530
+Subject: [PATCH] Add ExpandAllComments checkbox in PatchScreen
+
+Change-Id: I2bc786285940655d17c498ec6abbe8dfe8e5e974
+---
+ .../com/google/gerrit/common/data/PatchScript.java |    4 +++
+ .../client/patches/AbstractPatchContentTable.java  |    5 ++-
+ .../google/gerrit/client/patches/PatchScreen.java  |    2 +-
+ .../client/patches/PatchScriptSettingsPanel.java   |    5 ++++
+ .../client/patches/PatchScriptSettingsPanel.ui.xml |   17 ++++++++++---
+ .../gerrit/client/patches/SideBySideTable.java     |   14 +++++-----
+ .../gerrit/client/patches/UnifiedDiffTable.java    |   12 ++++----
+ .../gerrit/reviewdb/AccountDiffPreference.java     |   12 +++++++++
+ .../google/gerrit/server/schema/SchemaVersion.java |    2 +-
+ .../com/google/gerrit/server/schema/Schema_53.java |   25 ++++++++++++++++++++
+ 10 files changed, 77 insertions(+), 21 deletions(-)
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_53.java
+
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/PatchScript.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/PatchScript.java
+index 24cdee4..2214af9 100644
+--- a/gerrit-common/src/main/java/com/google/gerrit/common/data/PatchScript.java
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/PatchScript.java
+@@ -155,6 +155,10 @@ public class PatchScript {
+     return intralineFailure;
+   }
+ 
++  public boolean isExpandAllComments() {
++    return diffPrefs.isExpandAllComments();
++  }
++
+   public SparseFileContent getA() {
+     return a;
+   }
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/AbstractPatchContentTable.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/AbstractPatchContentTable.java
+index 6452e08..d5a5367 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/AbstractPatchContentTable.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/AbstractPatchContentTable.java
+@@ -175,7 +175,7 @@ public abstract class AbstractPatchContentTable extends NavigationTable<Object>
+ 
+   protected abstract void onInsertComment(PatchLine pl);
+ 
+-  public abstract void display(CommentDetail comments);
++  public abstract void display(CommentDetail comments, boolean expandComments);
+ 
+   @Override
+   protected MyFlexTable createFlexTable() {
+@@ -529,7 +529,7 @@ public abstract class AbstractPatchContentTable extends NavigationTable<Object>
+   }
+ 
+   protected void bindComment(final int row, final int col,
+-      final PatchLineComment line, final boolean isLast) {
++      final PatchLineComment line, final boolean isLast, boolean expandComment) {
+     if (line.getStatus() == PatchLineComment.Status.DRAFT) {
+       final CommentEditorPanel plc = new CommentEditorPanel(line);
+       plc.addFocusHandler(this);
+@@ -541,6 +541,7 @@ public abstract class AbstractPatchContentTable extends NavigationTable<Object>
+       final AccountInfo author = accountCache.get(line.getAuthor());
+       final PublishedCommentPanel panel =
+           new PublishedCommentPanel(author, line);
++      panel.setOpen(expandComment);
+       panel.addFocusHandler(this);
+       panel.addBlurHandler(this);
+       table.setWidget(row, col, panel);
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
+index cad371e..1489fa8 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
+@@ -442,7 +442,7 @@ public abstract class PatchScreen extends Screen implements
+ 
+     if (hasDifferences) {
+       contentTable.display(patchKey, idSideA, idSideB, script);
+-      contentTable.display(script.getCommentDetail());
++      contentTable.display(script.getCommentDetail(), script.isExpandAllComments());
+       contentTable.finishDisplay();
+     }
+     showPatch(hasDifferences);
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.java
+index 5c777ff..df7c477 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.java
+@@ -87,6 +87,9 @@ public class PatchScriptSettingsPanel extends Composite implements
+   @UiField
+   CheckBox skipUncommented;
+ 
++  @UiField
++  CheckBox expandAllComments;
++
+ 
+   @UiField
+   Button update;
+@@ -209,6 +212,7 @@ public class PatchScriptSettingsPanel extends Composite implements
+     showTabs.setValue(dp.isShowTabs());
+     skipDeleted.setValue(dp.isSkipDeleted());
+     skipUncommented.setValue(dp.isSkipUncommented());
++    expandAllComments.setValue(dp.isExpandAllComments());
+   }
+ 
+   @UiHandler("update")
+@@ -233,6 +237,7 @@ public class PatchScriptSettingsPanel extends Composite implements
+     dp.setShowTabs(showTabs.getValue());
+     dp.setSkipDeleted(skipDeleted.getValue());
+     dp.setSkipUncommented(skipUncommented.getValue());
++    dp.setExpandAllComments(expandAllComments.getValue());
+ 
+     listenablePrefs.set(dp);
+ 
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.ui.xml b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.ui.xml
+index f0f1b4d..8bda032 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.ui.xml
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.ui.xml
+@@ -115,18 +115,27 @@ limitations under the License.
+       </g:CheckBox>
+     </td>
+ 
++    <td>
++      <g:CheckBox
++          ui:field='expandAllComments'
++          text='Expand All Comments'
++          tabIndex='9'>
++        <ui:attribute name='text'/>
++      </g:CheckBox>
++    </td>
++
+     <td rowspan='2'>
+       <g:CheckBox
+           ui:field='skipUncommented'
+           text='Skip Uncommented Files'
+-          tabIndex='9'>
++          tabIndex='10'>
+         <ui:attribute name='text'/>
+       </g:CheckBox>
+       <br/>
+       <g:CheckBox
+           ui:field='skipDeleted'
+           text='Skip Deleted Files'
+-          tabIndex='10'>
++          tabIndex='11'>
+         <ui:attribute name='text'/>
+       </g:CheckBox>
+     </td>
+@@ -136,7 +145,7 @@ limitations under the License.
+           ui:field='update'
+           text='Update'
+           styleName='{style.updateButton}'
+-          tabIndex='11'>
++          tabIndex='12'>
+         <ui:attribute name='text'/>
+       </g:Button>
+     </td>
+@@ -145,7 +154,7 @@ limitations under the License.
+       <g:CheckBox
+           ui:field='reviewed'
+           text='Reviewed'
+-          tabIndex='12'>
++          tabIndex='13'>
+         <ui:attribute name='text'/>
+       </g:CheckBox>
+     </td>
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/SideBySideTable.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/SideBySideTable.java
+index 2939e71..1c27388 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/SideBySideTable.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/SideBySideTable.java
+@@ -186,7 +186,7 @@ public class SideBySideTable extends AbstractPatchContentTable {
+   }
+ 
+   @Override
+-  public void display(final CommentDetail cd) {
++  public void display(final CommentDetail cd, boolean expandComments) {
+     if (cd.isEmpty()) {
+       return;
+     }
+@@ -205,13 +205,13 @@ public class SideBySideTable extends AbstractPatchContentTable {
+           final PatchLineComment ac = ai.next();
+           final PatchLineComment bc = bi.next();
+           insertRow(row);
+-          bindComment(row, COL_A, ac, !ai.hasNext());
+-          bindComment(row, COL_B, bc, !bi.hasNext());
++          bindComment(row, COL_A, ac, !ai.hasNext(), expandComments);
++          bindComment(row, COL_B, bc, !bi.hasNext(), expandComments);
+           row++;
+         }
+ 
+-        row = finish(ai, row, COL_A);
+-        row = finish(bi, row, COL_B);
++        row = finish(ai, row, COL_A, expandComments);
++        row = finish(bi, row, COL_B, expandComments);
+       } else {
+         row++;
+       }
+@@ -228,11 +228,11 @@ public class SideBySideTable extends AbstractPatchContentTable {
+     fmt.addStyleName(row, COL_B, Gerrit.RESOURCES.css().diffText());
+   }
+ 
+-  private int finish(final Iterator<PatchLineComment> i, int row, final int col) {
++  private int finish(final Iterator<PatchLineComment> i, int row, final int col, boolean expandComment) {
+     while (i.hasNext()) {
+       final PatchLineComment c = i.next();
+       insertRow(row);
+-      bindComment(row, col, c, !i.hasNext());
++      bindComment(row, col, c, !i.hasNext(), expandComment);
+       row++;
+     }
+     return row;
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/UnifiedDiffTable.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/UnifiedDiffTable.java
+index 508e508..21a5211 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/UnifiedDiffTable.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/UnifiedDiffTable.java
+@@ -205,7 +205,7 @@ public class UnifiedDiffTable extends AbstractPatchContentTable {
+   }
+ 
+   @Override
+-  public void display(final CommentDetail cd) {
++  public void display(final CommentDetail cd, boolean expandComments) {
+     if (cd.isEmpty()) {
+       return;
+     }
+@@ -224,13 +224,13 @@ public class UnifiedDiffTable extends AbstractPatchContentTable {
+           all.addAll(fora);
+           all.addAll(forb);
+           Collections.sort(all, BY_DATE);
+-          row = insert(all, row);
++          row = insert(all, row, expandComments);
+ 
+         } else if (!fora.isEmpty()) {
+-          row = insert(fora, row);
++          row = insert(fora, row, expandComments);
+ 
+         } else if (!forb.isEmpty()) {
+-          row = insert(forb, row);
++          row = insert(forb, row, expandComments);
+         }
+       } else {
+         row++;
+@@ -248,11 +248,11 @@ public class UnifiedDiffTable extends AbstractPatchContentTable {
+     fmt.addStyleName(row, PC, Gerrit.RESOURCES.css().diffText());
+   }
+ 
+-  private int insert(final List<PatchLineComment> in, int row) {
++  private int insert(final List<PatchLineComment> in, int row, boolean expandComment) {
+     for (Iterator<PatchLineComment> ci = in.iterator(); ci.hasNext();) {
+       final PatchLineComment c = ci.next();
+       insertRow(row);
+-      bindComment(row, PC, c, !ci.hasNext());
++      bindComment(row, PC, c, !ci.hasNext(), expandComment);
+       row++;
+     }
+     return row;
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/AccountDiffPreference.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/AccountDiffPreference.java
+index 38a2359..db6ca41 100644
+--- a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/AccountDiffPreference.java
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/AccountDiffPreference.java
+@@ -102,6 +102,9 @@ public class AccountDiffPreference {
+   @Column(id = 11)
+   protected boolean skipUncommented;
+ 
++  @Column(id = 12)
++  protected boolean expandAllComments;
++
+   protected AccountDiffPreference() {
+   }
+ 
+@@ -120,6 +123,7 @@ public class AccountDiffPreference {
+     this.showTabs = p.showTabs;
+     this.skipDeleted = p.skipDeleted;
+     this.skipUncommented = p.skipUncommented;
++    this.expandAllComments = p.expandAllComments;
+     this.context = p.context;
+   }
+ 
+@@ -209,4 +213,12 @@ public class AccountDiffPreference {
+   public void setSkipUncommented(boolean skip) {
+     skipUncommented = skip;
+   }
++
++  public boolean isExpandAllComments() {
++    return expandAllComments;
++  }
++
++  public void setExpandAllComments(boolean skip) {
++    expandAllComments = skip;
++  }
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java b/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
+index b0cb88a..0db29d5 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
+@@ -32,7 +32,7 @@ import java.util.List;
+ /** A version of the database schema. */
+ public abstract class SchemaVersion {
+   /** The current schema version. */
+-  private static final Class<? extends SchemaVersion> C = Schema_52.class;
++  private static final Class<? extends SchemaVersion> C = Schema_53.class;
+ 
+   public static class Module extends AbstractModule {
+     @Override
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_53.java b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_53.java
+new file mode 100644
+index 0000000..4140c55
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_53.java
+@@ -0,0 +1,25 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.server.schema;
++
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++public class Schema_53 extends SchemaVersion {
++  @Inject
++  Schema_53(Provider<Schema_52> prior) {
++    super(prior);
++  }
++}
+-- 
+1.7.4.1
+

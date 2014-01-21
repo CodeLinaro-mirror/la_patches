@@ -1,0 +1,655 @@
+From 21a4f5c3b6eb96aa5cab9e055869c5f46df4c5cc Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Fri, 17 Jun 2011 16:45:18 -0600
+Subject: [PATCH] Add CLA check to ProjectControl.canPushToAtLeastOneRef()
+
+This is a refactoring, it should not change functionality
+at all.  Move CLA check out of ReceiveCommits and into
+ProjectControl.  Create a common Capable class to facilitate
+this.
+
+Change-Id: I43ff798bcb727918eb39b1ec8dc7e14278c91b1f
+---
+ .../com/google/gerrit/common/data/Capable.java     |   29 ++++
+ .../com/google/gerrit/httpd/ProjectServlet.java    |    5 +-
+ .../google/gerrit/server/git/ReceiveCommits.java   |  162 +------------------
+ .../gerrit/server/project/ProjectControl.java      |  174 +++++++++++++++++++-
+ .../gerrit/server/project/RefControlTest.java      |   18 ++-
+ .../com/google/gerrit/sshd/commands/Receive.java   |    5 +-
+ 6 files changed, 224 insertions(+), 169 deletions(-)
+ create mode 100644 gerrit-common/src/main/java/com/google/gerrit/common/data/Capable.java
+
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/Capable.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/Capable.java
+new file mode 100644
+index 0000000..0be4b76
+--- /dev/null
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/Capable.java
+@@ -0,0 +1,29 @@
++// Copyright (C) 2008 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.common.data;
++
++public class Capable {
++  public static final Capable OK = new Capable("OK");
++
++  private final String message;
++
++  public Capable(String msg) {
++    message = msg;
++  }
++
++  public String getMessage() {
++    return message;
++  }
++}
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectServlet.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectServlet.java
+index 73b2ca4..56b7143 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectServlet.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectServlet.java
+@@ -15,6 +15,7 @@
+ package com.google.gerrit.httpd;
+ 
+ import com.google.gerrit.common.PageLinks;
++import com.google.gerrit.common.data.Capable;
+ import com.google.gerrit.reviewdb.Change;
+ import com.google.gerrit.reviewdb.Project;
+ import com.google.gerrit.reviewdb.ReviewDb;
+@@ -262,8 +263,8 @@ public class ProjectServlet extends GitServlet {
+       if (pc.getCurrentUser() instanceof IdentifiedUser) {
+         final IdentifiedUser user = (IdentifiedUser) pc.getCurrentUser();
+         final ReceiveCommits rc = factory.create(pc, db);
+-        final ReceiveCommits.Capable s = rc.canUpload();
+-        if (s != ReceiveCommits.Capable.OK) {
++        final Capable s = rc.canUpload();
++        if (s != Capable.OK) {
+           // TODO We should alert the user to this message on the HTTP
+           // response channel, assuming Git will even report it to them.
+           //
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/git/ReceiveCommits.java b/gerrit-server/src/main/java/com/google/gerrit/server/git/ReceiveCommits.java
+index 98c66ff..4233889 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/git/ReceiveCommits.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/git/ReceiveCommits.java
+@@ -18,17 +18,14 @@ import com.google.gerrit.common.ChangeHookRunner;
+ import com.google.gerrit.common.PageLinks;
+ import com.google.gerrit.common.data.ApprovalType;
+ import com.google.gerrit.common.data.ApprovalTypes;
++import com.google.gerrit.common.data.Capable;
+ import com.google.gerrit.common.errors.NoSuchAccountException;
+-import com.google.gerrit.reviewdb.AbstractAgreement;
+ import com.google.gerrit.reviewdb.Account;
+-import com.google.gerrit.reviewdb.AccountAgreement;
+ import com.google.gerrit.reviewdb.AccountGroup;
+-import com.google.gerrit.reviewdb.AccountGroupAgreement;
+ import com.google.gerrit.reviewdb.ApprovalCategory;
+ import com.google.gerrit.reviewdb.Branch;
+ import com.google.gerrit.reviewdb.Change;
+ import com.google.gerrit.reviewdb.ChangeMessage;
+-import com.google.gerrit.reviewdb.ContributorAgreement;
+ import com.google.gerrit.reviewdb.PatchSet;
+ import com.google.gerrit.reviewdb.PatchSetAncestor;
+ import com.google.gerrit.reviewdb.PatchSetApproval;
+@@ -40,7 +37,6 @@ import com.google.gerrit.server.ChangeUtil;
+ import com.google.gerrit.server.GerritPersonIdent;
+ import com.google.gerrit.server.IdentifiedUser;
+ import com.google.gerrit.server.account.AccountResolver;
+-import com.google.gerrit.server.account.GroupCache;
+ import com.google.gerrit.server.config.CanonicalWebUrl;
+ import com.google.gerrit.server.config.TrackingFooters;
+ import com.google.gerrit.server.mail.CreateChangeSender;
+@@ -117,20 +113,6 @@ public class ReceiveCommits implements PreReceiveHook, PostReceiveHook {
+     ReceiveCommits create(ProjectControl projectControl, Repository repository);
+   }
+ 
+-  public static class Capable {
+-    public static final Capable OK = new Capable("OK");
+-
+-    private final String message;
+-
+-    Capable(String msg) {
+-      message = msg;
+-    }
+-
+-    public String getMessage() {
+-      return message;
+-    }
+-  }
+-
+   private final Set<Account.Id> reviewerId = new HashSet<Account.Id>();
+   private final Set<Account.Id> ccId = new HashSet<Account.Id>();
+ 
+@@ -146,7 +128,6 @@ public class ReceiveCommits implements PreReceiveHook, PostReceiveHook {
+   private final ChangeHookRunner hooks;
+   private final GitRepositoryManager repoManager;
+   private final ProjectCache projectCache;
+-  private final GroupCache groupCache;
+   private final String canonicalWebUrl;
+   private final PersonIdent gerritIdent;
+   private final TrackingFooters trackingFooters;
+@@ -183,7 +164,6 @@ public class ReceiveCommits implements PreReceiveHook, PostReceiveHook {
+       final ChangeHookRunner hooks,
+       final ProjectCache projectCache,
+       final GitRepositoryManager repoManager,
+-      final GroupCache groupCache,
+       @CanonicalWebUrl @Nullable final String canonicalWebUrl,
+       @GerritPersonIdent final PersonIdent gerritIdent,
+       final TrackingFooters trackingFooters,
+@@ -202,7 +182,6 @@ public class ReceiveCommits implements PreReceiveHook, PostReceiveHook {
+     this.hooks = hooks;
+     this.projectCache = projectCache;
+     this.repoManager = repoManager;
+-    this.groupCache = groupCache;
+     this.canonicalWebUrl = canonicalWebUrl;
+     this.gerritIdent = gerritIdent;
+     this.trackingFooters = trackingFooters;
+@@ -319,9 +298,9 @@ public class ReceiveCommits implements PreReceiveHook, PostReceiveHook {
+ 
+   /** Determine if the user can upload commits. */
+   public Capable canUpload() {
+-    if (!projectControl.canPushToAtLeastOneRef()) {
+-      String reqName = project.getName();
+-      return new Capable("Upload denied for project '" + reqName + "'");
++    Capable result = projectControl.canPushToAtLeastOneRef();
++    if (result != Capable.OK) {
++      return result;
+     }
+ 
+     // Don't permit receive-pack to be executed if a refs/for/branch_name
+@@ -346,16 +325,7 @@ public class ReceiveCommits implements PreReceiveHook, PostReceiveHook {
+       return new Capable("One or more refs/for/ names blocks change upload");
+     }
+ 
+-    if (project.isUseContributorAgreements()) {
+-      try {
+-        return verifyActiveContributorAgreement();
+-      } catch (OrmException e) {
+-        log.error("Cannot query database for agreements", e);
+-        return new Capable("Cannot verify contribution agreement");
+-      }
+-    } else {
+-      return Capable.OK;
+-    }
++    return Capable.OK;
+   }
+ 
+   @Override
+@@ -417,127 +387,6 @@ public class ReceiveCommits implements PreReceiveHook, PostReceiveHook {
+     }
+   }
+ 
+-  private Capable verifyActiveContributorAgreement() throws OrmException {
+-    AbstractAgreement bestAgreement = null;
+-    ContributorAgreement bestCla = null;
+-
+-    OUTER: for (AccountGroup.UUID groupUUID : currentUser.getEffectiveGroups()) {
+-      AccountGroup group = groupCache.get(groupUUID);
+-      if (group == null) {
+-        continue;
+-      }
+-
+-      final List<AccountGroupAgreement> temp =
+-          db.accountGroupAgreements().byGroup(group.getId()).toList();
+-
+-      Collections.reverse(temp);
+-
+-      for (final AccountGroupAgreement a : temp) {
+-        final ContributorAgreement cla =
+-            db.contributorAgreements().get(a.getAgreementId());
+-        if (cla == null) {
+-          continue;
+-        }
+-
+-        bestAgreement = a;
+-        bestCla = cla;
+-        break OUTER;
+-      }
+-    }
+-
+-    if (bestAgreement == null) {
+-      final List<AccountAgreement> temp =
+-          db.accountAgreements().byAccount(currentUser.getAccountId()).toList();
+-
+-      Collections.reverse(temp);
+-
+-      for (final AccountAgreement a : temp) {
+-        final ContributorAgreement cla =
+-            db.contributorAgreements().get(a.getAgreementId());
+-        if (cla == null) {
+-          continue;
+-        }
+-
+-        bestAgreement = a;
+-        bestCla = cla;
+-        break;
+-      }
+-    }
+-
+-    if (bestCla != null && !bestCla.isActive()) {
+-      final StringBuilder msg = new StringBuilder();
+-      msg.append(bestCla.getShortName());
+-      msg.append(" contributor agreement is expired.\n");
+-      if (canonicalWebUrl != null) {
+-        msg.append("\nPlease complete a new agreement");
+-        msg.append(":\n\n  ");
+-        msg.append(canonicalWebUrl);
+-        msg.append("#");
+-        msg.append(PageLinks.SETTINGS_AGREEMENTS);
+-        msg.append("\n");
+-      }
+-      msg.append("\n");
+-      return new Capable(msg.toString());
+-    }
+-
+-    if (bestCla != null && bestCla.isRequireContactInformation()) {
+-      boolean fail = false;
+-      fail |= missing(currentUser.getAccount().getFullName());
+-      fail |= missing(currentUser.getAccount().getPreferredEmail());
+-      fail |= !currentUser.getAccount().isContactFiled();
+-
+-      if (fail) {
+-        final StringBuilder msg = new StringBuilder();
+-        msg.append(bestCla.getShortName());
+-        msg.append(" contributor agreement requires");
+-        msg.append(" current contact information.\n");
+-        if (canonicalWebUrl != null) {
+-          msg.append("\nPlease review your contact information");
+-          msg.append(":\n\n  ");
+-          msg.append(canonicalWebUrl);
+-          msg.append("#");
+-          msg.append(PageLinks.SETTINGS_CONTACT);
+-          msg.append("\n");
+-        }
+-        msg.append("\n");
+-        return new Capable(msg.toString());
+-      }
+-    }
+-
+-    if (bestAgreement != null) {
+-      switch (bestAgreement.getStatus()) {
+-        case VERIFIED:
+-          return Capable.OK;
+-        case REJECTED:
+-          return new Capable(bestCla.getShortName()
+-              + " contributor agreement was rejected."
+-              + "\n       (rejected on " + bestAgreement.getReviewedOn()
+-              + ")\n");
+-        case NEW:
+-          return new Capable(bestCla.getShortName()
+-              + " contributor agreement is still pending review.\n");
+-      }
+-    }
+-
+-    final StringBuilder msg = new StringBuilder();
+-    msg.append(" A Contributor Agreement must be completed before uploading");
+-    if (canonicalWebUrl != null) {
+-      msg.append(":\n\n  ");
+-      msg.append(canonicalWebUrl);
+-      msg.append("#");
+-      msg.append(PageLinks.SETTINGS_AGREEMENTS);
+-      msg.append("\n");
+-    } else {
+-      msg.append(".");
+-    }
+-    msg.append("\n");
+-    return new Capable(msg.toString());
+-  }
+-
+-  private static boolean missing(final String value) {
+-    return value == null || value.trim().equals("");
+-  }
+-
+   private Account.Id toAccountId(final String nameOrEmail) throws OrmException,
+       NoSuchAccountException {
+     final Account a = accountResolver.findByNameOrEmail(nameOrEmail);
+@@ -2031,5 +1880,4 @@ public class ReceiveCommits implements PreReceiveHook, PostReceiveHook {
+   private static boolean isConfig(final ReceiveCommand cmd) {
+     return cmd.getRefName().equals(GitRepositoryManager.REF_CONFIG);
+   }
+-
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectControl.java b/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectControl.java
+index 104d966..1ad3185 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectControl.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectControl.java
+@@ -16,28 +16,48 @@ package com.google.gerrit.server.project;
+ 
+ import static com.google.gerrit.common.CollectionsUtil.isAnyIncludedIn;
+ 
++import com.google.gerrit.common.PageLinks;
+ import com.google.gerrit.common.data.AccessSection;
++import com.google.gerrit.common.data.Capable;
+ import com.google.gerrit.common.data.Permission;
+ import com.google.gerrit.common.data.PermissionRule;
++import com.google.gerrit.reviewdb.AbstractAgreement;
++import com.google.gerrit.reviewdb.AccountAgreement;
+ import com.google.gerrit.reviewdb.AccountGroup;
++import com.google.gerrit.reviewdb.AccountGroupAgreement;
+ import com.google.gerrit.reviewdb.Branch;
+ import com.google.gerrit.reviewdb.Change;
++import com.google.gerrit.reviewdb.ContributorAgreement;
+ import com.google.gerrit.reviewdb.Project;
++import com.google.gerrit.reviewdb.ReviewDb;
+ import com.google.gerrit.server.CurrentUser;
++import com.google.gerrit.server.IdentifiedUser;
+ import com.google.gerrit.server.ReplicationUser;
++import com.google.gerrit.server.account.GroupCache;
++import com.google.gerrit.server.config.CanonicalWebUrl;
+ import com.google.gerrit.server.config.GitReceivePackGroups;
+ import com.google.gerrit.server.config.GitUploadPackGroups;
++import com.google.gwtorm.client.OrmException;
+ import com.google.inject.Inject;
+ import com.google.inject.Provider;
+ import com.google.inject.assistedinject.Assisted;
+ 
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
+ import java.util.Collection;
+ import java.util.Collections;
+ import java.util.HashSet;
++import java.util.List;
+ import java.util.Set;
+ 
++import javax.annotation.Nullable;
++
+ /** Access control management for a user accessing a project's data. */
+ public class ProjectControl {
++  private static final Logger log =
++      LoggerFactory.getLogger(ProjectControl.class);
++
+   public static final int VISIBLE = 1 << 0;
+   public static final int OWNER = 1 << 1;
+ 
+@@ -108,19 +128,28 @@ public class ProjectControl {
+   private final Set<AccountGroup.UUID> uploadGroups;
+   private final Set<AccountGroup.UUID> receiveGroups;
+ 
++  private final String canonicalWebUrl;
+   private final RefControl.Factory refControlFactory;
++  private final ReviewDb db;
+   private final CurrentUser user;
+   private final ProjectState state;
++  private final GroupCache groupCache;
++
+ 
+   private Collection<AccessSection> access;
+ 
+   @Inject
+   ProjectControl(@GitUploadPackGroups Set<AccountGroup.UUID> uploadGroups,
+       @GitReceivePackGroups Set<AccountGroup.UUID> receiveGroups,
++      final ReviewDb db, final GroupCache groupCache,
++      @CanonicalWebUrl @Nullable final String canonicalWebUrl,
+       final RefControl.Factory refControlFactory,
+       @Assisted CurrentUser who, @Assisted ProjectState ps) {
+     this.uploadGroups = uploadGroups;
+     this.receiveGroups = receiveGroups;
++    this.db = db;
++    this.groupCache = groupCache;
++    this.canonicalWebUrl = canonicalWebUrl;
+     this.refControlFactory = refControlFactory;
+     user = who;
+     state = ps;
+@@ -190,9 +219,148 @@ public class ProjectControl {
+   }
+ 
+   /** @return true if the user can upload to at least one reference */
+-  public boolean canPushToAtLeastOneRef() {
+-    return canPerformOnAnyRef(Permission.PUSH)
+-        || canPerformOnAnyRef(Permission.PUSH_TAG);
++  public Capable canPushToAtLeastOneRef() {
++    if (! canPerformOnAnyRef(Permission.PUSH) &&
++        ! canPerformOnAnyRef(Permission.PUSH_TAG)) {
++      String pName = state.getProject().getName();
++      return new Capable("Upload denied for project '" + pName + "'");
++    }
++    Project project = state.getProject();
++    if (project.isUseContributorAgreements()) {
++      try {
++        return verifyActiveContributorAgreement();
++      } catch (OrmException e) {
++        log.error("Cannot query database for agreements", e);
++        return new Capable("Cannot verify contribution agreement");
++      }
++    }
++    return Capable.OK;
++  }
++
++  private Capable verifyActiveContributorAgreement() throws OrmException {
++    if (! (user instanceof IdentifiedUser)) {
++      return new Capable("Must be logged in to verify Contributor Agreement");
++    }
++    IdentifiedUser iUser = (IdentifiedUser) user;
++
++    AbstractAgreement bestAgreement = null;
++    ContributorAgreement bestCla = null;
++
++    OUTER: for (AccountGroup.UUID groupUUID : iUser.getEffectiveGroups()) {
++      AccountGroup group = groupCache.get(groupUUID);
++      if (group == null) {
++        continue;
++      }
++
++      final List<AccountGroupAgreement> temp =
++          db.accountGroupAgreements().byGroup(group.getId()).toList();
++
++      Collections.reverse(temp);
++
++      for (final AccountGroupAgreement a : temp) {
++        final ContributorAgreement cla =
++            db.contributorAgreements().get(a.getAgreementId());
++        if (cla == null) {
++          continue;
++        }
++
++        bestAgreement = a;
++        bestCla = cla;
++        break OUTER;
++      }
++    }
++
++    if (bestAgreement == null) {
++      final List<AccountAgreement> temp =
++          db.accountAgreements().byAccount(iUser.getAccountId()).toList();
++
++      Collections.reverse(temp);
++
++      for (final AccountAgreement a : temp) {
++        final ContributorAgreement cla =
++            db.contributorAgreements().get(a.getAgreementId());
++        if (cla == null) {
++          continue;
++        }
++
++        bestAgreement = a;
++        bestCla = cla;
++        break;
++      }
++    }
++
++    if (bestCla != null && !bestCla.isActive()) {
++      final StringBuilder msg = new StringBuilder();
++      msg.append(bestCla.getShortName());
++      msg.append(" contributor agreement is expired.\n");
++      if (canonicalWebUrl != null) {
++        msg.append("\nPlease complete a new agreement");
++        msg.append(":\n\n  ");
++        msg.append(canonicalWebUrl);
++        msg.append("#");
++        msg.append(PageLinks.SETTINGS_AGREEMENTS);
++        msg.append("\n");
++      }
++      msg.append("\n");
++      return new Capable(msg.toString());
++    }
++
++    if (bestCla != null && bestCla.isRequireContactInformation()) {
++      boolean fail = false;
++      fail |= missing(iUser.getAccount().getFullName());
++      fail |= missing(iUser.getAccount().getPreferredEmail());
++      fail |= !iUser.getAccount().isContactFiled();
++
++      if (fail) {
++        final StringBuilder msg = new StringBuilder();
++        msg.append(bestCla.getShortName());
++        msg.append(" contributor agreement requires");
++        msg.append(" current contact information.\n");
++        if (canonicalWebUrl != null) {
++          msg.append("\nPlease review your contact information");
++          msg.append(":\n\n  ");
++          msg.append(canonicalWebUrl);
++          msg.append("#");
++          msg.append(PageLinks.SETTINGS_CONTACT);
++          msg.append("\n");
++        }
++        msg.append("\n");
++        return new Capable(msg.toString());
++      }
++    }
++
++    if (bestAgreement != null) {
++      switch (bestAgreement.getStatus()) {
++        case VERIFIED:
++          return Capable.OK;
++        case REJECTED:
++          return new Capable(bestCla.getShortName()
++              + " contributor agreement was rejected."
++              + "\n       (rejected on " + bestAgreement.getReviewedOn()
++              + ")\n");
++        case NEW:
++          return new Capable(bestCla.getShortName()
++              + " contributor agreement is still pending review.\n");
++      }
++    }
++
++    final StringBuilder msg = new StringBuilder();
++    msg.append(" A Contributor Agreement must be completed before uploading");
++    if (canonicalWebUrl != null) {
++      msg.append(":\n\n  ");
++      msg.append(canonicalWebUrl);
++      msg.append("#");
++      msg.append(PageLinks.SETTINGS_AGREEMENTS);
++      msg.append("\n");
++    } else {
++      msg.append(".");
++    }
++    msg.append("\n");
++    return new Capable(msg.toString());
++  }
++
++  private static boolean missing(final String value) {
++    return value == null || value.trim().equals("");
+   }
+ 
+   /**
+diff --git a/gerrit-server/src/test/java/com/google/gerrit/server/project/RefControlTest.java b/gerrit-server/src/test/java/com/google/gerrit/server/project/RefControlTest.java
+index 7f1cfa1..e336f7c 100644
+--- a/gerrit-server/src/test/java/com/google/gerrit/server/project/RefControlTest.java
++++ b/gerrit-server/src/test/java/com/google/gerrit/server/project/RefControlTest.java
+@@ -19,17 +19,20 @@ import static com.google.gerrit.common.data.Permission.PUSH;
+ import static com.google.gerrit.common.data.Permission.READ;
+ import static com.google.gerrit.common.data.Permission.SUBMIT;
+ 
++import com.google.gerrit.common.data.Capable;
+ import com.google.gerrit.common.data.GroupReference;
+ import com.google.gerrit.common.data.PermissionRule;
+ import com.google.gerrit.reviewdb.AccountGroup;
+ import com.google.gerrit.reviewdb.AccountProjectWatch;
+ import com.google.gerrit.reviewdb.Change;
+ import com.google.gerrit.reviewdb.Project;
++import com.google.gerrit.reviewdb.ReviewDb;
+ import com.google.gerrit.rules.PrologEnvironment;
+ import com.google.gerrit.rules.RulesCache;
+ import com.google.gerrit.server.AccessPath;
+ import com.google.gerrit.server.CurrentUser;
+ import com.google.gerrit.server.account.CapabilityControl;
++import com.google.gerrit.server.account.GroupCache;
+ import com.google.gerrit.server.config.AllProjectsName;
+ import com.google.gerrit.server.config.GerritServerConfig;
+ import com.google.gerrit.server.git.GitRepositoryManager;
+@@ -114,7 +117,7 @@ public class RefControlTest extends TestCase {
+     doNotInherit(local, PUSH, "refs/for/refs/heads/foobar");
+ 
+     ProjectControl u = user();
+-    assertTrue("can upload", u.canPushToAtLeastOneRef());
++    assertTrue("can upload", u.canPushToAtLeastOneRef() == Capable.OK);
+ 
+     assertTrue("can upload refs/heads/master", //
+         u.controlForRef("refs/heads/master").canUpload());
+@@ -129,7 +132,7 @@ public class RefControlTest extends TestCase {
+     grant(local, READ, registered, "refs/heads/foobar");
+ 
+     ProjectControl u = user();
+-    assertTrue("can upload", u.canPushToAtLeastOneRef());
++    assertTrue("can upload", u.canPushToAtLeastOneRef() == Capable.OK);
+ 
+     assertTrue("can upload refs/heads/master", //
+         u.controlForRef("refs/heads/master").canUpload());
+@@ -186,7 +189,7 @@ public class RefControlTest extends TestCase {
+     grant(local, PUSH, devs, "refs/for/refs/heads/*");
+ 
+     ProjectControl u = user();
+-    assertFalse("cannot upload", u.canPushToAtLeastOneRef());
++    assertFalse("cannot upload", u.canPushToAtLeastOneRef() == Capable.OK);
+     assertFalse("cannot upload refs/heads/master", //
+         u.controlForRef("refs/heads/master").canUpload());
+   }
+@@ -303,6 +306,10 @@ public class RefControlTest extends TestCase {
+   }
+ 
+   private ProjectControl user(AccountGroup.UUID... memberOf) {
++    ReviewDb db = null;
++    GroupCache groupCache = null;
++    String canonicalWebUrl = "http://localhost";
++
+     RefControl.Factory refControlFactory = new RefControl.Factory() {
+       @Override
+       public RefControl create(final ProjectControl projectControl, final String ref) {
+@@ -310,8 +317,9 @@ public class RefControlTest extends TestCase {
+       }
+     };
+     return new ProjectControl(Collections.<AccountGroup.UUID> emptySet(),
+-        Collections.<AccountGroup.UUID> emptySet(), refControlFactory,
+-        new MockUser(memberOf), newProjectState());
++        Collections.<AccountGroup.UUID> emptySet(), db, groupCache,
++        canonicalWebUrl, refControlFactory, new MockUser(memberOf),
++        newProjectState());
+   }
+ 
+   private ProjectState newProjectState() {
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Receive.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Receive.java
+index 4ba55b7..425d4f8 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Receive.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/Receive.java
+@@ -14,6 +14,7 @@
+ 
+ package com.google.gerrit.sshd.commands;
+ 
++import com.google.gerrit.common.data.Capable;
+ import com.google.gerrit.reviewdb.Account;
+ import com.google.gerrit.server.IdentifiedUser;
+ import com.google.gerrit.server.git.ReceiveCommits;
+@@ -70,8 +71,8 @@ final class Receive extends AbstractGitCommand {
+ 
+     final ReceiveCommits receive = factory.create(projectControl, repo);
+ 
+-    ReceiveCommits.Capable r = receive.canUpload();
+-    if (r != ReceiveCommits.Capable.OK) {
++    Capable r = receive.canUpload();
++    if (r != Capable.OK) {
+       throw new UnloggedFailure(1, "\nfatal: " + r.getMessage());
+     }
+ 
+-- 
+1.7.3.1
+

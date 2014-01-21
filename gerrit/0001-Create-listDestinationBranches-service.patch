@@ -1,0 +1,193 @@
+From 3a74aed3442523124290a3f7768dc76e1dd145d8 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Tue, 28 Feb 2012 17:07:11 -0700
+Subject: [PATCH] Create listDestinationBranches service
+
+This service returns a list of destination branches
+which the current user is allowed to moved changes
+to.
+
+Change-Id: Id50374cdfe865bfed4fd4c2b763c4dd5e4ad6a8d
+---
+ .../gerrit/common/data/ChangeDetailService.java    |    5 ++
+ .../rpc/changedetail/ChangeDetailServiceImpl.java  |   12 +++++-
+ .../httpd/rpc/changedetail/ChangeModule.java       |    1 +
+ .../rpc/changedetail/ListDestinationBranches.java  |   41 ++++++++++++++++++++
+ .../gerrit/httpd/rpc/project/ListBranches.java     |   10 +++-
+ 5 files changed, 65 insertions(+), 4 deletions(-)
+ create mode 100644 gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ListDestinationBranches.java
+
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/ChangeDetailService.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/ChangeDetailService.java
+index 2fbda21..01ae5fc 100644
+--- a/gerrit-common/src/main/java/com/google/gerrit/common/data/ChangeDetailService.java
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/ChangeDetailService.java
+@@ -18,6 +18,7 @@ import com.google.gerrit.common.auth.SignInRequired;
+ import com.google.gerrit.reviewdb.AccountDiffPreference;
+ import com.google.gerrit.reviewdb.Change;
+ import com.google.gerrit.reviewdb.PatchSet;
++import com.google.gerrit.reviewdb.Project;
+ import com.google.gwt.user.client.rpc.AsyncCallback;
+ import com.google.gwtjsonrpc.client.RemoteJsonService;
+ import com.google.gwtjsonrpc.client.RpcImpl;
+@@ -37,4 +38,8 @@ public interface ChangeDetailService extends RemoteJsonService {
+   @SignInRequired
+   void patchSetPublishDetail(PatchSet.Id key,
+       AsyncCallback<PatchSetPublishDetail> callback);
++
++  @SignInRequired
++  void listDestinationBranches(Project.NameKey projectName,
++      AsyncCallback<ListBranchesResult> callback);
+ }
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeDetailServiceImpl.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeDetailServiceImpl.java
+index fa0579e..8b20e97 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeDetailServiceImpl.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeDetailServiceImpl.java
+@@ -17,11 +17,13 @@ package com.google.gerrit.httpd.rpc.changedetail;
+ import com.google.gerrit.common.data.ChangeDetail;
+ import com.google.gerrit.common.data.ChangeDetailService;
+ import com.google.gerrit.common.data.IncludedInDetail;
++import com.google.gerrit.common.data.ListBranchesResult;
+ import com.google.gerrit.common.data.PatchSetDetail;
+ import com.google.gerrit.common.data.PatchSetPublishDetail;
+ import com.google.gerrit.reviewdb.AccountDiffPreference;
+ import com.google.gerrit.reviewdb.Change;
+ import com.google.gerrit.reviewdb.PatchSet;
++import com.google.gerrit.reviewdb.Project;
+ import com.google.gwt.user.client.rpc.AsyncCallback;
+ import com.google.inject.Inject;
+ 
+@@ -30,16 +32,19 @@ class ChangeDetailServiceImpl implements ChangeDetailService {
+   private final IncludedInDetailFactory.Factory includedInDetail;
+   private final PatchSetDetailFactory.Factory patchSetDetail;
+   private final PatchSetPublishDetailFactory.Factory patchSetPublishDetail;
++  private final ListDestinationBranches.Factory listDestinationBranchesFactory;
+ 
+   @Inject
+   ChangeDetailServiceImpl(final ChangeDetailFactory.Factory changeDetail,
+       final IncludedInDetailFactory.Factory includedInDetail,
+       final PatchSetDetailFactory.Factory patchSetDetail,
+-      final PatchSetPublishDetailFactory.Factory patchSetPublishDetail) {
++      final PatchSetPublishDetailFactory.Factory patchSetPublishDetail,
++      final ListDestinationBranches.Factory listDestinationBranchesFactory) {
+     this.changeDetail = changeDetail;
+     this.includedInDetail = includedInDetail;
+     this.patchSetDetail = patchSetDetail;
+     this.patchSetPublishDetail = patchSetPublishDetail;
++    this.listDestinationBranchesFactory = listDestinationBranchesFactory;
+   }
+ 
+   public void changeDetail(final Change.Id id,
+@@ -66,4 +71,9 @@ class ChangeDetailServiceImpl implements ChangeDetailService {
+       final AsyncCallback<PatchSetPublishDetail> callback) {
+     patchSetPublishDetail.create(id).to(callback);
+   }
++
++  public void listDestinationBranches(final Project.NameKey projectName,
++      final AsyncCallback<ListBranchesResult> callback) {
++    listDestinationBranchesFactory.create(projectName).to(callback);
++  }
+ }
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeModule.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeModule.java
+index 7cd73c2..3015c6a 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeModule.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeModule.java
+@@ -36,6 +36,7 @@ public class ChangeModule extends RpcServletModule {
+         factory(IncludedInDetailFactory.Factory.class);
+         factory(PatchSetDetailFactory.Factory.class);
+         factory(PatchSetPublishDetailFactory.Factory.class);
++        factory(ListDestinationBranches.Factory.class);
+         factory(SubmitAction.Factory.class);
+         factory(PublishAction.Factory.class);
+         factory(DeleteDraftChange.Factory.class);
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ListDestinationBranches.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ListDestinationBranches.java
+new file mode 100644
+index 0000000..fb76e60
+--- /dev/null
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ListDestinationBranches.java
+@@ -0,0 +1,41 @@
++// Copyright (C) 2009 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.httpd.rpc.changedetail;
++
++import com.google.gerrit.httpd.rpc.project.ListBranches;
++import com.google.gerrit.reviewdb.Project;
++import com.google.gerrit.server.git.GitRepositoryManager;
++import com.google.gerrit.server.project.ProjectControl;
++import com.google.gerrit.server.project.RefControl;
++import com.google.inject.Inject;
++import com.google.inject.assistedinject.Assisted;
++
++class ListDestinationBranches extends ListBranches {
++  interface Factory {
++    ListDestinationBranches create(@Assisted Project.NameKey name);
++  }
++
++  @Inject
++  ListDestinationBranches(final ProjectControl.Factory projectControlFactory,
++      final GitRepositoryManager repoManager,
++
++      @Assisted final Project.NameKey name) {
++    super(projectControlFactory, repoManager, name);
++  }
++
++  protected boolean isListedRef(RefControl targetRefControl) {
++    return targetRefControl.canMoveTo();
++  }
++}
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/project/ListBranches.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/project/ListBranches.java
+index 7be0f66..b97fe8e 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/project/ListBranches.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/project/ListBranches.java
+@@ -40,7 +40,7 @@ import java.util.List;
+ import java.util.Map;
+ import java.util.Set;
+ 
+-class ListBranches extends Handler<ListBranchesResult> {
++public class ListBranches extends Handler<ListBranchesResult> {
+   interface Factory {
+     ListBranches create(@Assisted Project.NameKey name);
+   }
+@@ -51,7 +51,7 @@ class ListBranches extends Handler<ListBranchesResult> {
+   private final Project.NameKey projectName;
+ 
+   @Inject
+-  ListBranches(final ProjectControl.Factory projectControlFactory,
++  protected ListBranches(final ProjectControl.Factory projectControlFactory,
+       final GitRepositoryManager repoManager,
+ 
+       @Assisted final Project.NameKey name) {
+@@ -109,7 +109,7 @@ class ListBranches extends Handler<ListBranchesResult> {
+           //
+           String target = ref.getTarget().getName();
+           RefControl targetRefControl = pctl.controlForRef(target);
+-          if (!targetRefControl.isVisible()) {
++          if (!isListedRef(targetRefControl)) {
+             continue;
+           }
+           if (target.startsWith(Constants.R_HEADS)) {
+@@ -156,6 +156,10 @@ class ListBranches extends Handler<ListBranchesResult> {
+     return new ListBranchesResult(branches, pctl.canAddRefs(), false);
+   }
+ 
++  protected boolean isListedRef(RefControl targetRefControl) {
++    return targetRefControl.isVisible();
++  }
++
+   private Branch createBranch(final Ref ref, final RefControl refControl,
+       final Set<String> targets) {
+     final Branch b = createBranch(ref.getName());
+-- 
+1.7.8
+

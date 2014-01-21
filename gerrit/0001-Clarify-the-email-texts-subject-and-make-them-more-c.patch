@@ -1,0 +1,219 @@
+From 4d25b9afcc8dc2cc0c382d03225a0256b6833d15 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Wed, 4 Aug 2010 17:20:52 -0600
+Subject: [PATCH] Clarify the email texts/subject and make them more consistent
+
+Add the Change-Id and PatchSetId to the change footer. Use
+the subject to refer to changes instead of the abbreviated
+id.  Make the header section more similar for the different
+message types.  Eliminate some redundant urls in footer and
+body. Use merge-failed as a message type instead of comment.
+Shorten the subject line (project path), remove the change
+id from it.
+
+Bug: issue 311
+Change-Id: Ia4e616683608e9665ad6f0eaf7433be5edf2ed88
+---
+ .../google/gerrit/server/mail/MergeFailSender.java |    2 +-
+ .../com/google/gerrit/server/mail/Abandoned.vm     |    6 +++++-
+ .../com/google/gerrit/server/mail/ChangeFooter.vm  |    2 ++
+ .../com/google/gerrit/server/mail/ChangeSubject.vm |    2 +-
+ .../com/google/gerrit/server/mail/Comment.vm       |   10 +++++-----
+ .../com/google/gerrit/server/mail/MergeFail.vm     |    7 +++++--
+ .../com/google/gerrit/server/mail/Merged.vm        |   10 ++++++++--
+ .../com/google/gerrit/server/mail/NewChange.vm     |   15 +++++----------
+ .../google/gerrit/server/mail/ReplacePatchSet.vm   |   17 ++++++-----------
+ 9 files changed, 38 insertions(+), 33 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/MergeFailSender.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/MergeFailSender.java
+index cf8f590..19fb48b 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/MergeFailSender.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/MergeFailSender.java
+@@ -26,7 +26,7 @@ public class MergeFailSender extends ReplyToChangeSender {
+ 
+   @Inject
+   public MergeFailSender(EmailArguments ea, @Assisted Change c) {
+-    super(ea, c, "comment");
++    super(ea, c, "merge-failed");
+   }
+ 
+   @Override
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Abandoned.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Abandoned.vm
+index 557ee60..20529b2 100644
+--- a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Abandoned.vm
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Abandoned.vm
+@@ -32,7 +32,11 @@
+ ## to a change being abandoned.   It is a ChangeEmail: see ChangeSubject.vm and
+ ## ChangeFooter.vm.
+ ##
+-$fromName has abandoned change $changeId.abbreviate():
++$fromName has abandoned this change.
++
++Change subject: $change.subject
++......................................................................
++
+ 
+ #if ($coverLetter)
+ $coverLetter
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeFooter.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeFooter.vm
+index c15d6ef..3d3fe0c 100644
+--- a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeFooter.vm
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeFooter.vm
+@@ -44,6 +44,8 @@ To unsubscribe, visit $email.settingsUrl
+ 
+ #end
+ Gerrit-MessageType: $messageClass
++Gerrit-ChangeId: $changeId
++Gerrit-PatchSetId:$patchSet.patchSetId
+ Gerrit-Project: $projectName
+ Gerrit-Branch: $branch.shortName
+ Gerrit-Owner: $email.getNameEmailFor($change.owner)
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeSubject.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeSubject.vm
+index 2132c63..24cc23c 100644
+--- a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeSubject.vm
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ChangeSubject.vm
+@@ -34,4 +34,4 @@
+ #macro(elipses $length $str)
+ #if($str.length() > $length)${str.substring(0,$length)}...#else$str#end
+ #end
+-[$branch.shortName] Change $changeId.abbreviate(): ($projectName) #elipses(60, $change.subject)
++Change in $projectName.replaceAll('/.*/', '...')[$branch.shortName]: #elipses(60, $change.subject)
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Comment.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Comment.vm
+index b7ba89e..4ad355b 100644
+--- a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Comment.vm
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Comment.vm
+@@ -33,15 +33,15 @@
+ ## ChangeSubject.vm and ChangeFooter.vm.
+ ##
+ #if ($email.coverLetter || $email.inlineComments)
+-Comments on Patch Set $patchSet.patchSetId:
++$fromName has posted comments on this change.
++
++Change subject: $change.subject
++......................................................................
++
+ 
+ #if ($email.coverLetter)
+ $email.coverLetter
+ 
+ #end
+ #if($email.inlineComments)$email.inlineComments#end
+-#if ($email.changeUrl)
+-To respond, visit $email.changeUrl
+-
+-#end
+ #end
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/MergeFail.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/MergeFail.vm
+index 17036a1..dfe3d92 100644
+--- a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/MergeFail.vm
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/MergeFail.vm
+@@ -32,8 +32,11 @@
+ ## to a failure upon attempting to merge a change to the head.  It is a
+ ## ChangeEmail: see ChangeSubject.vm and ChangeFooter.vm.
+ ##
+-Change $change.key.abbreviate()#if ($patchSetInfo.author.name)
+- by $patchSetInfo.author.name#end FAILED to submit to ${change.dest.shortName}.
++$fromName has submitted this change and it FAILED to merge.
++
++Change subject: $change.subject
++......................................................................
++
+ 
+ #if ($email.coverLetter)
+ $email.coverLetter
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Merged.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Merged.vm
+index c459c16..296a37a 100644
+--- a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Merged.vm
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/Merged.vm
+@@ -32,7 +32,13 @@
+ ## a change successfully merged to the head.  It is a ChangeEmail: see
+ ## ChangeSubject.vm and ChangeFooter.vm.
+ ##
+-Change $changeId.abbreviate()#if ($patchSetInfo.author.name)
+- by $patchSetInfo.author.name#end submitted to $change.dest.shortName:
++#macro(elipses $length $str)
++#if($str.length() > $length)${str.substring(0,$length)}...#else$str#end
++#end
++$fromName has submitted this change and it was merged.
++
++Change subject: $change.subject
++......................................................................
++
+ 
+ $email.changeDetail$email.approvals
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/NewChange.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/NewChange.vm
+index 7f61039..a9a5fed 100644
+--- a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/NewChange.vm
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/NewChange.vm
+@@ -32,7 +32,6 @@
+ ## to a user submitting a new change for review. It is a ChangeEmail: see
+ ## ChangeSubject.vm and ChangeFooter.vm.
+ ##
+-#set ($destination = "Change $changeId.abbreviate() for $branch.shortName in $projectName:")
+ #if($email.reviewerNames)
+ Hello $StringUtils.join($email.reviewerNames, ' ,'),
+ 
+@@ -40,18 +39,14 @@ I'd like you to do a code review.#if($email.changeUrl)  Please visit
+ 
+     $email.changeUrl
+ 
+-to review the following change:
++to review the following change.
+ #end
+-
+-$destination
+ #else
+-$destination
+-#if($email.changeUrl)
+-
+-    $email.changeUrl
+-
+-#end
++$fromName has uploaded a new change for review.
+ #end
+ 
++Change subject: $change.subject
++......................................................................
++
+ $email.changeDetail
+   git pull ssh://$email.sshHost/$projectName $patchSet.refName
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ReplacePatchSet.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ReplacePatchSet.vm
+index d13b6af..bdaa76d 100644
+--- a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ReplacePatchSet.vm
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ReplacePatchSet.vm
+@@ -32,26 +32,21 @@
+ ## related to a user submitting a new patchset for a change.  It is a
+ ## ChangeEmail: see ChangeSubject.vm and ChangeFooter.vm.
+ ##
+-#set ($destination = "Change $changeId.abbreviate() (patch set $patchSet.patchSetId) for $branch.shortName in $projectName:")
+ #if($email.reviewerNames)
+ Hello $StringUtils.join($email.reviewerNames, ' ,'),
+ 
+-I'd like you to reexamine change ${changeId.abbreviate()}.#if($email.changeUrl)  Please visit
++I'd like you to reexamine a change.#if($email.changeUrl)  Please visit
+ 
+     $email.changeUrl
+ 
+-to look at patch set $patchSet.patchSetId
++to look at the new patch set(#$patchSet.patchSetId).
+ #end
+-
+-$destination
+ #else
+-$destination
+-#if($email.changeUrl)
+-
+-    $email.changeUrl
+-
+-#end
++$fromName has uploaded a new patch set(#$patchSet.patchSetId) to this change for review.
+ #end
+ 
++Change subject: $change.subject
++......................................................................
++
+ $email.changeDetail
+   git pull ssh://$email.sshHost/$projectName $patchSet.refName
+-- 
+1.7.2.2
+

@@ -1,0 +1,216 @@
+From b01ff0dd830d941364c22d4a6276463699aceea8 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Thu, 29 Nov 2012 17:58:13 -0700
+Subject: [PATCH] Create a CHANGE dashboard type.
+
+Create a new project type of dashboard, a "CHANGE" dashboard.
+A change dashboard is similar to a project default dashboard,
+it is defined by adding an entry to they project config file:
+
+ [dashboards]
+    change = default:change
+
+If a project has a CHANGE dashboard defined for it (either
+directly or via inheritance), the info about this dash is
+added to the ChangeDetail object on creation so that it may
+be displayed by UI objects which use a ChangeDetail (however
+this change does not attempt to make use of it in the UI yet).
+
+Change-Id: Ib9233e7e50cfb9d09963e6f202c6e7a843a92245
+---
+ .../google/gerrit/common/data/ChangeDetail.java    |   18 +++++++++++++++
+ .../rpc/changedetail/ChangeDetailFactory.java      |   24 +++++++++++++++++++-
+ .../com/google/gerrit/reviewdb/client/Project.java |    3 +-
+ .../google/gerrit/server/git/ProjectConfig.java    |    8 ++++++
+ .../server/project/DashboardsCollection.java       |    6 +++-
+ 5 files changed, 55 insertions(+), 4 deletions(-)
+
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/ChangeDetail.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/ChangeDetail.java
+index 23969a0..cfe24c8 100644
+--- a/gerrit-common/src/main/java/com/google/gerrit/common/data/ChangeDetail.java
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/ChangeDetail.java
+@@ -50,6 +50,8 @@ public class ChangeDetail {
+   protected PatchSetDetail currentDetail;
+   protected boolean canEdit;
+   protected boolean canEditTopicName;
++  protected String dashboardTitle;
++  protected String dashboardParams;
+ 
+   public ChangeDetail() {
+   }
+@@ -259,4 +261,20 @@ public class ChangeDetail {
+   public boolean canEdit() {
+     return canEdit;
+   }
++
++  public String getDashboardTitle() {
++    return dashboardTitle;
++  }
++
++  public void setDashboardTitle(String dashboardTitle) {
++    this.dashboardTitle = dashboardTitle;
++  }
++
++  public String getDashboardParameters() {
++    return dashboardParams;
++  }
++
++  public void setDashboardParameters(String dashboardParams) {
++    this.dashboardParams = dashboardParams;
++  }
+ }
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeDetailFactory.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeDetailFactory.java
+index 6357e14..818df5b 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeDetailFactory.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/changedetail/ChangeDetailFactory.java
+@@ -22,6 +22,7 @@ import com.google.gerrit.common.data.ChangeInfo;
+ import com.google.gerrit.common.data.PermissionRange;
+ import com.google.gerrit.common.data.SubmitRecord;
+ import com.google.gerrit.common.errors.NoSuchEntityException;
++import com.google.gerrit.extensions.restapi.ResourceNotFoundException;
+ import com.google.gerrit.httpd.rpc.Handler;
+ import com.google.gerrit.reviewdb.client.Account;
+ import com.google.gerrit.reviewdb.client.Change;
+@@ -29,6 +30,7 @@ import com.google.gerrit.reviewdb.client.ChangeMessage;
+ import com.google.gerrit.reviewdb.client.PatchSet;
+ import com.google.gerrit.reviewdb.client.PatchSetAncestor;
+ import com.google.gerrit.reviewdb.client.PatchSetApproval;
++import com.google.gerrit.reviewdb.client.Project;
+ import com.google.gerrit.reviewdb.client.RevId;
+ import com.google.gerrit.reviewdb.server.ReviewDb;
+ import com.google.gerrit.server.AnonymousUser;
+@@ -56,6 +58,7 @@ import com.google.inject.Inject;
+ import com.google.inject.Provider;
+ import com.google.inject.assistedinject.Assisted;
+ 
++import org.eclipse.jgit.errors.ConfigInvalidException;
+ import org.eclipse.jgit.errors.RepositoryNotFoundException;
+ import org.eclipse.jgit.lib.Config;
+ 
+@@ -85,6 +88,7 @@ public class ChangeDetailFactory extends Handler<ChangeDetail> {
+   private final AnonymousUser anonymousUser;
+   private final ReviewDb db;
+   private final GitRepositoryManager repoManager;
++  private final Provider<GetDashboard> dashboardProvider;
+ 
+   private final Change.Id changeId;
+ 
+@@ -110,6 +114,7 @@ public class ChangeDetailFactory extends Handler<ChangeDetail> {
+       final AccountInfoCacheFactory.Factory accountInfoCacheFactory,
+       final AnonymousUser anonymousUser,
+       final MergeOp.Factory opFactory,
++      final Provider<GetDashboard> dashboardProvider,
+       @GerritServerConfig final Config cfg,
+       @Assisted final Change.Id id) {
+     this.approvalTypes = approvalTypes;
+@@ -125,7 +130,7 @@ public class ChangeDetailFactory extends Handler<ChangeDetail> {
+ 
+     this.opFactory = opFactory;
+     this.testMerge = cfg.getBoolean("changeMerge", "test", false);
+-
++    this.dashboardProvider = dashboardProvider;
+     this.changeId = id;
+   }
+ 
+@@ -192,9 +197,26 @@ public class ChangeDetailFactory extends Handler<ChangeDetail> {
+         RebaseChange.canDoRebase(db, change, repoManager,
+             currentPatchSetAncestors, currentDepPatchSets, currentDepChanges));
+     detail.setAccounts(aic.create());
++    loadDashboard();
+     return detail;
+   }
+ 
++  private void loadDashboard() {
++    GetDashboard getDashboard = dashboardProvider.get();
++    DashboardResource resource = DashboardResource.projectTyped(
++        control.getProjectControl(), Project.DashboardType.CHANGE);
++    try {
++      DashboardInfo info = getDashboard.apply(resource);
++      detail.setDashboardTitle(info.title);
++      detail.setDashboardParameters(info.parameters);
++
++      // Exceptions loading dashboard, ignore so we can still load a change.
++    } catch (IOException e) {
++    } catch (ConfigInvalidException e) {
++    } catch (ResourceNotFoundException e) {
++    }
++  }
++
+   private void loadPatchSets() throws OrmException {
+     ResultSet<PatchSet> source = db.patchSets().byChange(changeId);
+     List<PatchSet> patches = new ArrayList<PatchSet>();
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/client/Project.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/client/Project.java
+index 987a9ce..876d174 100644
+--- a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/client/Project.java
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/client/Project.java
+@@ -100,7 +100,8 @@ public final class Project {
+   }
+ 
+   public static enum DashboardType {
+-    DEFAULT("default");
++    DEFAULT("default"),
++    CHANGE("change");
+ 
+     public final String id;
+ 
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/git/ProjectConfig.java b/gerrit-server/src/main/java/com/google/gerrit/server/git/ProjectConfig.java
+index c950517..f99fe6a 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/git/ProjectConfig.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/git/ProjectConfig.java
+@@ -96,7 +96,9 @@ public class ProjectConfig extends VersionedMetaData {
+ 
+   private static final String DASHBOARD = "dashboard";
+   private static final String KEY_DEFAULT = "default";
++  private static final String KEY_CHANGE = "change";
+   private static final String KEY_LOCAL_DEFAULT = "local-default";
++  private static final String KEY_LOCAL_CHANGE = "local-change";
+ 
+   private static final SubmitType defaultSubmitAction =
+       SubmitType.MERGE_IF_NECESSARY;
+@@ -298,6 +300,9 @@ public class ProjectConfig extends VersionedMetaData {
+     p.setDashboard(Project.DashboardType.DEFAULT, rc.getString(DASHBOARD, null, KEY_DEFAULT));
+     p.setLocalDashboard(Project.DashboardType.DEFAULT, rc.getString(DASHBOARD, null, KEY_LOCAL_DEFAULT));
+ 
++    p.setDashboard(Project.DashboardType.CHANGE, rc.getString(DASHBOARD, null, KEY_CHANGE));
++    p.setLocalDashboard(Project.DashboardType.CHANGE, rc.getString(DASHBOARD, null, KEY_LOCAL_CHANGE));
++
+     loadAccountsSection(rc, groupsByName);
+     loadContributorAgreements(rc, groupsByName);
+     loadAccessSections(rc, groupsByName);
+@@ -548,6 +553,9 @@ public class ProjectConfig extends VersionedMetaData {
+     set(rc, DASHBOARD, null, KEY_DEFAULT, p.getDashboard(Project.DashboardType.DEFAULT));
+     set(rc, DASHBOARD, null, KEY_LOCAL_DEFAULT, p.getLocalDashboard(Project.DashboardType.DEFAULT));
+ 
++    set(rc, DASHBOARD, null, KEY_CHANGE, p.getDashboard(Project.DashboardType.CHANGE));
++    set(rc, DASHBOARD, null, KEY_LOCAL_CHANGE, p.getLocalDashboard(Project.DashboardType.CHANGE));
++
+     Set<AccountGroup.UUID> keepGroups = new HashSet<AccountGroup.UUID>();
+     saveAccountsSection(rc, keepGroups);
+     saveContributorAgreements(rc, keepGroups);
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/project/DashboardsCollection.java b/gerrit-server/src/main/java/com/google/gerrit/server/project/DashboardsCollection.java
+index fa7faee..c82c788 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/project/DashboardsCollection.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/project/DashboardsCollection.java
+@@ -169,7 +169,9 @@ public class DashboardsCollection implements
+     DashboardInfo info = new DashboardInfo(refName, path);
+     info.project = project;
+     info.definingProject = definingProject.getName();
+-    info.title = config.getString("dashboard", null, "title");
++    info.title = Objects.firstNonNull(
++        config.getString("dashboard", null, "title"),
++        info.path);
+     info.description = config.getString("dashboard", null, "description");
+     info.foreach = config.getString("dashboard", null, "foreach");
+ 
+@@ -181,7 +183,7 @@ public class DashboardsCollection implements
+     }
+ 
+     UrlEncoded u = new UrlEncoded("/dashboard/");
+-    u.put("title", Objects.firstNonNull(info.title, info.path)
++    u.put("title", info.title);
+     if (info.foreach != null) {
+       u.put("foreach", replace(project, info.foreach));
+     }
+-- 
+1.7.8
+

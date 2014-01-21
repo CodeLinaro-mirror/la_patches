@@ -1,0 +1,153 @@
+From 70df507367a66294f0b59b2f8acf57d6ec4b4524 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Mon, 6 Feb 2012 15:39:09 -0700
+Subject: [PATCH] Add changeMoved hook
+
+Add a new changeMoved hook and call it when a change
+moves to a new branch.
+
+Change-Id: I810365cdd48ef3c7e408aba41663237d2e0a39c2
+---
+ .../com/google/gerrit/common/ChangeHookRunner.java |   25 ++++++++++++++++++++
+ .../gerrit/server/changedetail/MoveChange.java     |   10 ++++++-
+ .../gerrit/server/events/ChangeMovedEvent.java     |   22 +++++++++++++++++
+ 3 files changed, 55 insertions(+), 2 deletions(-)
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeMovedEvent.java
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/common/ChangeHookRunner.java b/gerrit-server/src/main/java/com/google/gerrit/common/ChangeHookRunner.java
+index 6ecf19b..8c5cb6c 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/common/ChangeHookRunner.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/common/ChangeHookRunner.java
+@@ -35,6 +35,7 @@ import com.google.gerrit.server.events.ApprovalAttribute;
+ import com.google.gerrit.server.events.ChangeAbandonedEvent;
+ import com.google.gerrit.server.events.ChangeEvent;
+ import com.google.gerrit.server.events.ChangeMergedEvent;
++import com.google.gerrit.server.events.ChangeMovedEvent;
+ import com.google.gerrit.server.events.ChangeRestoreEvent;
+ import com.google.gerrit.server.events.CommentAddedEvent;
+ import com.google.gerrit.server.events.EventFactory;
+@@ -105,6 +106,9 @@ public class ChangeHookRunner implements ChangeHooks {
+     /** Filename of the change merged hook. */
+     private final File changeMergedHook;
+ 
++    /** Filename of the change moved hook. */
++    private final File changeMovedHook;
++
+     /** Filename of the change abandoned hook. */
+     private final File changeAbandonedHook;
+ 
+@@ -163,6 +167,7 @@ public class ChangeHookRunner implements ChangeHooks {
+         patchsetCreatedHook = sitePath.resolve(new File(hooksPath, getValue(config, "hooks", "patchsetCreatedHook", "patchset-created")).getPath());
+         commentAddedHook = sitePath.resolve(new File(hooksPath, getValue(config, "hooks", "commentAddedHook", "comment-added")).getPath());
+         changeMergedHook = sitePath.resolve(new File(hooksPath, getValue(config, "hooks", "changeMergedHook", "change-merged")).getPath());
++        changeMovedHook = sitePath.resolve(new File(hooksPath, getValue(config, "hooks", "changeMovedHook", "change-moved")).getPath());
+         changeAbandonedHook = sitePath.resolve(new File(hooksPath, getValue(config, "hooks", "changeAbandonedHook", "change-abandoned")).getPath());
+         changeRestoredHook = sitePath.resolve(new File(hooksPath, getValue(config, "hooks", "changeRestoredHook", "change-restored")).getPath());
+         refUpdatedHook = sitePath.resolve(new File(hooksPath, getValue(config, "hooks", "refUpdatedHook", "ref-updated")).getPath());
+@@ -300,6 +305,26 @@ public class ChangeHookRunner implements ChangeHooks {
+         runHook(openRepository(change), changeMergedHook, args);
+     }
+ 
++    public void doChangeMovedHook(final Change change, final Account account,
++          final String reason, final ReviewDb db) throws OrmException {
++        final ChangeMovedEvent event = new ChangeMovedEvent();
++
++        event.change = eventFactory.asChangeAttribute(change);
++        event.mover = eventFactory.asAccountAttribute(account);
++        event.reason = reason;
++        fireEvent(change, event, db);
++
++        final List<String> args = new ArrayList<String>();
++        addArg(args, "--change", event.change.id);
++        addArg(args, "--change-url", event.change.url);
++        addArg(args, "--project", event.change.project);
++        addArg(args, "--new-branch", event.change.branch);
++        addArg(args, "--mover", getDisplayName(account));
++        addArg(args, "--reason", reason == null ? "" : reason);
++
++        runHook(openRepository(change), changeMovedHook, args);
++    }
++
+     public void doChangeAbandonedHook(final Change change, final Account account,
+           final String reason, final ReviewDb db) throws OrmException {
+         final ChangeAbandonedEvent event = new ChangeAbandonedEvent();
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/changedetail/MoveChange.java b/gerrit-server/src/main/java/com/google/gerrit/server/changedetail/MoveChange.java
+index 075e238..edf622e 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/changedetail/MoveChange.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/changedetail/MoveChange.java
+@@ -15,6 +15,7 @@
+ 
+ package com.google.gerrit.server.changedetail;
+ 
++import com.google.gerrit.common.ChangeHookRunner;
+ import com.google.gerrit.reviewdb.Branch;
+ import com.google.gerrit.reviewdb.Change;
+ import com.google.gerrit.reviewdb.ChangeMessage;
+@@ -50,6 +51,7 @@ public class MoveChange implements Callable<VoidResult> {
+   private final ReviewDb db;
+   private final IdentifiedUser currentUser;
+   private final ChangeMovedSender.Factory senderFactory;
++  private final ChangeHookRunner hooks;
+ 
+   private final PatchSet.Id patchSetId;
+   private final String branch;
+@@ -58,8 +60,8 @@ public class MoveChange implements Callable<VoidResult> {
+ 
+   @Inject
+   MoveChange(final ChangeControl.Factory changeControlFactory, final ReviewDb db,
+-      final IdentifiedUser currentUser,
+-      final ChangeMovedSender.Factory senderFactory, 
++      final IdentifiedUser currentUser, final ChangeHookRunner hooks,
++      final ChangeMovedSender.Factory senderFactory,
+       final @Assisted PatchSet.Id patchSetId,
+       final @Assisted("branch") String branch,
+       final @Assisted("message") @Nullable String changeComment) {
+@@ -67,6 +69,7 @@ public class MoveChange implements Callable<VoidResult> {
+     this.db = db;
+     this.currentUser = currentUser;
+     this.senderFactory = senderFactory;
++    this.hooks = hooks;
+ 
+     this.patchSetId = patchSetId;
+     this.branch = branch;
+@@ -124,6 +127,9 @@ public class MoveChange implements Callable<VoidResult> {
+     cm.setChangeMessage(cmsg);
+     cm.send();
+ 
++    hooks.doChangeMovedHook(updatedChange, currentUser.getAccount(),
++        changeComment, db);
++
+     return VoidResult.INSTANCE;
+   }
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeMovedEvent.java b/gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeMovedEvent.java
+new file mode 100644
+index 0000000..4eb1f13
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeMovedEvent.java
+@@ -0,0 +1,22 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.server.events;
++
++public class ChangeMovedEvent extends ChangeEvent {
++    public final String type = "change-moved";
++    public ChangeAttribute change;
++    public AccountAttribute mover;
++    public String reason;
++}
+-- 
+1.7.8
+
