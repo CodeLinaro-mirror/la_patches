@@ -1,0 +1,148 @@
+From 8d11790c24ea46843eb139627d86c7e8f724a2e1 Mon Sep 17 00:00:00 2001
+From: Keunhong Park <keunhong@codeaurora.org>
+Date: Tue, 17 Jul 2012 14:57:18 -0600
+Subject: [PATCH] Add validity check to gerrit ssh query
+
+This requires the --dependencies flag to be on as the dependencies
+are required for checking the validity of a change.
+
+Change-Id: Ib2b8e36894d9117791eded14028e9e4262acab76
+---
+ .../gerrit/server/events/ChangeAttribute.java      |    3 ++
+ .../google/gerrit/server/events/EventFactory.java  |   22 ++++++++++++++++++-
+ .../gerrit/server/query/change/QueryProcessor.java |    7 +++++-
+ 3 files changed, 29 insertions(+), 3 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeAttribute.java b/gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeAttribute.java
+index 9810f59..97cac42 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeAttribute.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeAttribute.java
+@@ -17,6 +17,7 @@ package com.google.gerrit.server.events;
+ import com.google.gerrit.reviewdb.client.Change;
+ 
+ import java.util.List;
++import java.util.Set;
+ 
+ public class ChangeAttribute {
+     public String project;
+@@ -42,4 +43,6 @@ public class ChangeAttribute {
+ 
+     public List<DependencyAttribute> dependsOn;
+     public List<DependencyAttribute> neededBy;
++
++    public Set<Change.DependencyError> dependencyErrors;
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java b/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java
+index 41cac4e..90ba0de 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java
+@@ -27,12 +27,17 @@ import com.google.gerrit.reviewdb.client.PatchSetApproval;
+ import com.google.gerrit.reviewdb.client.RevId;
+ import com.google.gerrit.reviewdb.client.TrackingId;
+ import com.google.gerrit.reviewdb.server.ReviewDb;
++import com.google.gerrit.server.CurrentUser;
++import com.google.gerrit.server.ChangeUtil;
++import com.google.gerrit.server.DependencyUtil;
+ import com.google.gerrit.server.account.AccountCache;
+ import com.google.gerrit.server.config.CanonicalWebUrl;
+ import com.google.gerrit.server.patch.PatchList;
+ import com.google.gerrit.server.patch.PatchListCache;
+ import com.google.gerrit.server.patch.PatchListEntry;
+ import com.google.gerrit.server.patch.PatchListNotAvailableException;
++import com.google.gerrit.server.project.ChangeControl;
++import com.google.gerrit.server.project.NoSuchChangeException;
+ import com.google.gwtorm.server.OrmException;
+ import com.google.gwtorm.server.SchemaFactory;
+ import com.google.inject.Inject;
+@@ -46,6 +51,7 @@ import org.slf4j.LoggerFactory;
+ import java.util.ArrayList;
+ import java.util.Collection;
+ import java.util.Map;
++import java.util.Set;
+ 
+ import javax.annotation.Nullable;
+ 
+@@ -57,17 +63,23 @@ public class EventFactory {
+   private final ApprovalTypes approvalTypes;
+   private final PatchListCache patchListCache;
+   private final SchemaFactory<ReviewDb> schema;
++  private final CurrentUser currentUser;
++  private final ChangeControl.GenericFactory changeControlFactory;
+ 
+   @Inject
+   EventFactory(AccountCache accountCache,
+       @CanonicalWebUrl @Nullable Provider<String> urlProvider,
+       ApprovalTypes approvalTypes,
+-      PatchListCache patchListCache, SchemaFactory<ReviewDb> schema) {
++      PatchListCache patchListCache, SchemaFactory<ReviewDb> schema,
++      CurrentUser currentUser,
++      ChangeControl.GenericFactory changeControlFactory) {
+     this.accountCache = accountCache;
+     this.urlProvider = urlProvider;
+     this.approvalTypes = approvalTypes;
+     this.patchListCache = patchListCache;
+     this.schema = schema;
++    this.currentUser = currentUser;
++    this.changeControlFactory = changeControlFactory;
+   }
+ 
+   /**
+@@ -121,7 +133,8 @@ public class EventFactory {
+     a.status = change.getStatus();
+   }
+ 
+-  public void addDependencies(ChangeAttribute ca, Change change) {
++  public void addDependencies(ChangeAttribute ca, Change change,
++      Map<Change.Id, Set<Change.DependencyError>> processedChanges) {
+     ca.dependsOn = new ArrayList<DependencyAttribute>();
+     ca.neededBy = new ArrayList<DependencyAttribute>();
+     try {
+@@ -142,6 +155,11 @@ public class EventFactory {
+           final Change c = db.changes().get(p.getId().getParentKey());
+           ca.neededBy.add(newNeededBy(c, p));
+         }
++
++        if (ca.dependsOn != null) {
++          ca.dependencyErrors = DependencyUtil.findDependencyErrors(db, change, changeControlFactory, currentUser, processedChanges);
++        }
++      } catch (NoSuchChangeException e) {
+       } finally {
+         db.close();
+       }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/query/change/QueryProcessor.java b/gerrit-server/src/main/java/com/google/gerrit/server/query/change/QueryProcessor.java
+index 76945f4..3f971fa 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/query/change/QueryProcessor.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/query/change/QueryProcessor.java
+@@ -48,8 +48,11 @@ import java.util.Collection;
+ import java.util.Collections;
+ import java.util.Comparator;
+ import java.util.Date;
++import java.util.HashMap;
+ import java.util.HashSet;
+ import java.util.List;
++import java.util.Map;
++import java.util.Set;
+ 
+ public class QueryProcessor {
+   private static final Logger log =
+@@ -254,6 +257,8 @@ public class QueryProcessor {
+         stats.runTimeMilliseconds = System.currentTimeMillis();
+ 
+         List<ChangeData> results = queryChanges(queryString);
++        Map<Change.Id, Set<Change.DependencyError>> processedChanges =
++            new HashMap<Change.Id, Set<Change.DependencyError>>();
+         for (ChangeData d : results) {
+           ChangeAttribute c = eventFactory.asChangeAttribute(d.getChange());
+           eventFactory.extend(c, d.getChange());
+@@ -298,7 +303,7 @@ public class QueryProcessor {
+           }
+ 
+           if (includeDependencies) {
+-            eventFactory.addDependencies(c, d.getChange());
++            eventFactory.addDependencies(c, d.getChange(), processedChanges);
+           }
+ 
+           show(c);
+-- 
+1.7.8.3
+

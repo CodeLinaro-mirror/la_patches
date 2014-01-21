@@ -1,0 +1,39 @@
+From 6221a87d043526a8dea6d22697cdb06eacfb31b6 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Fri, 19 Aug 2011 15:40:37 -0600
+Subject: [PATCH] Add createdOn to Changes in query output
+
+Bug: 1093
+Change-Id: I3ddbad7523d05f252c3f4ad112d38fc149097223
+---
+ .../gerrit/server/events/ChangeAttribute.java      |    1 +
+ .../google/gerrit/server/events/EventFactory.java  |    1 +
+ 2 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeAttribute.java b/gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeAttribute.java
+index 8138d20..e9a977e 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeAttribute.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/events/ChangeAttribute.java
+@@ -28,6 +28,7 @@ public class ChangeAttribute {
+     public AccountAttribute owner;
+     public String url;
+ 
++    public Long createdOn;
+     public Long lastUpdated;
+     public String sortKey;
+     public Boolean open;
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java b/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java
+index 2740d7f..6b60ee1 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/events/EventFactory.java
+@@ -97,6 +97,7 @@ public class EventFactory {
+    * @param change
+    */
+   public void extend(ChangeAttribute a, Change change) {
++    a.createdOn = change.getCreatedOn().getTime() / 1000L;
+     a.lastUpdated = change.getLastUpdatedOn().getTime() / 1000L;
+     a.sortKey = change.getSortKey();
+     a.open = change.getStatus().isOpen();
+-- 
+1.7.3.1
+

@@ -1,0 +1,84 @@
+From 167b35a9669c29ae884376088f6d3d2871e3fcea Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Mon, 19 Mar 2012 12:55:48 -0600
+Subject: [PATCH] Add --issues and --issue_numbers to gitlog2asciidoc.py
+
+The --issues option can be used to only output the
+commits with issues associated with them.
+
+The --issue_numbers only outputs the actual issue
+numbers of the commits with issues associated with them.
+
+Change-Id: Icf1c03461fa8054c6ae75e66ef80d403cc7052bc
+---
+ tools/gitlog2asciidoc.py |   23 ++++++++++++++++++++---
+ 1 files changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/tools/gitlog2asciidoc.py b/tools/gitlog2asciidoc.py
+index bb904cb..c67f38d 100755
+--- a/tools/gitlog2asciidoc.py
++++ b/tools/gitlog2asciidoc.py
+@@ -28,8 +28,18 @@ Expected Output:
+    <commit message>
+ """
+ 
++issues_only = False
++if sys.argv[1] == '--issues' :
++  issues_only = True
++  sys.argv.pop(0)
++
++issue_numbers_only = False
++if sys.argv[1] == '--issue_numbers' :
++  issue_numbers_only = True
++  sys.argv.pop(0)
++
+ if len(sys.argv) != 3:
+-    sys.exit('Usage: ' + sys.argv[0] + ' <since> <until>')
++    sys.exit('Usage: ' + sys.argv[0] + ' [--issues|--issue_numbers] <since> <until>')
+ since_until = sys.argv[1] + '..' + sys.argv[2]
+ proc = subprocess.Popen(['git', 'log', '--reverse', '--no-merges',
+                          since_until, "--format=* %s%n+%n%b"],
+@@ -40,6 +50,7 @@ stdout_value = proc.communicate()[0]
+ 
+ subject = ""
+ message = []
++is_issue = False
+ 
+ for line in stdout_value.splitlines(True):
+ 
+@@ -47,24 +58,30 @@ for line in stdout_value.splitlines(True):
+         # Write change log for a commit
+         if subject != "":
+             # Write subject
+-            sys.stdout.write(subject)
++            if (not issues_only or is_issue) and not issue_numbers_only:
++                sys.stdout.write(subject)
+ 
+             # Write message lines
+             if message != []:
+                 # Clear + from last line in commit message
+                 message[-1] = '\n'
+             for m in message:
+-                sys.stdout.write(m)
++                if (not issues_only or is_issue) and not issue_numbers_only:
++                    sys.stdout.write(m)
+ 
+         # Start new commit block
+         message = []
+         subject = line
++        is_issue = False
+         continue
+ 
+     # Move issue number to subject line
+     elif re.match('([bB][uU][gG]|[iI][sS][sS][uU][eE]):( [iI][sS][sS][uU][eE])? ', line) is not None:
+         line = re.sub('([bB][uU][gG]|[iI][sS][sS][uU][eE]):( [iI][sS][sS][uU][eE])? ', 'issue ', line, re.I).replace('\n',' ')
+         subject = subject[:2] + line + subject[2:]
++        is_issue = True
++        if issue_numbers_only:
++             sys.stdout.write(re.sub('\\* issue ([0-9]*) .*', '\\1', subject))
+ 
+     # Remove commit footers
+     elif re.match(r'((\w+-)+\w+:)', line) is not None:
+-- 
+1.7.8
+

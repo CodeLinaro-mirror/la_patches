@@ -1,0 +1,1149 @@
+From a5508ce19c60f28bc90043f944322196dc4e0f8e Mon Sep 17 00:00:00 2001
+From: Ahaan Ugale <augale@codeaurora.org>
+Date: Wed, 17 Jul 2013 11:59:13 -0600
+Subject: [PATCH] Allow plugins to replace the WebSession implementation
+
+Plugins can replace the existing implementation with the statement:
+DynamicItem.bind(binder(), WebSession.class).to(...);
+in a module designated as a "<Gerrit-HttpModule>" in the manifest.
+
+Just the Cache implementation used for web sessions can be changed
+by binding to a subclass of the now abstract CacheBasedWebSession
+which supplies the Cache in the superclass constructor.
+
+This is a step towards solving web session issues with multi-master.
+
+Change-Id: I255661a62cfcbfe07646cb90005764061d618f3d
+---
+ .../extensions/registration/DynamicItem.java       |  113 +++++++++++++++-----
+ .../registration/DynamicItemProvider.java          |    7 +-
+ .../google/gerrit/httpd/CacheBasedWebSession.java  |   30 +-----
+ .../google/gerrit/httpd/ContainerAuthFilter.java   |    6 +-
+ .../gerrit/httpd/H2CacheBasedWebSession.java       |   68 ++++++++++++
+ .../com/google/gerrit/httpd/HttpLogoutServlet.java |    5 +-
+ .../google/gerrit/httpd/HttpRequestContext.java    |    7 +-
+ .../gerrit/httpd/ProjectBasicAuthFilter.java       |    6 +-
+ .../google/gerrit/httpd/ProjectDigestFilter.java   |    5 +-
+ .../java/com/google/gerrit/httpd/RunAsFilter.java  |    6 +-
+ .../com/google/gerrit/httpd/WebSessionManager.java |   10 +-
+ .../gerrit/httpd/WebSessionManagerFactory.java     |   35 ++++++
+ .../auth/become/BecomeAnyAccountLoginServlet.java  |    6 +-
+ .../httpd/auth/container/HttpAuthFilter.java       |    6 +-
+ .../httpd/auth/container/HttpLoginServlet.java     |    6 +-
+ .../container/HttpsClientSslCertAuthFilter.java    |    6 +-
+ .../gerrit/httpd/auth/ldap/LdapLoginServlet.java   |    6 +-
+ .../google/gerrit/httpd/raw/HostPageServlet.java   |    5 +-
+ .../gerrit/httpd/restapi/RestApiServlet.java       |    5 +-
+ .../google/gerrit/httpd/rpc/GerritJsonServlet.java |    6 +-
+ .../httpd/rpc/account/ExternalIdDetailFactory.java |    7 +-
+ .../httpd/auth/openid/OpenIdServiceImpl.java       |    5 +-
+ .../main/java/com/google/gerrit/pgm/Daemon.java    |    4 +-
+ .../server/plugins/PluginGuiceEnvironment.java     |   19 ++--
+ .../com/google/gerrit/httpd/WebAppInitializer.java |    2 +-
+ 25 files changed, 269 insertions(+), 112 deletions(-)
+ create mode 100644 gerrit-httpd/src/main/java/com/google/gerrit/httpd/H2CacheBasedWebSession.java
+ create mode 100644 gerrit-httpd/src/main/java/com/google/gerrit/httpd/WebSessionManagerFactory.java
+
+diff --git a/gerrit-extension-api/src/main/java/com/google/gerrit/extensions/registration/DynamicItem.java b/gerrit-extension-api/src/main/java/com/google/gerrit/extensions/registration/DynamicItem.java
+index aa1dc76..69a2b6c 100644
+--- a/gerrit-extension-api/src/main/java/com/google/gerrit/extensions/registration/DynamicItem.java
++++ b/gerrit-extension-api/src/main/java/com/google/gerrit/extensions/registration/DynamicItem.java
+@@ -21,6 +21,7 @@ import com.google.inject.ProvisionException;
+ import com.google.inject.Scopes;
+ import com.google.inject.TypeLiteral;
+ import com.google.inject.binder.LinkedBindingBuilder;
++import com.google.inject.internal.UniqueAnnotations;
+ import com.google.inject.util.Providers;
+ import com.google.inject.util.Types;
+ 
+@@ -59,7 +60,7 @@ public class DynamicItem<T> {
+    * @param member type of entry to store.
+    */
+   public static <T> void itemOf(Binder binder, Class<T> member) {
+-    itemOf(binder, TypeLiteral.get(member));
++    itemOf(binder, member, false);
+   }
+ 
+   /**
+@@ -74,12 +75,61 @@ public class DynamicItem<T> {
+    * @param member type of entry to store.
+    */
+   public static <T> void itemOf(Binder binder, TypeLiteral<T> member) {
++    itemOf(binder, member, false);
++  }
++
++  /**
++   * Declare a singleton {@code DynamicItem<T>} with a binder.
++   * <p>
++   * Items must be defined in a Guice module before they can be bound:
++   *
++   * <pre>
++   * DynamicSet.itemOf(binder(), new TypeLiteral&lt;Thing&lt;Foo&gt;&gt;() {});
++   * </pre>
++   *
++   * @param binder a new binder created in the module.
++   * @param member type of entry to store.
++   * @param replaceable whether a provided implementation can be replaced
++   */
++  public static <T> void itemOf(Binder binder, Class<T> member,
++      boolean replaceable) {
++    itemOf(binder, TypeLiteral.get(member), replaceable);
++  }
++
++  /**
++   * Declare a singleton {@code DynamicItem<T>} with a binder.
++   * <p>
++   * Items must be defined in a Guice module before they can be bound:
++   *
++   * <pre>
++   * DynamicSet.itemOf(binder(), new TypeLiteral&lt;Thing&lt;Foo&gt;&gt;() {});
++   * </pre>
++   *
++   * @param binder a new binder created in the module.
++   * @param member type of entry to store.
++   * @param replaceable whether a provided implementation can be replaced
++   */
++  public static <T> void itemOf(Binder binder, TypeLiteral<T> member,
++      boolean replaceable) {
+     @SuppressWarnings("unchecked")
+-    Key<DynamicItem<T>> key = (Key<DynamicItem<T>>) Key.get(
+-        Types.newParameterizedType(DynamicItem.class, member.getType()));
++    Key<DynamicItem<T>> key =
++        (Key<DynamicItem<T>>) Key.get(Types.newParameterizedType(
++            DynamicItem.class, member.getType()));
+     binder.bind(key)
+-      .toProvider(new DynamicItemProvider<T>(member, key))
+-      .in(Scopes.SINGLETON);
++        .toProvider(new DynamicItemProvider<T>(member, key, replaceable))
++        .in(Scopes.SINGLETON);
++  }
++
++  /**
++   * Bind one implementation as the item.
++   *
++   * @param binder a new binder created in the module.
++   * @param type type of entry to store.
++   * @return a binder to continue configuring the new item.
++   */
++  public static <T> LinkedBindingBuilder<T> bind(Binder binder,
++      Key<T> key) {
++    return binder.bind(key);
+   }
+ 
+   /**
+@@ -94,7 +144,7 @@ public class DynamicItem<T> {
+   }
+ 
+   /**
+-   * Bind one implementation as the item.
++   * Bind one implementation as the item using a unique annotation.
+    *
+    * @param binder a new binder created in the module.
+    * @param type type of entry to store.
+@@ -102,19 +152,22 @@ public class DynamicItem<T> {
+    */
+   public static <T> LinkedBindingBuilder<T> bind(Binder binder,
+       TypeLiteral<T> type) {
+-    return binder.bind(type);
++    return binder.bind(type).annotatedWith(UniqueAnnotations.create());
+   }
+ 
+   private final Key<DynamicItem<T>> key;
+   private final AtomicReference<NamedProvider<T>> ref;
++  private final boolean replaceable;
+ 
+-  DynamicItem(Key<DynamicItem<T>> key, Provider<T> provider, String pluginName) {
++  DynamicItem(Key<DynamicItem<T>> key, Provider<T> provider, String pluginName,
++      boolean replaceable) {
+     NamedProvider<T> in = null;
+     if (provider != null) {
+       in = new NamedProvider<T>(provider, pluginName);
+     }
+     this.key = key;
+     this.ref = new AtomicReference<NamedProvider<T>>(in);
++    this.replaceable = replaceable;
+   }
+ 
+   /**
+@@ -148,19 +201,23 @@ public class DynamicItem<T> {
+    * @return handle to remove the item at a later point in time.
+    */
+   public RegistrationHandle set(Provider<T> impl, String pluginName) {
++    final NamedProvider<T> old = ref.get();
+     final NamedProvider<T> item = new NamedProvider<T>(impl, pluginName);
+-    while (!ref.compareAndSet(null, item)) {
+-      NamedProvider<T> old = ref.get();
+-      if (old != null) {
+-        throw new ProvisionException(String.format(
+-            "%s already provided by %s, ignoring plugin %s",
+-            key.getTypeLiteral(), old.pluginName, pluginName));
++    if (replaceable) {
++      ref.compareAndSet(old, item);
++    } else {
++      while (!ref.compareAndSet(null, item)) {
++        if (old != null) {
++          throw new ProvisionException(String.format(
++              "%s already provided by %s, ignoring plugin %s",
++              key.getTypeLiteral(), old.pluginName, pluginName));
++        }
+       }
+     }
+     return new RegistrationHandle() {
+       @Override
+       public void remove() {
+-        ref.compareAndSet(item, null);
++        ref.compareAndSet(item, old);
+       }
+     };
+   }
+@@ -177,25 +234,31 @@ public class DynamicItem<T> {
+    */
+   public ReloadableRegistrationHandle<T> set(Key<T> key, Provider<T> impl,
+       String pluginName) {
++    NamedProvider<T> old = ref.get();
+     final NamedProvider<T> item = new NamedProvider<T>(impl, pluginName);
+-    while (!ref.compareAndSet(null, item)) {
+-      NamedProvider<T> old = ref.get();
+-      if (old != null) {
+-        throw new ProvisionException(String.format(
+-            "%s already provided by %s, ignoring plugin %s",
+-            this.key.getTypeLiteral(), old.pluginName, pluginName));
++    if (replaceable) {
++      ref.compareAndSet(old, item);
++    } else {
++      while (!ref.compareAndSet(null, item)) {
++        if (old != null) {
++          throw new ProvisionException(String.format(
++              "%s already provided by %s, ignoring plugin %s",
++              this.key.getTypeLiteral(), old.pluginName, pluginName));
++        }
+       }
+     }
+-    return new ReloadableHandle(key, item);
++    return new ReloadableHandle(key, item, old);
+   }
+ 
+   private class ReloadableHandle implements ReloadableRegistrationHandle<T> {
+     private final Key<T> key;
+     private final NamedProvider<T> item;
++    private final NamedProvider<T> old;
+ 
+-    ReloadableHandle(Key<T> key, NamedProvider<T> item) {
++    ReloadableHandle(Key<T> key, NamedProvider<T> item, NamedProvider<T> old) {
+       this.key = key;
+       this.item = item;
++      this.old = old;
+     }
+ 
+     @Override
+@@ -205,14 +268,14 @@ public class DynamicItem<T> {
+ 
+     @Override
+     public void remove() {
+-      ref.compareAndSet(item, null);
++      ref.compareAndSet(item, old);
+     }
+ 
+     @Override
+     public ReloadableHandle replace(Key<T> newKey, Provider<T> newItem) {
+       NamedProvider<T> n = new NamedProvider<T>(newItem, item.pluginName);
+       if (ref.compareAndSet(item, n)) {
+-        return new ReloadableHandle(newKey, n);
++        return new ReloadableHandle(newKey, n, old);
+       }
+       return null;
+     }
+diff --git a/gerrit-extension-api/src/main/java/com/google/gerrit/extensions/registration/DynamicItemProvider.java b/gerrit-extension-api/src/main/java/com/google/gerrit/extensions/registration/DynamicItemProvider.java
+index 1074ee5..48f60ac 100644
+--- a/gerrit-extension-api/src/main/java/com/google/gerrit/extensions/registration/DynamicItemProvider.java
++++ b/gerrit-extension-api/src/main/java/com/google/gerrit/extensions/registration/DynamicItemProvider.java
+@@ -27,17 +27,20 @@ import java.util.List;
+ class DynamicItemProvider<T> implements Provider<DynamicItem<T>> {
+   private final TypeLiteral<T> type;
+   private final Key<DynamicItem<T>> key;
++  private final boolean replaceable;
+ 
+   @Inject
+   private Injector injector;
+ 
+-  DynamicItemProvider(TypeLiteral<T> type, Key<DynamicItem<T>> key) {
++  DynamicItemProvider(TypeLiteral<T> type, Key<DynamicItem<T>> key,
++      boolean replaceable) {
+     this.type = type;
+     this.key = key;
++    this.replaceable = replaceable;
+   }
+ 
+   public DynamicItem<T> get() {
+-    return new DynamicItem<T>(key, find(injector, type), "gerrit");
++    return new DynamicItem<T>(key, find(injector, type), "gerrit", replaceable);
+   }
+ 
+   private static <T> Provider<T> find(Injector src, TypeLiteral<T> type) {
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/CacheBasedWebSession.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/CacheBasedWebSession.java
+index 9968e2a..b472bbd 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/CacheBasedWebSession.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/CacheBasedWebSession.java
+@@ -15,7 +15,6 @@
+ package com.google.gerrit.httpd;
+ 
+ import static java.util.concurrent.TimeUnit.HOURS;
+-import static java.util.concurrent.TimeUnit.MINUTES;
+ 
+ import com.google.gerrit.httpd.WebSessionManager.Key;
+ import com.google.gerrit.httpd.WebSessionManager.Val;
+@@ -26,10 +25,7 @@ import com.google.gerrit.server.AnonymousUser;
+ import com.google.gerrit.server.CurrentUser;
+ import com.google.gerrit.server.IdentifiedUser;
+ import com.google.gerrit.server.account.AuthResult;
+-import com.google.gerrit.server.cache.CacheModule;
+ import com.google.gerrit.server.config.AuthConfig;
+-import com.google.inject.Inject;
+-import com.google.inject.Module;
+ import com.google.inject.Provider;
+ import com.google.inject.servlet.RequestScoped;
+ 
+@@ -42,25 +38,9 @@ import javax.servlet.http.HttpServletRequest;
+ import javax.servlet.http.HttpServletResponse;
+ 
+ @RequestScoped
+-public final class CacheBasedWebSession implements WebSession {
++public abstract class CacheBasedWebSession implements WebSession {
+   private static final String ACCOUNT_COOKIE = "GerritAccount";
+-  static final long MAX_AGE_MINUTES = HOURS.toMinutes(12);
+-
+-  public static Module module() {
+-    return new CacheModule() {
+-      @Override
+-      protected void configure() {
+-        persist(WebSessionManager.CACHE_NAME, String.class, Val.class)
+-            .maximumWeight(1024) // reasonable default for many sites
+-            .expireAfterWrite(MAX_AGE_MINUTES, MINUTES) // expire sessions if they are inactive
+-        ;
+-        bind(WebSessionManager.class);
+-        bind(WebSession.class)
+-          .to(CacheBasedWebSession.class)
+-          .in(RequestScoped.class);
+-      }
+-    };
+-  }
++  protected static final long MAX_AGE_MINUTES = HOURS.toMinutes(12);
+ 
+   private final HttpServletRequest request;
+   private final HttpServletResponse response;
+@@ -75,9 +55,9 @@ public final class CacheBasedWebSession implements WebSession {
+   private Val val;
+   private CurrentUser user;
+ 
+-  @Inject
+-  CacheBasedWebSession(final HttpServletRequest request,
+-      final HttpServletResponse response, final WebSessionManager manager,
++  protected CacheBasedWebSession(final HttpServletRequest request,
++      final HttpServletResponse response,
++      final WebSessionManager manager,
+       final AuthConfig authConfig,
+       final Provider<AnonymousUser> anonymousProvider,
+       final IdentifiedUser.RequestFactory identified) {
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ContainerAuthFilter.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ContainerAuthFilter.java
+index 433b4f5..91fb6af 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ContainerAuthFilter.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ContainerAuthFilter.java
+@@ -17,12 +17,12 @@ package com.google.gerrit.httpd;
+ import static javax.servlet.http.HttpServletResponse.SC_FORBIDDEN;
+ import static javax.servlet.http.HttpServletResponse.SC_UNAUTHORIZED;
+ 
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.server.AccessPath;
+ import com.google.gerrit.server.account.AccountCache;
+ import com.google.gerrit.server.account.AccountState;
+ import com.google.gerrit.server.config.GerritServerConfig;
+ import com.google.inject.Inject;
+-import com.google.inject.Provider;
+ import com.google.inject.Singleton;
+ 
+ import org.eclipse.jgit.lib.Config;
+@@ -54,12 +54,12 @@ import javax.servlet.http.HttpServletResponse;
+ class ContainerAuthFilter implements Filter {
+   public static final String REALM_NAME = "Gerrit Code Review";
+ 
+-  private final Provider<WebSession> session;
++  private final DynamicItem<WebSession> session;
+   private final AccountCache accountCache;
+   private final Config config;
+ 
+   @Inject
+-  ContainerAuthFilter(Provider<WebSession> session, AccountCache accountCache,
++  ContainerAuthFilter(DynamicItem<WebSession> session, AccountCache accountCache,
+       @GerritServerConfig Config config) {
+     this.session = session;
+     this.accountCache = accountCache;
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/H2CacheBasedWebSession.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/H2CacheBasedWebSession.java
+new file mode 100644
+index 0000000..782c497
+--- /dev/null
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/H2CacheBasedWebSession.java
+@@ -0,0 +1,68 @@
++// Copyright (C) 2009 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.httpd;
++
++import static java.util.concurrent.TimeUnit.MINUTES;
++
++import com.google.common.cache.Cache;
++import com.google.gerrit.extensions.registration.DynamicItem;
++import com.google.gerrit.httpd.WebSessionManager.Val;
++import com.google.gerrit.server.AnonymousUser;
++import com.google.gerrit.server.IdentifiedUser.RequestFactory;
++import com.google.gerrit.server.cache.CacheModule;
++import com.google.gerrit.server.config.AuthConfig;
++import com.google.inject.Inject;
++import com.google.inject.Module;
++import com.google.inject.Provider;
++import com.google.inject.assistedinject.FactoryModuleBuilder;
++import com.google.inject.name.Named;
++import com.google.inject.servlet.RequestScoped;
++
++import javax.servlet.http.HttpServletRequest;
++import javax.servlet.http.HttpServletResponse;
++
++@RequestScoped
++public class H2CacheBasedWebSession extends CacheBasedWebSession {
++  public static Module module() {
++    return new CacheModule() {
++      @Override
++      protected void configure() {
++        persist(WebSessionManager.CACHE_NAME, String.class, Val.class)
++            .maximumWeight(1024) // reasonable default for many sites
++            .expireAfterWrite(CacheBasedWebSession.MAX_AGE_MINUTES, MINUTES) // expire sessions if they are inactive
++        ;
++        install(new FactoryModuleBuilder()
++            .build(WebSessionManagerFactory.class));
++        DynamicItem.itemOf(binder(), WebSession.class, true);
++        DynamicItem.bind(binder(), WebSession.class)
++          .to(H2CacheBasedWebSession.class)
++          .in(RequestScoped.class);
++      }
++    };
++  }
++
++  @Inject
++  H2CacheBasedWebSession(
++      HttpServletRequest request,
++      HttpServletResponse response,
++      WebSessionManagerFactory managerFactory,
++      @Named(WebSessionManager.CACHE_NAME) final Cache<String, Val> cache,
++      AuthConfig authConfig,
++      Provider<AnonymousUser> anonymousProvider,
++      RequestFactory identified) {
++    super(request, response, managerFactory.create(cache), authConfig,
++        anonymousProvider, identified);
++  }
++}
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/HttpLogoutServlet.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/HttpLogoutServlet.java
+index 879dfa3..ae412eb 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/HttpLogoutServlet.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/HttpLogoutServlet.java
+@@ -16,6 +16,7 @@ package com.google.gerrit.httpd;
+ 
+ import com.google.gerrit.audit.AuditEvent;
+ import com.google.gerrit.audit.AuditService;
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.common.base.Strings;
+ import com.google.gerrit.server.CurrentUser;
+ import com.google.gerrit.server.account.AccountManager;
+@@ -36,14 +37,14 @@ import javax.servlet.http.HttpServletResponse;
+ class HttpLogoutServlet extends HttpServlet {
+   private static final long serialVersionUID = 1L;
+ 
+-  private final Provider<WebSession> webSession;
++  private final DynamicItem<WebSession> webSession;
+   private final Provider<String> urlProvider;
+   private final String logoutUrl;
+   private final AuditService audit;
+ 
+   @Inject
+   HttpLogoutServlet(final AuthConfig authConfig,
+-      final Provider<WebSession> webSession,
++      final DynamicItem<WebSession> webSession,
+       @CanonicalWebUrl @Nullable final Provider<String> urlProvider,
+       final AccountManager accountManager,
+       final AuditService audit) {
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/HttpRequestContext.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/HttpRequestContext.java
+index 2db3534..47593aa 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/HttpRequestContext.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/HttpRequestContext.java
+@@ -14,6 +14,7 @@
+ 
+ package com.google.gerrit.httpd;
+ 
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.reviewdb.server.ReviewDb;
+ import com.google.gerrit.server.CurrentUser;
+ import com.google.gerrit.server.config.RequestScopedReviewDbProvider;
+@@ -22,11 +23,11 @@ import com.google.inject.Inject;
+ import com.google.inject.Provider;
+ 
+ class HttpRequestContext implements RequestContext {
+-  private final WebSession session;
++  private final DynamicItem<WebSession> session;
+   private final RequestScopedReviewDbProvider provider;
+ 
+   @Inject
+-  HttpRequestContext(WebSession session,
++  HttpRequestContext(DynamicItem<WebSession> session,
+       RequestScopedReviewDbProvider provider) {
+     this.session = session;
+     this.provider = provider;
+@@ -34,7 +35,7 @@ class HttpRequestContext implements RequestContext {
+ 
+   @Override
+   public CurrentUser getCurrentUser() {
+-    return session.getCurrentUser();
++    return session.get().getCurrentUser();
+   }
+ 
+   @Override
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectBasicAuthFilter.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectBasicAuthFilter.java
+index d87e4af..6db96a8 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectBasicAuthFilter.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectBasicAuthFilter.java
+@@ -18,6 +18,7 @@ import static javax.servlet.http.HttpServletResponse.SC_UNAUTHORIZED;
+ 
+ import com.google.common.base.Objects;
+ import com.google.common.base.Strings;
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.server.AccessPath;
+ import com.google.gerrit.server.account.AccountCache;
+ import com.google.gerrit.server.account.AccountException;
+@@ -27,7 +28,6 @@ import com.google.gerrit.server.account.AuthRequest;
+ import com.google.gerrit.server.account.AuthResult;
+ import com.google.gerrit.server.config.AuthConfig;
+ import com.google.inject.Inject;
+-import com.google.inject.Provider;
+ import com.google.inject.Singleton;
+ 
+ import org.apache.commons.codec.binary.Base64;
+@@ -67,13 +67,13 @@ class ProjectBasicAuthFilter implements Filter {
+   private static final String AUTHORIZATION = "Authorization";
+   private static final String LIT_BASIC = "Basic ";
+ 
+-  private final Provider<WebSession> session;
++  private final DynamicItem<WebSession> session;
+   private final AccountCache accountCache;
+   private final AccountManager accountManager;
+   private final AuthConfig authConfig;
+ 
+   @Inject
+-  ProjectBasicAuthFilter(Provider<WebSession> session,
++  ProjectBasicAuthFilter(DynamicItem<WebSession> session,
+       AccountCache accountCache, AccountManager accountManager,
+       AuthConfig authConfig) {
+     this.session = session;
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectDigestFilter.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectDigestFilter.java
+index f1bddeb..617b7a5 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectDigestFilter.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/ProjectDigestFilter.java
+@@ -20,6 +20,7 @@ import static javax.servlet.http.HttpServletResponse.SC_FORBIDDEN;
+ import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+ import static javax.servlet.http.HttpServletResponse.SC_UNAUTHORIZED;
+ 
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.server.AccessPath;
+ import com.google.gerrit.server.account.AccountCache;
+ import com.google.gerrit.server.account.AccountState;
+@@ -70,7 +71,7 @@ class ProjectDigestFilter implements Filter {
+   private static final String AUTHORIZATION = "Authorization";
+ 
+   private final Provider<String> urlProvider;
+-  private final Provider<WebSession> session;
++  private final DynamicItem<WebSession> session;
+   private final AccountCache accountCache;
+   private final Config config;
+   private final SignedToken tokens;
+@@ -78,7 +79,7 @@ class ProjectDigestFilter implements Filter {
+ 
+   @Inject
+   ProjectDigestFilter(@CanonicalWebUrl @Nullable Provider<String> urlProvider,
+-      Provider<WebSession> session, AccountCache accountCache,
++      DynamicItem<WebSession> session, AccountCache accountCache,
+       @GerritServerConfig Config config) throws XsrfException {
+     this.urlProvider = urlProvider;
+     this.session = session;
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/RunAsFilter.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/RunAsFilter.java
+index e0bef35..3418354 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/RunAsFilter.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/RunAsFilter.java
+@@ -17,6 +17,7 @@ package com.google.gerrit.httpd;
+ import static javax.servlet.http.HttpServletResponse.SC_FORBIDDEN;
+ import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+ 
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.httpd.restapi.RestApiServlet;
+ import com.google.gerrit.reviewdb.client.Account;
+ import com.google.gerrit.server.CurrentUser;
+@@ -24,7 +25,6 @@ import com.google.gerrit.server.account.AccountResolver;
+ import com.google.gerrit.server.config.AuthConfig;
+ import com.google.gwtorm.server.OrmException;
+ import com.google.inject.Inject;
+-import com.google.inject.Provider;
+ import com.google.inject.Singleton;
+ import com.google.inject.servlet.ServletModule;
+ 
+@@ -56,12 +56,12 @@ class RunAsFilter implements Filter {
+   }
+ 
+   private final boolean enabled;
+-  private final Provider<WebSession> session;
++  private final DynamicItem<WebSession> session;
+   private final AccountResolver accountResolver;
+ 
+   @Inject
+   RunAsFilter(AuthConfig config,
+-      Provider<WebSession> session,
++      DynamicItem<WebSession> session,
+       AccountResolver accountResolver) {
+     this.enabled = config.isRunAsEnabled();
+     this.session = session;
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/WebSessionManager.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/WebSessionManager.java
+index a5338f8..7bb0519 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/WebSessionManager.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/WebSessionManager.java
+@@ -34,7 +34,7 @@ import com.google.gerrit.server.config.ConfigUtil;
+ import com.google.gerrit.server.config.GerritServerConfig;
+ import com.google.inject.Inject;
+ import com.google.inject.Singleton;
+-import com.google.inject.name.Named;
++import com.google.inject.assistedinject.Assisted;
+ 
+ import org.eclipse.jgit.lib.Config;
+ import org.slf4j.Logger;
+@@ -49,9 +49,9 @@ import java.security.SecureRandom;
+ import java.util.concurrent.TimeUnit;
+ 
+ @Singleton
+-class WebSessionManager {
++public class WebSessionManager {
+   private static final Logger log = LoggerFactory.getLogger(WebSessionManager.class);
+-  static final String CACHE_NAME = "web_sessions";
++  public static final String CACHE_NAME = "web_sessions";
+ 
+   static long now() {
+     return System.currentTimeMillis();
+@@ -63,7 +63,7 @@ class WebSessionManager {
+ 
+   @Inject
+   WebSessionManager(@GerritServerConfig Config cfg,
+-      @Named(CACHE_NAME) final Cache<String, Val> cache) {
++      @Assisted final Cache<String, Val> cache) {
+     prng = new SecureRandom();
+     self = cache;
+ 
+@@ -183,7 +183,7 @@ class WebSessionManager {
+     }
+   }
+ 
+-  static final class Val implements Serializable {
++  public static final class Val implements Serializable {
+     static final long serialVersionUID = 2L;
+ 
+     private transient Account.Id accountId;
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/WebSessionManagerFactory.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/WebSessionManagerFactory.java
+new file mode 100644
+index 0000000..f8e3a84
+--- /dev/null
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/WebSessionManagerFactory.java
+@@ -0,0 +1,35 @@
++// Copyright (c) 2013, The Linux Foundation. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of The Linux Foundation nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.httpd;
++
++import com.google.common.cache.Cache;
++import com.google.gerrit.httpd.WebSessionManager.Val;
++
++public interface WebSessionManagerFactory {
++  WebSessionManager create(Cache<String, Val> cache);
++}
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/become/BecomeAnyAccountLoginServlet.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/become/BecomeAnyAccountLoginServlet.java
+index 28e361c..b738c82 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/become/BecomeAnyAccountLoginServlet.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/become/BecomeAnyAccountLoginServlet.java
+@@ -19,6 +19,7 @@ import static com.google.gerrit.reviewdb.client.AccountExternalId.SCHEME_USERNAM
+ import com.google.common.base.Objects;
+ import com.google.common.base.Strings;
+ import com.google.gerrit.common.PageLinks;
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.httpd.HtmlDomUtil;
+ import com.google.gerrit.httpd.WebSession;
+ import com.google.gerrit.httpd.template.SiteHeaderFooter;
+@@ -34,7 +35,6 @@ import com.google.gwtorm.server.OrmException;
+ import com.google.gwtorm.server.ResultSet;
+ import com.google.gwtorm.server.SchemaFactory;
+ import com.google.inject.Inject;
+-import com.google.inject.Provider;
+ import com.google.inject.Singleton;
+ 
+ import org.w3c.dom.Document;
+@@ -59,12 +59,12 @@ class BecomeAnyAccountLoginServlet extends HttpServlet {
+   private static final boolean IS_DEV = Boolean.getBoolean("Gerrit.GwtDevMode");
+ 
+   private final SchemaFactory<ReviewDb> schema;
+-  private final Provider<WebSession> webSession;
++  private final DynamicItem<WebSession> webSession;
+   private final AccountManager accountManager;
+   private final SiteHeaderFooter headers;
+ 
+   @Inject
+-  BecomeAnyAccountLoginServlet(final Provider<WebSession> ws,
++  BecomeAnyAccountLoginServlet(final DynamicItem<WebSession> ws,
+       final SchemaFactory<ReviewDb> sf,
+       final AccountManager am,
+       final ServletContext servletContext,
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpAuthFilter.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpAuthFilter.java
+index adca95e..977e196 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpAuthFilter.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpAuthFilter.java
+@@ -19,6 +19,7 @@ import static com.google.common.base.Strings.emptyToNull;
+ import static com.google.common.net.HttpHeaders.AUTHORIZATION;
+ import static com.google.gerrit.reviewdb.client.AccountExternalId.SCHEME_GERRIT;
+ 
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.httpd.HtmlDomUtil;
+ import com.google.gerrit.httpd.WebSession;
+ import com.google.gerrit.httpd.raw.HostPageServlet;
+@@ -27,7 +28,6 @@ import com.google.gerrit.server.config.AuthConfig;
+ import com.google.gwtexpui.server.CacheHeaders;
+ import com.google.gwtjsonrpc.server.RPCServletUtils;
+ import com.google.inject.Inject;
+-import com.google.inject.Provider;
+ import com.google.inject.Singleton;
+ 
+ import org.eclipse.jgit.util.Base64;
+@@ -57,13 +57,13 @@ import javax.servlet.http.HttpServletResponse;
+  */
+ @Singleton
+ class HttpAuthFilter implements Filter {
+-  private final Provider<WebSession> sessionProvider;
++  private final DynamicItem<WebSession> sessionProvider;
+   private final byte[] signInRaw;
+   private final byte[] signInGzip;
+   private final String loginHeader;
+ 
+   @Inject
+-  HttpAuthFilter(final Provider<WebSession> webSession,
++  HttpAuthFilter(final DynamicItem<WebSession> webSession,
+       final AuthConfig authConfig) throws IOException {
+     this.sessionProvider = webSession;
+ 
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpLoginServlet.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpLoginServlet.java
+index d2a25a8..e8ad453 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpLoginServlet.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpLoginServlet.java
+@@ -15,6 +15,7 @@
+ package com.google.gerrit.httpd.auth.container;
+ 
+ import com.google.gerrit.common.PageLinks;
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.httpd.CanonicalWebUrl;
+ import com.google.gerrit.httpd.HtmlDomUtil;
+ import com.google.gerrit.httpd.WebSession;
+@@ -24,7 +25,6 @@ import com.google.gerrit.server.account.AuthRequest;
+ import com.google.gerrit.server.account.AuthResult;
+ import com.google.gwtexpui.server.CacheHeaders;
+ import com.google.inject.Inject;
+-import com.google.inject.Provider;
+ import com.google.inject.Singleton;
+ 
+ import org.slf4j.Logger;
+@@ -55,13 +55,13 @@ class HttpLoginServlet extends HttpServlet {
+   private static final Logger log =
+       LoggerFactory.getLogger(HttpLoginServlet.class);
+ 
+-  private final Provider<WebSession> webSession;
++  private final DynamicItem<WebSession> webSession;
+   private final CanonicalWebUrl urlProvider;
+   private final AccountManager accountManager;
+   private final HttpAuthFilter authFilter;
+ 
+   @Inject
+-  HttpLoginServlet(final Provider<WebSession> webSession,
++  HttpLoginServlet(final DynamicItem<WebSession> webSession,
+       final CanonicalWebUrl urlProvider,
+       final AccountManager accountManager,
+       final HttpAuthFilter authFilter) {
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpsClientSslCertAuthFilter.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpsClientSslCertAuthFilter.java
+index c892c9d..ea9b1c0 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpsClientSslCertAuthFilter.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/container/HttpsClientSslCertAuthFilter.java
+@@ -14,13 +14,13 @@
+ 
+ package com.google.gerrit.httpd.auth.container;
+ 
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.httpd.WebSession;
+ import com.google.gerrit.server.account.AccountException;
+ import com.google.gerrit.server.account.AccountManager;
+ import com.google.gerrit.server.account.AuthRequest;
+ import com.google.gerrit.server.account.AuthResult;
+ import com.google.inject.Inject;
+-import com.google.inject.Provider;
+ import com.google.inject.Singleton;
+ 
+ import org.slf4j.Logger;
+@@ -45,11 +45,11 @@ class HttpsClientSslCertAuthFilter implements Filter {
+   private static final Logger log =
+     LoggerFactory.getLogger(HttpsClientSslCertAuthFilter.class);
+ 
+-  private final Provider<WebSession> webSession;
++  private final DynamicItem<WebSession> webSession;
+   private final AccountManager accountManager;
+ 
+   @Inject
+-  HttpsClientSslCertAuthFilter(final Provider<WebSession> webSession,
++  HttpsClientSslCertAuthFilter(final DynamicItem<WebSession> webSession,
+       final AccountManager accountManager) {
+     this.webSession = webSession;
+     this.accountManager = accountManager;
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/ldap/LdapLoginServlet.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/ldap/LdapLoginServlet.java
+index 037c7bb..1267e4f 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/ldap/LdapLoginServlet.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/auth/ldap/LdapLoginServlet.java
+@@ -17,6 +17,7 @@ package com.google.gerrit.httpd.auth.ldap;
+ import com.google.common.base.Objects;
+ import com.google.common.base.Strings;
+ import com.google.gerrit.common.PageLinks;
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.httpd.CanonicalWebUrl;
+ import com.google.gerrit.httpd.HtmlDomUtil;
+ import com.google.gerrit.httpd.WebSession;
+@@ -29,7 +30,6 @@ import com.google.gerrit.server.account.AuthResult;
+ import com.google.gerrit.server.auth.AuthenticationUnavailableException;
+ import com.google.gwtexpui.server.CacheHeaders;
+ import com.google.inject.Inject;
+-import com.google.inject.Provider;
+ import com.google.inject.Singleton;
+ 
+ import org.slf4j.Logger;
+@@ -54,13 +54,13 @@ class LdapLoginServlet extends HttpServlet {
+       .getLogger(LdapLoginServlet.class);
+ 
+   private final AccountManager accountManager;
+-  private final Provider<WebSession> webSession;
++  private final DynamicItem<WebSession> webSession;
+   private final CanonicalWebUrl urlProvider;
+   private final SiteHeaderFooter headers;
+ 
+   @Inject
+   LdapLoginServlet(AccountManager accountManager,
+-      Provider<WebSession> webSession,
++      DynamicItem<WebSession> webSession,
+       CanonicalWebUrl urlProvider,
+       SiteHeaderFooter headers) {
+     this.accountManager = accountManager;
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/raw/HostPageServlet.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/raw/HostPageServlet.java
+index b1fd412..92cca4a 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/raw/HostPageServlet.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/raw/HostPageServlet.java
+@@ -21,6 +21,7 @@ import com.google.common.primitives.Bytes;
+ import com.google.gerrit.common.Version;
+ import com.google.gerrit.common.data.GerritConfig;
+ import com.google.gerrit.common.data.HostPageData;
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.extensions.registration.DynamicSet;
+ import com.google.gerrit.extensions.webui.WebUiPlugin;
+ import com.google.gerrit.httpd.HtmlDomUtil;
+@@ -70,7 +71,7 @@ public class HostPageServlet extends HttpServlet {
+   private static final String HPD_ID = "gerrit_hostpagedata";
+ 
+   private final Provider<CurrentUser> currentUser;
+-  private final Provider<WebSession> session;
++  private final DynamicItem<WebSession> session;
+   private final GerritConfig config;
+   private final DynamicSet<WebUiPlugin> plugins;
+   private final HostPageData.Theme signedOutTheme;
+@@ -83,7 +84,7 @@ public class HostPageServlet extends HttpServlet {
+   private volatile Page page;
+ 
+   @Inject
+-  HostPageServlet(final Provider<CurrentUser> cu, final Provider<WebSession> w,
++  HostPageServlet(final Provider<CurrentUser> cu, final DynamicItem<WebSession> w,
+       final SitePaths sp, final ThemeFactory themeFactory,
+       final GerritConfig gc, final ServletContext servletContext,
+       final DynamicSet<WebUiPlugin> webUiPlugins,
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/restapi/RestApiServlet.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/restapi/RestApiServlet.java
+index f2fee0b..c690007 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/restapi/RestApiServlet.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/restapi/RestApiServlet.java
+@@ -47,6 +47,7 @@ import com.google.common.net.HttpHeaders;
+ import com.google.gerrit.audit.AuditService;
+ import com.google.gerrit.audit.HttpAuditEvent;
+ import com.google.gerrit.extensions.annotations.RequiresCapability;
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.extensions.registration.DynamicMap;
+ import com.google.gerrit.extensions.restapi.AcceptsCreate;
+ import com.google.gerrit.extensions.restapi.AcceptsPost;
+@@ -150,13 +151,13 @@ public class RestApiServlet extends HttpServlet {
+ 
+   public static class Globals {
+     final Provider<CurrentUser> currentUser;
+-    final Provider<WebSession> webSession;
++    final DynamicItem<WebSession> webSession;
+     final Provider<ParameterParser> paramParser;
+     final AuditService auditService;
+ 
+     @Inject
+     Globals(Provider<CurrentUser> currentUser,
+-        Provider<WebSession> webSession,
++        DynamicItem<WebSession> webSession,
+         Provider<ParameterParser> paramParser,
+         AuditService auditService) {
+       this.currentUser = currentUser;
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/GerritJsonServlet.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/GerritJsonServlet.java
+index 55ecb01..3d7f821 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/GerritJsonServlet.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/GerritJsonServlet.java
+@@ -21,6 +21,7 @@ import com.google.gerrit.audit.RpcAuditEvent;
+ import com.google.gerrit.common.audit.Audit;
+ import com.google.gerrit.common.auth.SignInRequired;
+ import com.google.gerrit.common.errors.NotSignedInException;
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.httpd.WebSession;
+ import com.google.gerrit.server.AccessPath;
+ import com.google.gerrit.server.CurrentUser;
+@@ -31,7 +32,6 @@ import com.google.gwtjsonrpc.server.JsonServlet;
+ import com.google.gwtjsonrpc.server.MethodHandle;
+ import com.google.gwtorm.server.OrmException;
+ import com.google.inject.Inject;
+-import com.google.inject.Provider;
+ 
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+@@ -53,13 +53,13 @@ final class GerritJsonServlet extends JsonServlet<GerritJsonServlet.GerritCall>
+       new ThreadLocal<GerritCall>();
+   private static final ThreadLocal<MethodHandle> currentMethod =
+       new ThreadLocal<MethodHandle>();
+-  private final Provider<WebSession> session;
++  private final DynamicItem<WebSession> session;
+   private final RemoteJsonService service;
+   private final AuditService audit;
+ 
+ 
+   @Inject
+-  GerritJsonServlet(final Provider<WebSession> w, final RemoteJsonService s,
++  GerritJsonServlet(final DynamicItem<WebSession> w, final RemoteJsonService s,
+       final AuditService a) {
+     session = w;
+     service = s;
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/ExternalIdDetailFactory.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/ExternalIdDetailFactory.java
+index d876f2e..b97d46a 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/ExternalIdDetailFactory.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/ExternalIdDetailFactory.java
+@@ -16,6 +16,7 @@ package com.google.gerrit.httpd.rpc.account;
+ 
+ import static com.google.gerrit.reviewdb.client.AccountExternalId.SCHEME_USERNAME;
+ 
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.httpd.WebSession;
+ import com.google.gerrit.httpd.rpc.Handler;
+ import com.google.gerrit.reviewdb.client.AccountExternalId;
+@@ -36,11 +37,11 @@ class ExternalIdDetailFactory extends Handler<List<AccountExternalId>> {
+   private final ReviewDb db;
+   private final IdentifiedUser user;
+   private final AuthConfig authConfig;
+-  private final WebSession session;
++  private final DynamicItem<WebSession> session;
+ 
+   @Inject
+   ExternalIdDetailFactory(final ReviewDb db, final IdentifiedUser user,
+-      final AuthConfig authConfig, final WebSession session) {
++      final AuthConfig authConfig, final DynamicItem<WebSession> session) {
+     this.db = db;
+     this.user = user;
+     this.authConfig = authConfig;
+@@ -49,7 +50,7 @@ class ExternalIdDetailFactory extends Handler<List<AccountExternalId>> {
+ 
+   @Override
+   public List<AccountExternalId> call() throws OrmException {
+-    final AccountExternalId.Key last = session.getLastLoginExternalId();
++    final AccountExternalId.Key last = session.get().getLastLoginExternalId();
+     final List<AccountExternalId> ids =
+         db.accountExternalIds().byAccount(user.getAccountId()).toList();
+ 
+diff --git a/gerrit-openid/src/main/java/com/google/gerrit/httpd/auth/openid/OpenIdServiceImpl.java b/gerrit-openid/src/main/java/com/google/gerrit/httpd/auth/openid/OpenIdServiceImpl.java
+index 5d74166..d5522bb 100644
+--- a/gerrit-openid/src/main/java/com/google/gerrit/httpd/auth/openid/OpenIdServiceImpl.java
++++ b/gerrit-openid/src/main/java/com/google/gerrit/httpd/auth/openid/OpenIdServiceImpl.java
+@@ -16,6 +16,7 @@ package com.google.gerrit.httpd.auth.openid;
+ 
+ import com.google.gerrit.common.PageLinks;
+ import com.google.gerrit.common.auth.openid.OpenIdUrls;
++import com.google.gerrit.extensions.registration.DynamicItem;
+ import com.google.gerrit.httpd.CanonicalWebUrl;
+ import com.google.gerrit.httpd.WebSession;
+ import com.google.gerrit.reviewdb.client.Account;
+@@ -90,7 +91,7 @@ class OpenIdServiceImpl {
+   private static final String SCHEMA_LASTNAME =
+       "http://schema.openid.net/namePerson/last";
+ 
+-  private final Provider<WebSession> webSession;
++  private final DynamicItem<WebSession> webSession;
+   private final Provider<IdentifiedUser> identifiedUser;
+   private final CanonicalWebUrl urlProvider;
+   private final AccountManager accountManager;
+@@ -102,7 +103,7 @@ class OpenIdServiceImpl {
+   private final int papeMaxAuthAge;
+ 
+   @Inject
+-  OpenIdServiceImpl(final Provider<WebSession> cf,
++  OpenIdServiceImpl(final DynamicItem<WebSession> cf,
+       final Provider<IdentifiedUser> iu,
+       CanonicalWebUrl up,
+       @GerritServerConfig final Config config, final AuthConfig ac,
+diff --git a/gerrit-pgm/src/main/java/com/google/gerrit/pgm/Daemon.java b/gerrit-pgm/src/main/java/com/google/gerrit/pgm/Daemon.java
+index a10e7e4..05aca6c 100644
+--- a/gerrit-pgm/src/main/java/com/google/gerrit/pgm/Daemon.java
++++ b/gerrit-pgm/src/main/java/com/google/gerrit/pgm/Daemon.java
+@@ -18,9 +18,9 @@ import static com.google.gerrit.server.schema.DataSourceProvider.Context.MULTI_U
+ 
+ import com.google.gerrit.common.ChangeHookRunner;
+ import com.google.gerrit.httpd.AllRequestFilter;
+-import com.google.gerrit.httpd.CacheBasedWebSession;
+ import com.google.gerrit.httpd.GerritUiOptions;
+ import com.google.gerrit.httpd.GitOverHttpModule;
++import com.google.gerrit.httpd.H2CacheBasedWebSession;
+ import com.google.gerrit.httpd.HttpCanonicalWebUrlProvider;
+ import com.google.gerrit.httpd.RequestContextFilter;
+ import com.google.gerrit.httpd.WebModule;
+@@ -341,7 +341,7 @@ public class Daemon extends SiteProgram {
+     }
+     modules.add(RequestContextFilter.module());
+     modules.add(AllRequestFilter.module());
+-    modules.add(CacheBasedWebSession.module());
++    modules.add(H2CacheBasedWebSession.module());
+     modules.add(HttpContactStoreConnection.module());
+     modules.add(sysInjector.getInstance(GitOverHttpModule.class));
+     modules.add(sysInjector.getInstance(WebModule.class));
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/plugins/PluginGuiceEnvironment.java b/gerrit-server/src/main/java/com/google/gerrit/server/plugins/PluginGuiceEnvironment.java
+index 387ffa4..b6b2408 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/plugins/PluginGuiceEnvironment.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/plugins/PluginGuiceEnvironment.java
+@@ -82,6 +82,7 @@ public class PluginGuiceEnvironment {
+   private Provider<ModuleGenerator> httpGen;
+ 
+   private Map<TypeLiteral<?>, DynamicItem<?>> sysItems;
++  private Map<TypeLiteral<?>, DynamicItem<?>> httpItems;
+ 
+   private Map<TypeLiteral<?>, DynamicSet<?>> sysSets;
+   private Map<TypeLiteral<?>, DynamicSet<?>> sshSets;
+@@ -119,7 +120,8 @@ public class PluginGuiceEnvironment {
+   }
+ 
+   boolean hasDynamicItem(TypeLiteral<?> type) {
+-    return sysItems.containsKey(type);
++    return sysItems.containsKey(type)
++        || (httpItems != null && httpItems.containsKey(type));
+   }
+ 
+   boolean hasDynamicSet(TypeLiteral<?> type) {
+@@ -175,6 +177,7 @@ public class PluginGuiceEnvironment {
+   public void setHttpInjector(Injector injector) {
+     httpModule = copy(injector);
+     httpGen = injector.getProvider(ModuleGenerator.class);
++    httpItems = dynamicItemsOf(injector);
+     httpSets = dynamicSetsOf(injector);
+     httpMaps = dynamicMapsOf(injector);
+     onStart.addAll(listeners(injector, StartPluginListener.class));
+@@ -209,6 +212,7 @@ public class PluginGuiceEnvironment {
+     RequestContext oldContext = enter(plugin);
+     try {
+       attachItem(sysItems, plugin.getSysInjector(), plugin);
++      attachItem(httpItems, plugin.getHttpInjector(), plugin);
+ 
+       attachSet(sysSets, plugin.getSysInjector(), plugin);
+       attachSet(sshSets, plugin.getSshInjector(), plugin);
+@@ -274,6 +278,7 @@ public class PluginGuiceEnvironment {
+       reattachSet(old, httpSets, newPlugin.getHttpInjector(), newPlugin);
+ 
+       reattachItem(old, sysItems, newPlugin.getSysInjector(), newPlugin);
++      reattachItem(old, httpItems, newPlugin.getHttpInjector(), newPlugin);
+     } finally {
+       exit(oldContext);
+     }
+@@ -524,21 +529,17 @@ public class PluginGuiceEnvironment {
+     if (is("javax.servlet.ServletContext", type)) {
+       return false;
+     }
+-    if (is("javax.servlet.ServletRequest", type)) {
++    if (is("javax.servlet.ServletRequest", type)
++        && !is("javax.servlet.http.HttpServletRequest", type)) {
+       return false;
+     }
+-    if (is("javax.servlet.ServletResponse", type)) {
++    if (is("javax.servlet.ServletResponse", type)
++        && !is("javax.servlet.http.HttpServletResponse", type)) {
+       return false;
+     }
+     if (is("javax.servlet.http.HttpServlet", type)) {
+       return false;
+     }
+-    if (is("javax.servlet.http.HttpServletRequest", type)) {
+-      return false;
+-    }
+-    if (is("javax.servlet.http.HttpServletResponse", type)) {
+-      return false;
+-    }
+     if (is("javax.servlet.http.HttpSession", type)) {
+       return false;
+     }
+diff --git a/gerrit-war/src/main/java/com/google/gerrit/httpd/WebAppInitializer.java b/gerrit-war/src/main/java/com/google/gerrit/httpd/WebAppInitializer.java
+index da08555..354306c 100644
+--- a/gerrit-war/src/main/java/com/google/gerrit/httpd/WebAppInitializer.java
++++ b/gerrit-war/src/main/java/com/google/gerrit/httpd/WebAppInitializer.java
+@@ -282,7 +282,7 @@ public class WebAppInitializer extends GuiceServletContextListener {
+     modules.add(sysInjector.getInstance(GitOverHttpModule.class));
+     modules.add(sshInjector.getInstance(WebModule.class));
+     modules.add(sshInjector.getInstance(WebSshGlueModule.class));
+-    modules.add(CacheBasedWebSession.module());
++    modules.add(H2CacheBasedWebSession.module());
+     modules.add(HttpContactStoreConnection.module());
+     modules.add(new HttpPluginModule());
+ 
+-- 
+1.7.8.3
+

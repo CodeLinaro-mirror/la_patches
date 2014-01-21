@@ -1,0 +1,217 @@
+From 96281b62d36b2275221812327f52d3ab4e6ec79f Mon Sep 17 00:00:00 2001
+From: Keunhong Park <keunhong@codeaurora.org>
+Date: Wed, 25 Jul 2012 10:28:46 -0600
+Subject: [PATCH] Add support for binding CacheRemovalListener
+
+This can be used to dynamically bind removal listeners for use in
+multi-master support.
+
+Change-Id: I9c58740c54c89e5bd75accc64f03f1fdddc8d581
+---
+ .../server/cache/h2/DefaultCacheFactory.java       |   16 ++++-
+ .../gerrit/server/cache/CacheRemovalListener.java  |   36 ++++++++++
+ .../server/cache/ForwardingRemovalListener.java    |   73 ++++++++++++++++++++
+ .../gerrit/server/config/GerritGlobalModule.java   |    2 +
+ 4 files changed, 126 insertions(+), 1 deletions(-)
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/cache/CacheRemovalListener.java
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/cache/ForwardingRemovalListener.java
+
+diff --git a/gerrit-cache-h2/src/main/java/com/google/gerrit/server/cache/h2/DefaultCacheFactory.java b/gerrit-cache-h2/src/main/java/com/google/gerrit/server/cache/h2/DefaultCacheFactory.java
+index 8bb0709..a6e28da 100644
+--- a/gerrit-cache-h2/src/main/java/com/google/gerrit/server/cache/h2/DefaultCacheFactory.java
++++ b/gerrit-cache-h2/src/main/java/com/google/gerrit/server/cache/h2/DefaultCacheFactory.java
+@@ -22,10 +22,12 @@ import com.google.common.cache.LoadingCache;
+ import com.google.common.cache.Weigher;
+ import com.google.gerrit.lifecycle.LifecycleModule;
+ import com.google.gerrit.server.cache.CacheBinding;
++import com.google.gerrit.server.cache.ForwardingRemovalListener;;
+ import com.google.gerrit.server.cache.MemoryCacheFactory;
+ import com.google.gerrit.server.cache.PersistentCacheFactory;
+ import com.google.gerrit.server.cache.h2.H2CacheImpl.ValueHolder;
+ import com.google.gerrit.server.config.ConfigUtil;
++import com.google.gerrit.server.config.FactoryModule;
+ import com.google.gerrit.server.config.GerritServerConfig;
+ import com.google.inject.Inject;
+ 
+@@ -37,6 +39,13 @@ public class DefaultCacheFactory implements MemoryCacheFactory {
+   public static class Module extends LifecycleModule {
+     @Override
+     protected void configure() {
++      install(new FactoryModule() {
++        @Override
++        protected void configure() {
++          factory(ForwardingRemovalListener.Factory.class);
++        }
++      });
++
+       bind(DefaultCacheFactory.class);
+       bind(MemoryCacheFactory.class).to(DefaultCacheFactory.class);
+       bind(PersistentCacheFactory.class).to(H2CacheFactory.class);
+@@ -45,10 +54,13 @@ public class DefaultCacheFactory implements MemoryCacheFactory {
+   }
+ 
+   private final Config cfg;
++  private final ForwardingRemovalListener.Factory forwardingRemovalListenerFactory;
+ 
+   @Inject
+-  public DefaultCacheFactory(@GerritServerConfig Config config) {
++  public DefaultCacheFactory(@GerritServerConfig Config config,
++      ForwardingRemovalListener.Factory forwardingRemovalListenerFactory) {
+     this.cfg = config;
++    this.forwardingRemovalListenerFactory = forwardingRemovalListenerFactory;
+   }
+ 
+   @Override
+@@ -73,6 +85,8 @@ public class DefaultCacheFactory implements MemoryCacheFactory {
+         "cache", def.name(), "memoryLimit",
+         def.maximumWeight()));
+ 
++    builder.removalListener(forwardingRemovalListenerFactory.create(def.name()));
++
+     Weigher<K, V> weigher = def.weigher();
+     if (weigher != null && unwrapValueHolder) {
+       final Weigher<K, V> impl = weigher;
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/cache/CacheRemovalListener.java b/gerrit-server/src/main/java/com/google/gerrit/server/cache/CacheRemovalListener.java
+new file mode 100644
+index 0000000..8d29666
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/cache/CacheRemovalListener.java
+@@ -0,0 +1,36 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.server.cache;
++
++import com.google.common.cache.RemovalNotification;
++
++public interface CacheRemovalListener<K,V> {
++  public void onRemoval(String pluginName,
++    String cacheName,
++    RemovalNotification<K, V> notification);
++}
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/cache/ForwardingRemovalListener.java b/gerrit-server/src/main/java/com/google/gerrit/server/cache/ForwardingRemovalListener.java
+new file mode 100644
+index 0000000..46ad2b9
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/cache/ForwardingRemovalListener.java
+@@ -0,0 +1,73 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++//     * Redistributions of source code must retain the above copyright
++//       notice, this list of conditions and the following disclaimer.
++//     * Redistributions in binary form must reproduce the above
++//       copyright notice, this list of conditions and the following
++//       disclaimer in the documentation and/or other materials provided
++//       with the distribution.
++//     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++//       contributors may be used to endorse or promote products derived
++//       from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.server.cache;
++
++import com.google.common.base.Strings;
++import com.google.common.cache.RemovalListener;
++import com.google.common.cache.RemovalNotification;
++import com.google.gerrit.extensions.registration.DynamicSet;
++import com.google.inject.Inject;
++import com.google.inject.assistedinject.Assisted;
++
++/**
++ * This listener dispatches removal events to all other RemovalListeners
++ * attached via the DynamicSet API.
++ *
++ * @param <K>
++ * @param <V>
++ */
++@SuppressWarnings("rawtypes")
++public class ForwardingRemovalListener<K, V> implements RemovalListener<K, V> {
++  public interface Factory {
++    ForwardingRemovalListener create(String cacheName);
++  }
++
++  private final DynamicSet<CacheRemovalListener> listeners;
++  private final String cacheName;
++  private String pluginName = "gerrit";
++
++  @Inject
++  ForwardingRemovalListener(DynamicSet<CacheRemovalListener> listeners,
++      @Assisted String cacheName) {
++    this.listeners = listeners;
++    this.cacheName = cacheName;
++  }
++
++  @Inject(optional = true)
++  void setPluginName(String name) {
++    if (!Strings.isNullOrEmpty(name)) {
++      this.pluginName = name;
++    }
++  }
++
++  public void onRemoval(RemovalNotification<K, V> notification) {
++    for (CacheRemovalListener<K, V> l : listeners) {
++      l.onRemoval(pluginName, cacheName, notification);
++    }
++  }
++}
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/config/GerritGlobalModule.java b/gerrit-server/src/main/java/com/google/gerrit/server/config/GerritGlobalModule.java
+index 9e3aeca..2cdc94b 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/config/GerritGlobalModule.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/config/GerritGlobalModule.java
+@@ -48,6 +48,7 @@ import com.google.gerrit.server.account.InternalGroupBackend;
+ import com.google.gerrit.server.account.Realm;
+ import com.google.gerrit.server.account.UniversalGroupBackend;
+ import com.google.gerrit.server.auth.ldap.LdapModule;
++import com.google.gerrit.server.cache.CacheRemovalListener;
+ import com.google.gerrit.server.events.EventFactory;
+ import com.google.gerrit.server.extensions.events.GitReferenceUpdated;
+ import com.google.gerrit.server.git.ChangeMergeQueue;
+@@ -169,6 +170,7 @@ public class GerritGlobalModule extends FactoryModule {
+ 
+     bind(GitReferenceUpdated.class);
+     DynamicMap.mapOf(binder(), new TypeLiteral<Cache<?, ?>>() {});
++    DynamicSet.setOf(binder(), CacheRemovalListener.class);
+     DynamicSet.setOf(binder(), GitReferenceUpdatedListener.class);
+     DynamicSet.setOf(binder(), NewProjectCreatedListener.class);
+ 
+-- 
+1.7.8.3
+

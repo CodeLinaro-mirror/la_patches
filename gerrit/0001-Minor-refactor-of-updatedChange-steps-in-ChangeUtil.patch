@@ -1,0 +1,88 @@
+From 7887a15cd253198a764bb18ba11b33424f75b667 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Wed, 22 Jun 2011 12:53:40 -0600
+Subject: [PATCH] Minor refactor of updatedChange steps in ChangeUtil
+
+Use a common function to set the ChangeMessage and
+update the approvals cache after updating a Change.
+
+Change-Id: I019ce22f819e6d46acc5be4d2ed78b7cccb54ae0
+---
+ .../java/com/google/gerrit/server/ChangeUtil.java  |   47 +++++++++-----------
+ 1 files changed, 21 insertions(+), 26 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+index 87cded0..a3dcfea 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+@@ -246,19 +246,8 @@ public class ChangeUtil {
+       }
+     });
+ 
+-    if (updatedChange == null) {
+-      throw new InvalidChangeOperationException(
+-          "Change is no longer open or patchset is not latest");
+-    }
+-
+-    db.changeMessages().insert(Collections.singleton(cmsg));
+-
+-    final List<PatchSetApproval> approvals =
+-        db.patchSetApprovals().byChange(changeId).toList();
+-    for (PatchSetApproval a : approvals) {
+-      a.cache(updatedChange);
+-    }
+-    db.patchSetApprovals().update(approvals);
++    updatedChange(db, updatedChange, cmsg,
++        "Change is no longer open or patchset is not latest");
+ 
+     // Email the reviewers
+     final AbandonedSender cm = abandonedSenderFactory.create(updatedChange);
+@@ -408,19 +397,8 @@ public class ChangeUtil {
+       }
+     });
+ 
+-    if (updatedChange == null) {
+-      throw new InvalidChangeOperationException(
+-          "Change is not abandoned or patchset is not latest");
+-    }
+-
+-    db.changeMessages().insert(Collections.singleton(cmsg));
+-
+-    final List<PatchSetApproval> approvals =
+-        db.patchSetApprovals().byChange(changeId).toList();
+-    for (PatchSetApproval a : approvals) {
+-      a.cache(updatedChange);
+-    }
+-    db.patchSetApprovals().update(approvals);
++    updatedChange(db, updatedChange, cmsg,
++       "Change is not abandoned or patchset is not latest");
+ 
+     // Email the reviewers
+     final AbandonedSender cm = abandonedSenderFactory.create(updatedChange);
+@@ -431,6 +409,23 @@ public class ChangeUtil {
+     hooks.doChangeRestoreHook(updatedChange, user.getAccount(), message);
+   }
+ 
++  private static void updatedChange(final ReviewDb db, final Change change,
++      final ChangeMessage cmsg, final String err) throws NoSuchChangeException,
++      InvalidChangeOperationException, OrmException {
++    if (change == null) {
++      throw new InvalidChangeOperationException(err);
++    }
++
++    db.changeMessages().insert(Collections.singleton(cmsg));
++
++    final List<PatchSetApproval> approvals =
++        db.patchSetApprovals().byChange(change.getId()).toList();
++    for (PatchSetApproval a : approvals) {
++      a.cache(change);
++    }
++    db.patchSetApprovals().update(approvals);
++  }
++
+   public static String sortKey(long lastUpdated, int id){
+     // The encoding uses minutes since Wed Oct 1 00:00:00 2008 UTC.
+     // We overrun approximately 4,085 years later, so ~6093.
+-- 
+1.7.3.1
+

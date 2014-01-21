@@ -1,0 +1,1161 @@
+From 05eb2a5130bc266c2c2298d19202f31c2a71aac8 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Thu, 10 Jun 2010 10:32:00 -0600
+Subject: [PATCH] Add ssh command line feature to submit change set
+
+Rename the ssh gerrit approve command to review and enhance
+it with the ability to perform submits via --submit.  Create
+an alias for 'review' as 'approve' to support legacy approve.
+Update docs accordingly.
+
+Bug: issue 310
+Change-Id: I5b88c8818b227de7dfc9c8a879eb5e7c7821e3b5
+---
+ Documentation/cmd-approve.txt                      |   87 -----
+ Documentation/cmd-index.txt                        |    7 +-
+ Documentation/cmd-review.txt                       |   95 ++++++
+ .../java/com/google/gerrit/server/ChangeUtil.java  |   51 +++
+ .../gerrit/server/project/ChangeControl.java       |   63 ++++-
+ .../google/gerrit/server/project/RefControl.java   |    5 +
+ .../gerrit/sshd/commands/ApproveCommand.java       |  336 -------------------
+ .../gerrit/sshd/commands/MasterCommandModule.java  |    3 +-
+ .../google/gerrit/sshd/commands/ReviewCommand.java |  351 ++++++++++++++++++++
+ .../gerrit/sshd/commands/SlaveCommandModule.java   |    1 +
+ 10 files changed, 572 insertions(+), 427 deletions(-)
+ delete mode 100644 Documentation/cmd-approve.txt
+ create mode 100644 Documentation/cmd-review.txt
+ delete mode 100644 gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ApproveCommand.java
+ create mode 100644 gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java
+
+diff --git a/Documentation/cmd-approve.txt b/Documentation/cmd-approve.txt
+deleted file mode 100644
+index a81ce82..0000000
+--- a/Documentation/cmd-approve.txt
++++ /dev/null
+@@ -1,87 +0,0 @@
+-gerrit approve
+-==============
+-
+-NAME
+-----
+-gerrit approve - Approve one or more patch sets
+-
+-SYNOPSIS
+---------
+-[verse]
+-'ssh' -p <port> <host> 'gerrit approve' [\--project <PROJECT>] [\--message <MESSAGE>] {COMMIT | CHANGEID,PATCHSET}...
+-
+-DESCRIPTION
+------------
+-Updates the current user's approval status of the specified patch
+-sets, sending out email notifications and updating the database.
+-
+-Patch sets should be specified as complete or abbreviated commit
+-SHA-1s.  If the same commit is available in multiple projects the
+-\--project option may be used to limit where Gerrit searches for
+-the change to only the contents of the specified project.
+-
+-For current backward compatibility with user tools patch sets may
+-also be specified in the legacy 'CHANGEID,PATCHSET' format, such as
+-'8242,2'.  Support for this legacy format is planned to be removed
+-in a future edition of Gerrit Code Review.  Use of commit SHA-1s
+-is strongly encouraged.
+-
+-OPTIONS
+--------
+-
+-\--project::
+--p::
+-	Name of the project the intended changes are contained
+-	within.  This option must be supplied before the commit
+-	SHA-1 in order to take effect.
+-
+-\--message::
+--m::
+-	Optional cover letter to include as part of the message
+-	sent to reviewers when the approval states are updated.
+-
+-\--help::
+--h::
+-	Display site-specific usage information, including the
+-	complete listing of supported approval categories and values.
+-
+-\--code-review::
+-\--verified::
+-	Set the approval category to the value 'N'.  The exact
+-	option names supported and the range of values permitted
+-	differs per site, check the output of \--help, or contact
+-	your site administrator for further details.
+-
+-ACCESS
+-------
+-Any user who has configured an SSH key.
+-
+-SCRIPTING
+----------
+-This command is intended to be used in scripts.
+-
+-EXAMPLES
+---------
+-
+-Approve the change with commit c0ff33 as "Verified +1"
+-=====
+-	$ ssh -p 29418 review.example.com gerrit approve --verified=+1 c0ff33
+-=====
+-
+-Mark the unmerged commits both "Verified +1" and "Code Review +2":
+-====
+-	$ ssh -p 29418 review.example.com gerrit approve \
+-	--verified=+1 \
+-	--code-review=+2 \
+-	--project=this/project \
+-	$(git rev-list origin/master..HEAD)
+-====
+-
+-SEE ALSO
+---------
+-
+-* link:access-control.html[Access Controls]
+-
+-GERRIT
+-------
+-Part of link:index.html[Gerrit Code Review]
+diff --git a/Documentation/cmd-index.txt b/Documentation/cmd-index.txt
+index a9107eb..6fdcee0 100644
+--- a/Documentation/cmd-index.txt
++++ b/Documentation/cmd-index.txt
+@@ -60,12 +60,15 @@ link:cmd-receive-pack.html[git receive-pack]::
+ Also implements the magic associated with uploading commits for
+ review.  See link:user-upload.html#push_create[Creating Changes].
+ 
+-link:cmd-approve.html[gerrit approve]::
+-	Approve a patch set from the command line.
++link:cmd-review.html[gerrit approve]::
++  Alias for 'gerrit review'.
+ 
+ link:cmd-ls-projects.html[gerrit ls-projects]::
+ 	List projects visible to the caller.
+ 
++link:cmd-review.html[gerrit review]::
++  Verify, approve and/or submit a patch set from the command line.
++
+ link:cmd-stream-events.html[gerrit stream-events]::
+ 	Monitor events occuring in real time.
+ 
+diff --git a/Documentation/cmd-review.txt b/Documentation/cmd-review.txt
+new file mode 100644
+index 0000000..b800cb4
+--- /dev/null
++++ b/Documentation/cmd-review.txt
+@@ -0,0 +1,95 @@
++gerrit review
++==============
++
++NAME
++----
++gerrit review - Verify, approve and/or submit one or more patch sets
++
++SYNOPSIS
++--------
++[verse]
++'ssh' -p <port> <host> 'gerrit approve' [\--project <PROJECT>] [\--message <MESSAGE>] [\--verified <N>] [\--code-review <N>] [\--submit] {COMMIT | CHANGEID,PATCHSET}...
++'ssh' -p <port> <host> 'gerrit review' [\--project <PROJECT>] [\--message <MESSAGE>] [\--verified <N>] [\--code-review <N>] [\--submit] {COMMIT | CHANGEID,PATCHSET}...
++
++DESCRIPTION
++-----------
++Updates the current user's approval status of the specified patch
++sets and/or submits them for merging, sending out email
++notifications and updating the database.
++
++Patch sets should be specified as complete or abbreviated commit
++SHA-1s.  If the same commit is available in multiple projects the
++\--project option may be used to limit where Gerrit searches for
++the change to only the contents of the specified project.
++
++For current backward compatibility with user tools patch sets may
++also be specified in the legacy 'CHANGEID,PATCHSET' format, such as
++'8242,2'.  Support for this legacy format is planned to be removed
++in a future edition of Gerrit Code Review.  Use of commit SHA-1s
++is strongly encouraged.
++
++OPTIONS
++-------
++
++\--project::
++-p::
++	Name of the project the intended changes are contained
++	within.  This option must be supplied before the commit
++	SHA-1 in order to take effect.
++
++\--message::
++-m::
++	Optional cover letter to include as part of the message
++	sent to reviewers when the approval states are updated.
++
++\--help::
++-h::
++	Display site-specific usage information, including the
++	complete listing of supported approval categories and values.
++
++\--code-review::
++\--verified::
++	Set the approval category to the value 'N'.  The exact
++	option names supported and the range of values permitted
++	differs per site, check the output of \--help, or contact
++	your site administrator for further details.
++
++\--submit::
++-s::
++  Submit the specified patch set(s) for merging.
++
++ACCESS
++------
++Any user who has configured an SSH key.
++
++SCRIPTING
++---------
++This command is intended to be used in scripts.
++
++EXAMPLES
++--------
++
++Approve the change with commit c0ff33 as "Verified +1"
++=====
++	$ ssh -p 29418 review.example.com gerrit review --verified=+1 c0ff33
++=====
++
++Mark the unmerged commits both "Verified +1" and "Code Review +2" and
++submit tehm for merging:
++====
++	$ ssh -p 29418 review.example.com gerrit review \
++	--verified=+1 \
++	--code-review=+2 \
++  --submit \
++	--project=this/project \
++	$(git rev-list origin/master..HEAD)
++====
++
++SEE ALSO
++--------
++
++* link:access-control.html[Access Controls]
++
++GERRIT
++------
++Part of link:index.html[Gerrit Code Review]
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+index 4d9c177..320cf65 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/ChangeUtil.java
+@@ -14,15 +14,23 @@
+ 
+ package com.google.gerrit.server;
+ 
++import static com.google.gerrit.reviewdb.ApprovalCategory.SUBMIT;
++
+ import com.google.gerrit.reviewdb.Change;
++import com.google.gerrit.reviewdb.PatchSet;
++import com.google.gerrit.reviewdb.PatchSetApproval;
+ import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.server.git.MergeQueue;
++import com.google.gwtorm.client.AtomicUpdate;
+ import com.google.gwtorm.client.OrmConcurrencyException;
+ import com.google.gwtorm.client.OrmException;
+ 
+ import org.eclipse.jgit.util.Base64;
+ import org.eclipse.jgit.util.NB;
+ 
++import java.util.ArrayList;
+ import java.util.Collections;
++import java.util.List;
+ 
+ public class ChangeUtil {
+   private static int uuidPrefix;
+@@ -67,6 +75,49 @@ public class ChangeUtil {
+     computeSortKey(c);
+   }
+ 
++  public static void submit(PatchSet.Id patchSetId, IdentifiedUser user, ReviewDb db, MergeQueue merger)
++      throws OrmException {
++    final Change.Id changeId = patchSetId.getParentKey();
++    final PatchSetApproval approval = createSubmitApproval(patchSetId, user, db);
++
++    db.patchSetApprovals().upsert(Collections.singleton(approval));
++
++    final Change change = db.changes().atomicUpdate(changeId, new AtomicUpdate<Change>() {
++      @Override
++      public Change update(Change change) {
++        if (change.getStatus() == Change.Status.NEW) {
++          change.setStatus(Change.Status.SUBMITTED);
++          ChangeUtil.updated(change);
++        }
++        return change;
++      }
++    });
++
++    if (change.getStatus() == Change.Status.SUBMITTED) {
++      merger.merge(change.getDest());
++    }
++  }
++
++  public static PatchSetApproval createSubmitApproval(PatchSet.Id patchSetId, IdentifiedUser user, ReviewDb db) 
++      throws OrmException {
++    final List<PatchSetApproval> allApprovals =
++        new ArrayList<PatchSetApproval>(db.patchSetApprovals().byPatchSet(
++            patchSetId).toList());
++
++    final PatchSetApproval.Key akey =
++        new PatchSetApproval.Key(patchSetId, user.getAccountId(), SUBMIT);
++
++    for (final PatchSetApproval approval : allApprovals) {
++      if (akey.equals(approval.getKey())) {
++        approval.setValue((short) 1);
++        approval.setGranted();
++        return approval;
++      }
++    }
++    return new PatchSetApproval(akey, (short) 1);
++  }
++
++
+   public static void computeSortKey(final Change c) {
+     // The encoding uses minutes since Wed Oct 1 00:00:00 2008 UTC.
+     // We overrun approximately 4,085 years later, so ~6093.
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/project/ChangeControl.java b/gerrit-server/src/main/java/com/google/gerrit/server/project/ChangeControl.java
+index 86afcbe..97dd276 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/project/ChangeControl.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/project/ChangeControl.java
+@@ -14,17 +14,27 @@
+ 
+ package com.google.gerrit.server.project;
+ 
+-import com.google.gerrit.reviewdb.Account;
++import com.google.gerrit.common.data.ApprovalType;
++import com.google.gerrit.common.data.ApprovalTypes;
+ import com.google.gerrit.reviewdb.Change;
++import com.google.gerrit.reviewdb.PatchSet;
+ import com.google.gerrit.reviewdb.PatchSetApproval;
+ import com.google.gerrit.reviewdb.Project;
+ import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.server.ChangeUtil;
+ import com.google.gerrit.server.CurrentUser;
+ import com.google.gerrit.server.IdentifiedUser;
++import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
++import com.google.gerrit.server.workflow.CategoryFunction;
++import com.google.gerrit.server.workflow.FunctionState;
+ import com.google.gwtorm.client.OrmException;
+ import com.google.inject.Inject;
+ import com.google.inject.Provider;
+ 
++import java.util.ArrayList;
++import java.util.List;
++
++
+ /** Access control management for a user accessing a single change. */
+ public class ChangeControl {
+   public static class Factory {
+@@ -173,4 +183,55 @@ public class ChangeControl {
+ 
+     return false;
+   }
++
++  /** @return an error string if this user cannot currently submit patch
++   *          sets to this change */
++  public String canSubmit(final PatchSet.Id patchSetId, final ReviewDb db,
++        final ApprovalTypes approvalTypes,
++        FunctionState.Factory functionStateFactory)
++         throws OrmException {
++
++    if (change.getStatus().isClosed()) {
++      return "Change " + patchSetId.getParentKey() + " is closed";
++    }
++    if (!patchSetId.equals(change.currentPatchSetId())) {
++      return "Patch set " + patchSetId + " not current";
++    }
++    if (!getRefControl().canSubmit()) {
++      return "User does not have permission to submit";
++    }
++
++    final List<PatchSetApproval> allApprovals =
++        new ArrayList<PatchSetApproval>(db.patchSetApprovals().byPatchSet(
++            patchSetId).toList());
++
++    if(!(getCurrentUser() instanceof IdentifiedUser)) {
++      throw new IllegalArgumentException("user is not identified");
++    }
++    final PatchSetApproval myAction =
++        ChangeUtil.createSubmitApproval(patchSetId,
++            (IdentifiedUser) getCurrentUser(), db);
++
++    final ApprovalType actionType =
++        approvalTypes.getApprovalType(myAction.getCategoryId());
++    if (actionType == null || !actionType.getCategory().isAction()) {
++      throw new IllegalArgumentException(myAction.getCategoryId() +
++        " not an action");
++    }
++
++    final FunctionState fs =
++        functionStateFactory.create(change, patchSetId, allApprovals);
++    for (ApprovalType c : approvalTypes.getApprovalTypes()) {
++      CategoryFunction.forCategory(c.getCategory()).run(c, fs);
++    }
++    if (!CategoryFunction.forCategory(actionType.getCategory()).isValid(
++          getCurrentUser(), actionType, fs)) {
++      return actionType.getCategory().getName() + " not permitted";
++    }
++    fs.normalize(actionType, myAction);
++    if (myAction.getValue() <= 0) {
++      return actionType.getCategory().getName() + " not permitted";
++    }
++    return null;
++  }
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/project/RefControl.java b/gerrit-server/src/main/java/com/google/gerrit/server/project/RefControl.java
+index afeb422..9b82fd3 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/project/RefControl.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/project/RefControl.java
+@@ -349,6 +349,11 @@ public class RefControl {
+     return rights;
+   }
+ 
++  /** @return true if this user can ever submit patch sets to this change */
++  public boolean canSubmit() {
++    return canPerform(ApprovalCategory.SUBMIT, (short) 1);
++  }
++
+   private List<RefRight> getLocalRights(ApprovalCategory.Id actionId) {
+     return filter(getProjectState().getLocalRights(actionId));
+   }
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ApproveCommand.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ApproveCommand.java
+deleted file mode 100644
+index 202ee76..0000000
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ApproveCommand.java
++++ /dev/null
+@@ -1,336 +0,0 @@
+-// Copyright (C) 2009 The Android Open Source Project
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License.
+-
+-package com.google.gerrit.sshd.commands;
+-
+-import com.google.gerrit.common.ChangeHookRunner;
+-import com.google.gerrit.common.data.ApprovalType;
+-import com.google.gerrit.common.data.ApprovalTypes;
+-import com.google.gerrit.reviewdb.ApprovalCategory;
+-import com.google.gerrit.reviewdb.ApprovalCategoryValue;
+-import com.google.gerrit.reviewdb.Change;
+-import com.google.gerrit.reviewdb.ChangeMessage;
+-import com.google.gerrit.reviewdb.PatchSet;
+-import com.google.gerrit.reviewdb.PatchSetApproval;
+-import com.google.gerrit.reviewdb.RevId;
+-import com.google.gerrit.reviewdb.ReviewDb;
+-import com.google.gerrit.server.ChangeUtil;
+-import com.google.gerrit.server.IdentifiedUser;
+-import com.google.gerrit.server.mail.CommentSender;
+-import com.google.gerrit.server.mail.EmailException;
+-import com.google.gerrit.server.patch.PatchSetInfoFactory;
+-import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
+-import com.google.gerrit.server.project.ChangeControl;
+-import com.google.gerrit.server.project.NoSuchChangeException;
+-import com.google.gerrit.server.project.ProjectControl;
+-import com.google.gerrit.server.workflow.FunctionState;
+-import com.google.gerrit.sshd.BaseCommand;
+-import com.google.gerrit.util.cli.CmdLineParser;
+-import com.google.gwtorm.client.OrmException;
+-import com.google.gwtorm.client.ResultSet;
+-import com.google.inject.Inject;
+-
+-import org.apache.sshd.server.Environment;
+-import org.kohsuke.args4j.Argument;
+-import org.kohsuke.args4j.Option;
+-import org.slf4j.Logger;
+-import org.slf4j.LoggerFactory;
+-
+-import java.io.IOException;
+-import java.util.ArrayList;
+-import java.util.Collections;
+-import java.util.HashMap;
+-import java.util.HashSet;
+-import java.util.List;
+-import java.util.Map;
+-import java.util.Set;
+-
+-public class ApproveCommand extends BaseCommand {
+-  private static final Logger log =
+-      LoggerFactory.getLogger(ApproveCommand.class);
+-
+-  @Override
+-  protected final CmdLineParser newCmdLineParser() {
+-    final CmdLineParser parser = super.newCmdLineParser();
+-    for (ApproveOption c : optionList) {
+-      parser.addOption(c, c);
+-    }
+-    return parser;
+-  }
+-
+-  private final Set<PatchSet.Id> patchSetIds = new HashSet<PatchSet.Id>();
+-
+-  @Argument(index = 0, required = true, multiValued = true, metaVar = "{COMMIT | CHANGE,PATCHSET}", usage = "patch to approve")
+-  void addPatchSetId(final String token) {
+-    try {
+-      patchSetIds.addAll(parsePatchSetId(token));
+-    } catch (UnloggedFailure e) {
+-      throw new IllegalArgumentException(e.getMessage(), e);
+-    } catch (OrmException e) {
+-      throw new IllegalArgumentException("database error", e);
+-    }
+-  }
+-
+-  @Option(name = "--project", aliases = "-p", usage = "project containing the patch set")
+-  private ProjectControl projectControl;
+-
+-  @Option(name = "--message", aliases = "-m", usage = "cover message to publish on change", metaVar = "MESSAGE")
+-  private String changeComment;
+-
+-  @Inject
+-  private ReviewDb db;
+-
+-  @Inject
+-  private IdentifiedUser currentUser;
+-
+-  @Inject
+-  private CommentSender.Factory commentSenderFactory;
+-
+-  @Inject
+-  private PatchSetInfoFactory patchSetInfoFactory;
+-
+-  @Inject
+-  private ApprovalTypes approvalTypes;
+-
+-  @Inject
+-  private ChangeControl.Factory changeControlFactory;
+-
+-  @Inject
+-  private FunctionState.Factory functionStateFactory;
+-
+-  @Inject
+-  private ChangeHookRunner hooks;
+-
+-  private List<ApproveOption> optionList;
+-
+-  @Override
+-  public final void start(final Environment env) {
+-    startThread(new CommandRunnable() {
+-      @Override
+-      public void run() throws Failure {
+-        initOptionList();
+-        parseCommandLine();
+-
+-        boolean ok = true;
+-        for (final PatchSet.Id patchSetId : patchSetIds) {
+-          try {
+-            approveOne(patchSetId);
+-          } catch (UnloggedFailure e) {
+-            ok = false;
+-            writeError("error: " + e.getMessage() + "\n");
+-          } catch (Exception e) {
+-            ok = false;
+-            writeError("fatal: internal server error while approving "
+-                + patchSetId + "\n");
+-            log.error("internal error while approving " + patchSetId);
+-          }
+-        }
+-        if (!ok) {
+-          throw new UnloggedFailure(1, "one or more approvals failed;"
+-              + " review output above");
+-        }
+-      }
+-    });
+-  }
+-
+-  private void approveOne(final PatchSet.Id patchSetId)
+-      throws NoSuchChangeException, UnloggedFailure, OrmException,
+-      PatchSetInfoNotAvailableException, EmailException {
+-    final Change.Id changeId = patchSetId.getParentKey();
+-    final ChangeControl changeControl =
+-        changeControlFactory.validateFor(changeId);
+-    final Change change = changeControl.getChange();
+-
+-    final StringBuffer msgBuf = new StringBuffer();
+-    msgBuf.append("Patch Set ");
+-    msgBuf.append(patchSetId.get());
+-    msgBuf.append(": ");
+-
+-    final Map<ApprovalCategory.Id, ApprovalCategoryValue.Id> approvalsMap =
+-        new HashMap<ApprovalCategory.Id, ApprovalCategoryValue.Id>();
+-
+-    if (change.getStatus().isOpen()) {
+-      for (ApproveOption co : optionList) {
+-        final ApprovalCategory.Id category = co.getCategoryId();
+-        PatchSetApproval.Key psaKey =
+-            new PatchSetApproval.Key(patchSetId, currentUser.getAccountId(),
+-                category);
+-        PatchSetApproval psa = db.patchSetApprovals().get(psaKey);
+-
+-        Short score = co.value();
+-
+-        if (score != null) {
+-          addApproval(psaKey, score, change, co);
+-        } else {
+-          if (psa == null) {
+-            score = 0;
+-            addApproval(psaKey, score, change, co);
+-          } else {
+-            score = psa.getValue();
+-          }
+-        }
+-
+-        final ApprovalCategoryValue.Id val =
+-            new ApprovalCategoryValue.Id(category, score);
+-
+-        String message = db.approvalCategoryValues().get(val).getName();
+-        msgBuf.append(" " + message + ";");
+-        approvalsMap.put(category, val);
+-      }
+-    }
+-
+-    msgBuf.deleteCharAt(msgBuf.length() - 1);
+-    msgBuf.append("\n\n");
+-
+-    if (changeComment != null) {
+-      msgBuf.append(changeComment);
+-    }
+-
+-    String uuid = ChangeUtil.messageUUID(db);
+-    ChangeMessage cm =
+-        new ChangeMessage(new ChangeMessage.Key(changeId, uuid), currentUser
+-            .getAccountId());
+-    cm.setMessage(msgBuf.toString());
+-    db.changeMessages().insert(Collections.singleton(cm));
+-
+-    ChangeUtil.touch(change, db);
+-    sendMail(change, change.currentPatchSetId(), cm);
+-
+-    hooks.doCommentAddedHook(change, currentUser.getAccount(), db.patchSets()
+-        .get(patchSetId), changeComment, approvalsMap);
+-  }
+-
+-  private Set<PatchSet.Id> parsePatchSetId(final String patchIdentity)
+-      throws UnloggedFailure, OrmException {
+-    // By commit?
+-    //
+-    if (patchIdentity.matches("^([0-9a-fA-F]{4," + RevId.LEN + "})$")) {
+-      final RevId id = new RevId(patchIdentity);
+-      final ResultSet<PatchSet> patches;
+-      if (id.isComplete()) {
+-        patches = db.patchSets().byRevision(id);
+-      } else {
+-        patches = db.patchSets().byRevisionRange(id, id.max());
+-      }
+-
+-      final Set<PatchSet.Id> matches = new HashSet<PatchSet.Id>();
+-      for (final PatchSet ps : patches) {
+-        final Change change = db.changes().get(ps.getId().getParentKey());
+-        if (inProject(change)) {
+-          matches.add(ps.getId());
+-        }
+-      }
+-
+-      switch (matches.size()) {
+-        case 1:
+-          return matches;
+-        case 0:
+-          throw error("\"" + patchIdentity + "\" no such patch set");
+-        default:
+-          throw error("\"" + patchIdentity + "\" matches multiple patch sets");
+-      }
+-    }
+-
+-    // By older style change,patchset?
+-    //
+-    if (patchIdentity.matches("^[1-9][0-9]*,[1-9][0-9]*$")) {
+-      final PatchSet.Id patchSetId;
+-      try {
+-        patchSetId = PatchSet.Id.parse(patchIdentity);
+-      } catch (IllegalArgumentException e) {
+-        throw error("\"" + patchIdentity + "\" is not a valid patch set");
+-      }
+-      if (db.patchSets().get(patchSetId) == null) {
+-        throw error("\"" + patchIdentity + "\" no such patch set");
+-      }
+-      if (projectControl != null) {
+-        final Change change = db.changes().get(patchSetId.getParentKey());
+-        if (!inProject(change)) {
+-          throw error("change " + change.getId() + " not in project "
+-              + projectControl.getProject().getName());
+-        }
+-      }
+-      return Collections.singleton(patchSetId);
+-    }
+-
+-    throw error("\"" + patchIdentity + "\" is not a valid patch set");
+-  }
+-
+-  private boolean inProject(final Change change) {
+-    if (projectControl == null) {
+-      // No --project option, so they want every project.
+-      return true;
+-    }
+-    return projectControl.getProject().getNameKey().equals(change.getProject());
+-  }
+-
+-  private void sendMail(final Change c, final PatchSet.Id psid,
+-      final ChangeMessage message) throws PatchSetInfoNotAvailableException,
+-      EmailException, OrmException {
+-    PatchSet ps = db.patchSets().get(psid);
+-    final CommentSender cm;
+-    cm = commentSenderFactory.create(c);
+-    cm.setFrom(currentUser.getAccountId());
+-    cm.setPatchSet(ps, patchSetInfoFactory.get(psid));
+-    cm.setChangeMessage(message);
+-    cm.setReviewDb(db);
+-    cm.send();
+-  }
+-
+-  private void addApproval(final PatchSetApproval.Key psaKey,
+-      final Short score, final Change c, final ApproveOption co)
+-      throws OrmException, UnloggedFailure {
+-    final PatchSetApproval psa = new PatchSetApproval(psaKey, score);
+-    final List<PatchSetApproval> approvals = Collections.emptyList();
+-    final FunctionState fs =
+-        functionStateFactory.create(c, psaKey.getParentKey(), approvals);
+-    psa.setValue(score);
+-    fs.normalize(approvalTypes.getApprovalType(psa.getCategoryId()), psa);
+-    if (score != psa.getValue()) {
+-      throw error(co.name() + "=" + co.value() + " not permitted");
+-    }
+-
+-    psa.setGranted();
+-    db.patchSetApprovals().upsert(Collections.singleton(psa));
+-  }
+-
+-  private void initOptionList() {
+-    optionList = new ArrayList<ApproveOption>();
+-
+-    for (ApprovalType type : approvalTypes.getApprovalTypes()) {
+-      String usage = "";
+-      final ApprovalCategory category = type.getCategory();
+-      usage = "score for " + category.getName() + "\n";
+-
+-      for (ApprovalCategoryValue v : type.getValues()) {
+-        usage += v.format() + "\n";
+-      }
+-
+-      final String name =
+-          "--" + category.getName().toLowerCase().replace(' ', '-');
+-      optionList.add(new ApproveOption(name, usage, type));
+-    }
+-  }
+-
+-  private void writeError(final String msg) {
+-    try {
+-      err.write(msg.getBytes(ENC));
+-    } catch (IOException e) {
+-    }
+-  }
+-
+-  private static UnloggedFailure error(final String msg) {
+-    return new UnloggedFailure(1, msg);
+-  }
+-}
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/MasterCommandModule.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/MasterCommandModule.java
+index 886b4a8..c83d604 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/MasterCommandModule.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/MasterCommandModule.java
+@@ -25,12 +25,13 @@ public class MasterCommandModule extends CommandModule {
+   protected void configure() {
+     final CommandName gerrit = Commands.named("gerrit");
+ 
+-    command(gerrit, "approve").to(ApproveCommand.class);
++    command(gerrit, "approve").to(ReviewCommand.class);
+     command(gerrit, "create-account").to(AdminCreateAccount.class);
+     command(gerrit, "create-project").to(CreateProject.class);
+     command(gerrit, "gsql").to(AdminQueryShell.class);
+     command(gerrit, "receive-pack").to(Receive.class);
+     command(gerrit, "replicate").to(AdminReplicate.class);
+     command(gerrit, "set-project-parent").to(AdminSetParent.class);
++    command(gerrit, "review").to(ReviewCommand.class);
+   }
+ }
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java
+new file mode 100644
+index 0000000..85eb118
+--- /dev/null
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java
+@@ -0,0 +1,351 @@
++// Copyright (C) 2009 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.sshd.commands;
++
++import com.google.gerrit.common.ChangeHookRunner;
++import com.google.gerrit.common.data.ApprovalType;
++import com.google.gerrit.common.data.ApprovalTypes;
++import com.google.gerrit.reviewdb.ApprovalCategory;
++import com.google.gerrit.reviewdb.ApprovalCategoryValue;
++import com.google.gerrit.reviewdb.Change;
++import com.google.gerrit.reviewdb.ChangeMessage;
++import com.google.gerrit.reviewdb.PatchSet;
++import com.google.gerrit.reviewdb.PatchSetApproval;
++import com.google.gerrit.reviewdb.RevId;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.server.ChangeUtil;
++import com.google.gerrit.server.IdentifiedUser;
++import com.google.gerrit.server.git.MergeQueue;
++import com.google.gerrit.server.mail.CommentSender;
++import com.google.gerrit.server.mail.EmailException;
++import com.google.gerrit.server.patch.PatchSetInfoFactory;
++import com.google.gerrit.server.patch.PatchSetInfoNotAvailableException;
++import com.google.gerrit.server.project.ChangeControl;
++import com.google.gerrit.server.project.NoSuchChangeException;
++import com.google.gerrit.server.project.ProjectControl;
++import com.google.gerrit.server.workflow.FunctionState;
++import com.google.gerrit.sshd.BaseCommand;
++import com.google.gerrit.util.cli.CmdLineParser;
++import com.google.gwtorm.client.OrmException;
++import com.google.gwtorm.client.ResultSet;
++import com.google.inject.Inject;
++
++import org.apache.sshd.server.Environment;
++import org.kohsuke.args4j.Argument;
++import org.kohsuke.args4j.Option;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++ 
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.HashMap;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Map;
++import java.util.Set;
++
++public class ReviewCommand extends BaseCommand {
++  private static final Logger log =
++      LoggerFactory.getLogger(ReviewCommand.class);
++
++  @Override
++  protected final CmdLineParser newCmdLineParser() {
++    final CmdLineParser parser = super.newCmdLineParser();
++    for (ApproveOption c : optionList) {
++      parser.addOption(c, c);
++    }
++    return parser;
++  }
++
++  private final Set<PatchSet.Id> patchSetIds = new HashSet<PatchSet.Id>();
++
++  @Argument(index = 0, required = true, multiValued = true, metaVar = "{COMMIT | CHANGE,PATCHSET}", usage = "patch to review")
++  void addPatchSetId(final String token) {
++    try {
++      patchSetIds.addAll(parsePatchSetId(token));
++    } catch (UnloggedFailure e) {
++      throw new IllegalArgumentException(e.getMessage(), e);
++    } catch (OrmException e) {
++      throw new IllegalArgumentException("database error", e);
++    }
++  }
++
++  @Option(name = "--project", aliases = "-p", usage = "project containing the patch set")
++  private ProjectControl projectControl;
++
++  @Option(name = "--message", aliases = "-m", usage = "cover message to publish on change", metaVar = "MESSAGE")
++  private String changeComment;
++
++  @Option(name = "--submit", aliases = "-s", usage = "submit the patch set")
++  private boolean submitChange;
++
++  @Inject
++  private ReviewDb db;
++
++  @Inject
++  private IdentifiedUser currentUser;
++
++  @Inject
++  private MergeQueue merger;
++
++  @Inject
++  private CommentSender.Factory commentSenderFactory;
++
++  @Inject
++  private PatchSetInfoFactory patchSetInfoFactory;
++
++  @Inject
++  private ApprovalTypes approvalTypes;
++
++  @Inject
++  private ChangeControl.Factory changeControlFactory;
++
++  @Inject
++  private FunctionState.Factory functionStateFactory;
++
++  @Inject
++  private ChangeHookRunner hooks;
++
++  private List<ApproveOption> optionList;
++
++  @Override
++  public final void start(final Environment env) {
++    startThread(new CommandRunnable() {
++      @Override
++      public void run() throws Failure {
++        initOptionList();
++        parseCommandLine();
++
++        boolean ok = true;
++        for (final PatchSet.Id patchSetId : patchSetIds) {
++          try {
++            approveOne(patchSetId);
++          } catch (UnloggedFailure e) {
++            ok = false;
++            writeError("error: " + e.getMessage() + "\n");
++          } catch (Exception e) {
++            ok = false;
++            writeError("fatal: internal server error while approving "
++                + patchSetId + "\n");
++            log.error("internal error while approving " + patchSetId);
++          }
++        }
++        if (!ok) {
++          throw new UnloggedFailure(1, "one or more approvals failed;"
++              + " review output above");
++        }
++      }
++    });
++  }
++
++  private void approveOne(final PatchSet.Id patchSetId)
++      throws NoSuchChangeException, UnloggedFailure, OrmException,
++      PatchSetInfoNotAvailableException, EmailException {
++    final Change.Id changeId = patchSetId.getParentKey();
++    final ChangeControl changeControl =
++        changeControlFactory.validateFor(changeId);
++    final Change change = changeControl.getChange();
++
++    final StringBuffer msgBuf = new StringBuffer();
++    msgBuf.append("Patch Set ");
++    msgBuf.append(patchSetId.get());
++    msgBuf.append(": ");
++
++    final Map<ApprovalCategory.Id, ApprovalCategoryValue.Id> approvalsMap =
++        new HashMap<ApprovalCategory.Id, ApprovalCategoryValue.Id>();
++
++    if (change.getStatus().isOpen()) {
++      for (ApproveOption co : optionList) {
++        final ApprovalCategory.Id category = co.getCategoryId();
++        PatchSetApproval.Key psaKey =
++            new PatchSetApproval.Key(patchSetId, currentUser.getAccountId(),
++                category);
++        PatchSetApproval psa = db.patchSetApprovals().get(psaKey);
++
++        Short score = co.value();
++
++        if (score != null) {
++          addApproval(psaKey, score, change, co);
++        } else {
++          if (psa == null) {
++            score = 0;
++            addApproval(psaKey, score, change, co);
++          } else {
++            score = psa.getValue();
++          }
++        }
++
++        final ApprovalCategoryValue.Id val =
++            new ApprovalCategoryValue.Id(category, score);
++
++        String message = db.approvalCategoryValues().get(val).getName();
++        msgBuf.append(" " + message + ";");
++        approvalsMap.put(category, val);
++      }
++    }
++
++    msgBuf.deleteCharAt(msgBuf.length() - 1);
++    msgBuf.append("\n\n");
++
++    if (changeComment != null) {
++      msgBuf.append(changeComment);
++    }
++
++    String uuid = ChangeUtil.messageUUID(db);
++    ChangeMessage cm =
++        new ChangeMessage(new ChangeMessage.Key(changeId, uuid), currentUser
++            .getAccountId());
++    cm.setMessage(msgBuf.toString());
++    db.changeMessages().insert(Collections.singleton(cm));
++
++    ChangeUtil.touch(change, db);
++    sendMail(change, change.currentPatchSetId(), cm);
++
++    hooks.doCommentAddedHook(change, currentUser.getAccount(), db.patchSets()
++        .get(patchSetId), changeComment, approvalsMap);
++
++    if(submitChange) {
++      String err = changeControl.canSubmit(patchSetId, db, approvalTypes,
++          functionStateFactory);
++      if(err != null) { throw error(err); }
++
++      ChangeUtil.submit(patchSetId, currentUser, db, merger);
++    }
++  }
++
++  private Set<PatchSet.Id> parsePatchSetId(final String patchIdentity)
++      throws UnloggedFailure, OrmException {
++    // By commit?
++    //
++    if (patchIdentity.matches("^([0-9a-fA-F]{4," + RevId.LEN + "})$")) {
++      final RevId id = new RevId(patchIdentity);
++      final ResultSet<PatchSet> patches;
++      if (id.isComplete()) {
++        patches = db.patchSets().byRevision(id);
++      } else {
++        patches = db.patchSets().byRevisionRange(id, id.max());
++      }
++
++      final Set<PatchSet.Id> matches = new HashSet<PatchSet.Id>();
++      for (final PatchSet ps : patches) {
++        final Change change = db.changes().get(ps.getId().getParentKey());
++        if (inProject(change)) {
++          matches.add(ps.getId());
++        }
++      }
++
++      switch (matches.size()) {
++        case 1:
++          return matches;
++        case 0:
++          throw error("\"" + patchIdentity + "\" no such patch set");
++        default:
++          throw error("\"" + patchIdentity + "\" matches multiple patch sets");
++      }
++    }
++
++    // By older style change,patchset?
++    //
++    if (patchIdentity.matches("^[1-9][0-9]*,[1-9][0-9]*$")) {
++      final PatchSet.Id patchSetId;
++      try {
++        patchSetId = PatchSet.Id.parse(patchIdentity);
++      } catch (IllegalArgumentException e) {
++        throw error("\"" + patchIdentity + "\" is not a valid patch set");
++      }
++      if (db.patchSets().get(patchSetId) == null) {
++        throw error("\"" + patchIdentity + "\" no such patch set");
++      }
++      if (projectControl != null) {
++        final Change change = db.changes().get(patchSetId.getParentKey());
++        if (!inProject(change)) {
++          throw error("change " + change.getId() + " not in project "
++              + projectControl.getProject().getName());
++        }
++      }
++      return Collections.singleton(patchSetId);
++    }
++
++    throw error("\"" + patchIdentity + "\" is not a valid patch set");
++  }
++
++  private boolean inProject(final Change change) {
++    if (projectControl == null) {
++      // No --project option, so they want every project.
++      return true;
++    }
++    return projectControl.getProject().getNameKey().equals(change.getProject());
++  }
++
++  private void sendMail(final Change c, final PatchSet.Id psid,
++      final ChangeMessage message) throws PatchSetInfoNotAvailableException,
++      EmailException, OrmException {
++    PatchSet ps = db.patchSets().get(psid);
++    final CommentSender cm;
++    cm = commentSenderFactory.create(c);
++    cm.setFrom(currentUser.getAccountId());
++    cm.setPatchSet(ps, patchSetInfoFactory.get(psid));
++    cm.setChangeMessage(message);
++    cm.setReviewDb(db);
++    cm.send();
++  }
++
++  private void addApproval(final PatchSetApproval.Key psaKey,
++      final Short score, final Change c, final ApproveOption co)
++      throws OrmException, UnloggedFailure {
++    final PatchSetApproval psa = new PatchSetApproval(psaKey, score);
++    final List<PatchSetApproval> approvals = Collections.emptyList();
++    final FunctionState fs =
++        functionStateFactory.create(c, psaKey.getParentKey(), approvals);
++    psa.setValue(score);
++    fs.normalize(approvalTypes.getApprovalType(psa.getCategoryId()), psa);
++    if (score != psa.getValue()) {
++      throw error(co.name() + "=" + co.value() + " not permitted");
++    }
++
++    psa.setGranted();
++    db.patchSetApprovals().upsert(Collections.singleton(psa));
++  }
++
++  private void initOptionList() {
++    optionList = new ArrayList<ApproveOption>();
++
++    for (ApprovalType type : approvalTypes.getApprovalTypes()) {
++      String usage = "";
++      final ApprovalCategory category = type.getCategory();
++      usage = "score for " + category.getName() + "\n";
++
++      for (ApprovalCategoryValue v : type.getValues()) {
++        usage += v.format() + "\n";
++      }
++
++      final String name =
++          "--" + category.getName().toLowerCase().replace(' ', '-');
++      optionList.add(new ApproveOption(name, usage, type));
++    }
++  }
++
++  private void writeError(final String msg) {
++    try {
++      err.write(msg.getBytes(ENC));
++    } catch (IOException e) {
++    }
++  }
++
++  private static UnloggedFailure error(final String msg) {
++    return new UnloggedFailure(1, msg);
++  }
++}
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/SlaveCommandModule.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/SlaveCommandModule.java
+index 06bd80a..32ab2db 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/SlaveCommandModule.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/SlaveCommandModule.java
+@@ -31,6 +31,7 @@ public class SlaveCommandModule extends CommandModule {
+     command(gerrit, "gsql").to(ErrorSlaveMode.class);
+     command(gerrit, "receive-pack").to(ErrorSlaveMode.class);
+     command(gerrit, "replicate").to(ErrorSlaveMode.class);
++    command(gerrit, "review").to(ErrorSlaveMode.class);
+     command(gerrit, "set-project-parent").to(ErrorSlaveMode.class);
+   }
+ }
+-- 
+1.7.1
+

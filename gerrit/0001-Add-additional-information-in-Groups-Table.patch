@@ -1,0 +1,322 @@
+From ca8be7cb6e88058e1e881a2230f07fbfd3dbc26e Mon Sep 17 00:00:00 2001
+From: Raviteja Sunkara <raviteja@codeaurora.org>
+Date: Tue, 28 Jun 2011 20:25:21 +0530
+Subject: [PATCH] Add additional information in Groups Table.
+
+This commit adds additional columns namely 'Owners', 'Group Type',
+'Email Only Author' and 'Visible To All' in the groups table that
+is used by Admin->Groups Screen and MyGroups Screen.
+
+Change-Id: Ia952e9dcecf415c4fce7001a0d28ad4731ff5b1c
+---
+ .../google/gerrit/common/data/AccountSecurity.java |    3 +-
+ .../com/google/gerrit/common/data/GroupList.java   |    8 ++--
+ .../gerrit/client/account/MyGroupsScreen.java      |    6 ++--
+ .../google/gerrit/client/admin/AdminConstants.java |    3 ++
+ .../gerrit/client/admin/AdminConstants.properties  |    3 ++
+ .../com/google/gerrit/client/admin/GroupTable.java |   32 +++++++++++++++++--
+ .../httpd/rpc/account/AccountSecurityImpl.java     |   25 +++++++++++++--
+ .../httpd/rpc/account/GroupAdminServiceImpl.java   |    9 ++++-
+ 8 files changed, 72 insertions(+), 17 deletions(-)
+
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/AccountSecurity.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/AccountSecurity.java
+index 1117455..619c1f4 100644
+--- a/gerrit-common/src/main/java/com/google/gerrit/common/data/AccountSecurity.java
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/AccountSecurity.java
+@@ -15,6 +15,7 @@
+ package com.google.gerrit.common.data;
+ 
+ import com.google.gerrit.common.auth.SignInRequired;
++import com.google.gerrit.common.data.GroupDetail;
+ import com.google.gerrit.reviewdb.Account;
+ import com.google.gerrit.reviewdb.AccountExternalId;
+ import com.google.gerrit.reviewdb.AccountGroup;
+@@ -57,7 +58,7 @@ public interface AccountSecurity extends RemoteJsonService {
+   void myExternalIds(AsyncCallback<List<AccountExternalId>> callback);
+ 
+   @SignInRequired
+-  void myGroups(AsyncCallback<List<AccountGroup>> callback);
++  void myGroups(AsyncCallback<List<GroupDetail>> callback);
+ 
+   @SignInRequired
+   void deleteExternalIds(Set<AccountExternalId.Key> keys,
+diff --git a/gerrit-common/src/main/java/com/google/gerrit/common/data/GroupList.java b/gerrit-common/src/main/java/com/google/gerrit/common/data/GroupList.java
+index 1f06120..bc978cc 100644
+--- a/gerrit-common/src/main/java/com/google/gerrit/common/data/GroupList.java
++++ b/gerrit-common/src/main/java/com/google/gerrit/common/data/GroupList.java
+@@ -14,19 +14,19 @@
+ 
+ package com.google.gerrit.common.data;
+ 
+-import com.google.gerrit.reviewdb.AccountGroup;
++import com.google.gerrit.common.data.GroupDetail;
+ 
+ import java.util.List;
+ 
+ public class GroupList {
+-  protected List<AccountGroup> groups;
++  protected List<GroupDetail> groups;
+   protected boolean canCreateGroup;
+ 
+-  public List<AccountGroup> getGroups() {
++  public List<GroupDetail> getGroups() {
+     return groups;
+   }
+ 
+-  public void setGroups(List<AccountGroup> groups) {
++  public void setGroups(List<GroupDetail> groups) {
+     this.groups = groups;
+   }
+ 
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/account/MyGroupsScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/account/MyGroupsScreen.java
+index 437d438..719c395 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/account/MyGroupsScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/account/MyGroupsScreen.java
+@@ -16,7 +16,7 @@ package com.google.gerrit.client.account;
+ 
+ import com.google.gerrit.client.admin.GroupTable;
+ import com.google.gerrit.client.rpc.ScreenLoadCallback;
+-import com.google.gerrit.reviewdb.AccountGroup;
++import com.google.gerrit.common.data.GroupDetail;
+ 
+ import java.util.List;
+ 
+@@ -33,8 +33,8 @@ public class MyGroupsScreen extends SettingsScreen {
+   @Override
+   protected void onLoad() {
+     super.onLoad();
+-    Util.ACCOUNT_SEC.myGroups(new ScreenLoadCallback<List<AccountGroup>>(this) {
+-      public void preDisplay(final List<AccountGroup> result) {
++    Util.ACCOUNT_SEC.myGroups(new ScreenLoadCallback<List<GroupDetail>>(this) {
++      public void preDisplay(final List<GroupDetail> result) {
+         groups.display(result);
+       }
+     });
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.java
+index 712dee6..50460fe 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.java
+@@ -80,6 +80,9 @@ public interface AdminConstants extends Constants {
+   String columnApprovalCategory();
+   String columnRightRange();
+   String columnRefName();
++  String columnGroupType();
++  String columnGroupNotifications();
++  String columnGroupVisibleToAll();
+ 
+   String columnBranchName();
+   String columnBranchRevision();
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.properties b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.properties
+index 3b907ec..dab4be1 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.properties
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/AdminConstants.properties
+@@ -60,6 +60,9 @@ columnApprovalCategory = Category
+ columnRightOrigin = Origin
+ columnRightRange = Permitted Range
+ columnRefName = Reference Name
++columnGroupType = Group Type
++columnGroupNotifications = Email Only Authors
++columnGroupVisibleToAll = Visible To All
+ 
+ columnBranchName = Branch Name
+ columnBranchRevision = Revision
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/GroupTable.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/GroupTable.java
+index 5469d8e..24de3eb 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/GroupTable.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/GroupTable.java
+@@ -16,8 +16,10 @@ package com.google.gerrit.client.admin;
+ 
+ import com.google.gerrit.client.Dispatcher;
+ import com.google.gerrit.client.Gerrit;
++import com.google.gerrit.client.rpc.GerritCallback;
+ import com.google.gerrit.client.ui.Hyperlink;
+ import com.google.gerrit.client.ui.NavigationTable;
++import com.google.gerrit.common.data.GroupDetail;
+ import com.google.gerrit.reviewdb.AccountGroup;
+ import com.google.gwt.event.dom.client.ClickEvent;
+ import com.google.gwt.event.dom.client.ClickHandler;
+@@ -25,6 +27,7 @@ import com.google.gwt.event.dom.client.KeyCodes;
+ import com.google.gwt.user.client.History;
+ import com.google.gwt.user.client.ui.FlexTable.FlexCellFormatter;
+ import com.google.gwt.user.client.ui.HTMLTable.Cell;
++import com.google.gwt.user.client.ui.Image;
+ 
+ import java.util.List;
+ 
+@@ -48,6 +51,10 @@ public class GroupTable extends NavigationTable<AccountGroup> {
+ 
+     table.setText(0, 1, Util.C.columnGroupName());
+     table.setText(0, 2, Util.C.columnGroupDescription());
++    table.setText(0, 3, Util.C.headingOwner());
++    table.setText(0, 4, Util.C.columnGroupType());
++    table.setText(0, 5, Util.C.columnGroupNotifications());
++    table.setText(0, 6, Util.C.columnGroupVisibleToAll());
+     table.addClickHandler(new ClickHandler() {
+       @Override
+       public void onClick(ClickEvent event) {
+@@ -62,6 +69,10 @@ public class GroupTable extends NavigationTable<AccountGroup> {
+     final FlexCellFormatter fmt = table.getFlexCellFormatter();
+     fmt.addStyleName(0, 1, Gerrit.RESOURCES.css().dataHeader());
+     fmt.addStyleName(0, 2, Gerrit.RESOURCES.css().dataHeader());
++    fmt.addStyleName(0, 3, Gerrit.RESOURCES.css().dataHeader());
++    fmt.addStyleName(0, 4, Gerrit.RESOURCES.css().dataHeader());
++    fmt.addStyleName(0, 5, Gerrit.RESOURCES.css().dataHeader());
++    fmt.addStyleName(0, 6, Gerrit.RESOURCES.css().dataHeader());
+   }
+ 
+   @Override
+@@ -74,19 +85,20 @@ public class GroupTable extends NavigationTable<AccountGroup> {
+     History.newItem(Dispatcher.toGroup(getRowItem(row).getId()));
+   }
+ 
+-  public void display(final List<AccountGroup> result) {
++  public void display(final List<GroupDetail> result) {
+     while (1 < table.getRowCount())
+       table.removeRow(table.getRowCount() - 1);
+ 
+-    for (final AccountGroup k : result) {
++    for(GroupDetail detail : result) {
+       final int row = table.getRowCount();
+       table.insertRow(row);
+       applyDataRowStyle(row);
+-      populate(row, k);
++      populate(row, detail);
+     }
+   }
+ 
+-  void populate(final int row, final AccountGroup k) {
++  void populate(final int row, final GroupDetail detail) {
++    AccountGroup k = detail.group;
+     if (enableLink) {
+       table.setWidget(row, 1, new Hyperlink(k.getName(),
+           Dispatcher.toGroup(k.getId())));
+@@ -94,11 +106,23 @@ public class GroupTable extends NavigationTable<AccountGroup> {
+       table.setText(row, 1, k.getName());
+     }
+     table.setText(row, 2, k.getDescription());
++    table.setText(row, 3, detail.ownerGroup.getName());
++    table.setText(row, 4, k.getType().toString());
++    if(k.isEmailOnlyAuthors()) {
++      table.setWidget(row, 5, new Image(Gerrit.RESOURCES.greenCheck()));
++    }
++    if(k.isVisibleToAll()) {
++      table.setWidget(row, 6, new Image(Gerrit.RESOURCES.greenCheck()));
++    }
+ 
+     final FlexCellFormatter fmt = table.getFlexCellFormatter();
+     fmt.addStyleName(row, 1, Gerrit.RESOURCES.css().dataCell());
+     fmt.addStyleName(row, 1, Gerrit.RESOURCES.css().groupName());
+     fmt.addStyleName(row, 2, Gerrit.RESOURCES.css().dataCell());
++    fmt.addStyleName(row, 3, Gerrit.RESOURCES.css().dataCell());
++    fmt.addStyleName(row, 4, Gerrit.RESOURCES.css().dataCell());
++    fmt.addStyleName(row, 5, Gerrit.RESOURCES.css().dataCell());
++    fmt.addStyleName(row, 6, Gerrit.RESOURCES.css().dataCell());
+ 
+     setRowItem(row, k);
+   }
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/AccountSecurityImpl.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/AccountSecurityImpl.java
+index 77662a1..06f0777 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/AccountSecurityImpl.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/AccountSecurityImpl.java
+@@ -15,10 +15,12 @@
+ package com.google.gerrit.httpd.rpc.account;
+ 
+ import com.google.gerrit.common.data.AccountSecurity;
++import com.google.gerrit.common.data.GroupDetail;
+ import com.google.gerrit.common.errors.ContactInformationStoreException;
+ import com.google.gerrit.common.errors.InvalidSshKeyException;
+ import com.google.gerrit.common.errors.NameAlreadyUsedException;
+ import com.google.gerrit.common.errors.NoSuchEntityException;
++import com.google.gerrit.common.errors.NoSuchGroupException;
+ import com.google.gerrit.httpd.rpc.BaseServiceImplementation;
+ import com.google.gerrit.httpd.rpc.Handler;
+ import com.google.gerrit.reviewdb.Account;
+@@ -58,6 +60,7 @@ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+ import java.io.UnsupportedEncodingException;
++import java.util.ArrayList;
+ import java.util.Collections;
+ import java.util.List;
+ import java.util.Set;
+@@ -82,6 +85,7 @@ class AccountSecurityImpl extends BaseServiceImplementation implements
+   private final DeleteExternalIds.Factory deleteExternalIdsFactory;
+   private final ExternalIdDetailFactory.Factory externalIdDetailFactory;
+   private final MyGroupsFactory.Factory myGroupsFactory;
++  private final GroupDetailFactory.Factory groupDetailFactory;
+ 
+   @Inject
+   AccountSecurityImpl(final Provider<ReviewDb> schema,
+@@ -95,7 +99,8 @@ class AccountSecurityImpl extends BaseServiceImplementation implements
+       final ChangeUserName.CurrentUser changeUserNameFactory,
+       final DeleteExternalIds.Factory deleteExternalIdsFactory,
+       final ExternalIdDetailFactory.Factory externalIdDetailFactory,
+-      final MyGroupsFactory.Factory myGroupsFactory) {
++      final MyGroupsFactory.Factory myGroupsFactory,
++      final GroupDetailFactory.Factory groupDetailFactory) {
+     super(schema, currentUser);
+     contactStore = cs;
+     authConfig = ac;
+@@ -115,6 +120,7 @@ class AccountSecurityImpl extends BaseServiceImplementation implements
+     this.deleteExternalIdsFactory = deleteExternalIdsFactory;
+     this.externalIdDetailFactory = externalIdDetailFactory;
+     this.myGroupsFactory = myGroupsFactory;
++    this.groupDetailFactory = groupDetailFactory;
+   }
+ 
+   public void mySshKeys(final AsyncCallback<List<AccountSshKey>> callback) {
+@@ -198,8 +204,21 @@ class AccountSecurityImpl extends BaseServiceImplementation implements
+   }
+ 
+   @Override
+-  public void myGroups(final AsyncCallback<List<AccountGroup>> callback) {
+-    myGroupsFactory.create().to(callback);
++  public void myGroups(final AsyncCallback<List<GroupDetail>> callback) {
++    run(callback, new Action<List<GroupDetail>>() {
++      public List<GroupDetail> run(final ReviewDb db) throws OrmException,
++          NoSuchGroupException, Failure {
++        List<GroupDetail> groups = new ArrayList<GroupDetail>();
++        try {
++          for(AccountGroup group : myGroupsFactory.create().call()) {
++            groups.add(groupDetailFactory.create(group.getId()).call());
++          }
++        } catch (Exception e) {
++          throw new Failure(e);
++        }
++        return groups;
++      }
++    });
+   }
+ 
+   public void deleteExternalIds(final Set<AccountExternalId.Key> keys,
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/GroupAdminServiceImpl.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/GroupAdminServiceImpl.java
+index f89ef09..a9587f5 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/GroupAdminServiceImpl.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/account/GroupAdminServiceImpl.java
+@@ -91,7 +91,8 @@ class GroupAdminServiceImpl extends BaseServiceImplementation implements
+ 
+   public void visibleGroups(final AsyncCallback<GroupList> callback) {
+     run(callback, new Action<GroupList>() {
+-      public GroupList run(ReviewDb db) throws OrmException {
++      public GroupList run(ReviewDb db) throws OrmException,
++          NoSuchGroupException {
+         final IdentifiedUser user = identifiedUser.get();
+         final List<AccountGroup> list;
+         if (user.getCapabilities().canAdministrateServer()) {
+@@ -111,8 +112,12 @@ class GroupAdminServiceImpl extends BaseServiceImplementation implements
+           }
+         });
+ 
++        List<GroupDetail> l = new ArrayList<GroupDetail>();
++        for(AccountGroup group : list) {
++          l.add(groupDetailFactory.create(group.getId()).call());
++        }
+         GroupList res = new GroupList();
+-        res.setGroups(list);
++        res.setGroups(l);
+         res.setCanCreateGroup(user.getCapabilities().canCreateGroup());
+         return res;
+       }
+-- 
+1.7.4.1
+

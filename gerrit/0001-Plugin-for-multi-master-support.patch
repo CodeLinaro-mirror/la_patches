@@ -1,0 +1,4083 @@
+From 63f915173d8fc533ca548d0de5b25f41b1db8b9b Mon Sep 17 00:00:00 2001
+From: Keunhong Park <keunhong@codeaurora.org>
+Date: Mon, 6 Aug 2012 15:49:42 -0600
+Subject: [PATCH] Plugin for multi-master support
+
+Add interface and implementation necessary for Gerrit to run in
+multi-master mode. The implementation provided uses UDP messages with
+ACKs to send and receive evict notices.
+
+Peers are registered and checked using a shared git repository (under
+refs/meta/cluster/ in All-Projects.git).
+
+ Current Progress
+  - Git ref peer registry works
+  - UDP messaging (Evict notices, ACKS etc.) works
+  - UDPPacemaker is implemented and used (cache is flushed if an active
+    peer is outdated)
+
+Change-Id: I1dc0fd50f12ffbb7c8cabe512d221f35bcf00a09
+---
+ .gitignore                                         |    8 +
+ pom.xml                                            |   93 +++++
+ .../gerrit/plugins/multimaster/ConfigProvider.java |   68 ++++
+ .../plugins/multimaster/DegradedManager.java       |  102 ++++++
+ .../google/gerrit/plugins/multimaster/Json.java    |   72 ++++
+ .../plugins/multimaster/MultiMasterConfig.java     |   44 +++
+ .../plugins/multimaster/MultiMasterModule.java     |  104 ++++++
+ .../plugins/multimaster/MultiMasterUtil.java       |   92 +++++
+ .../gerrit/plugins/multimaster/OnStartStop.java    |   76 ++++
+ .../gerrit/plugins/multimaster/StateMachine.java   |  205 +++++++++++
+ .../plugins/multimaster/cache/CacheManager.java    |   92 +++++
+ .../cache/CacheRemovalListenerImpl.java            |  109 ++++++
+ .../plugins/multimaster/cache/EvictNotice.java     |   52 +++
+ .../gerrit/plugins/multimaster/cache/Evictor.java  |   53 +++
+ .../multimaster/impl/git/GitRefManager.java        |  299 ++++++++++++++++
+ .../plugins/multimaster/impl/git/GitRefModule.java |   63 ++++
+ .../multimaster/impl/git/GitRefPeerRegistry.java   |  369 ++++++++++++++++++++
+ .../plugins/multimaster/impl/git/RefNameBase.java  |   44 +++
+ .../plugins/multimaster/impl/udp/UDPEvictor.java   |  169 +++++++++
+ .../plugins/multimaster/impl/udp/UDPMessage.java   |  126 +++++++
+ .../multimaster/impl/udp/UDPMessageReceiver.java   |  201 +++++++++++
+ .../multimaster/impl/udp/UDPMessageSender.java     |  323 +++++++++++++++++
+ .../plugins/multimaster/impl/udp/UDPModule.java    |  151 ++++++++
+ .../plugins/multimaster/impl/udp/UDPPacemaker.java |  225 ++++++++++++
+ .../multimaster/impl/udp/config/BaseRetryTime.java |   44 +++
+ .../impl/udp/config/MaxMessageSize.java            |   44 +++
+ .../multimaster/impl/udp/config/MaxSenders.java    |   44 +++
+ .../multimaster/impl/udp/config/MaxTimeout.java    |   44 +++
+ .../multimaster/impl/udp/config/ReceiveHost.java   |   44 +++
+ .../multimaster/impl/udp/config/ReceivePort.java   |   44 +++
+ .../multimaster/peer/OutdatedThreshold.java        |   44 +++
+ .../gerrit/plugins/multimaster/peer/Pacemaker.java |   46 +++
+ .../gerrit/plugins/multimaster/peer/Peer.java      |  107 ++++++
+ .../plugins/multimaster/peer/PeerActivity.java     |   39 ++
+ .../plugins/multimaster/peer/PeerRegistry.java     |   86 +++++
+ .../gerrit/plugins/multimaster/peer/Self.java      |   44 +++
+ 36 files changed, 3770 insertions(+), 0 deletions(-)
+ create mode 100644 .gitignore
+ create mode 100644 pom.xml
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/ConfigProvider.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/DegradedManager.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/Json.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterConfig.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterModule.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterUtil.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/OnStartStop.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/StateMachine.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/cache/CacheManager.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/cache/CacheRemovalListenerImpl.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/cache/EvictNotice.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/cache/Evictor.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefManager.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefModule.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefPeerRegistry.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/git/RefNameBase.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPEvictor.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessage.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessageReceiver.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessageSender.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPModule.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPPacemaker.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/BaseRetryTime.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxMessageSize.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxSenders.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxTimeout.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/ReceiveHost.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/ReceivePort.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/peer/OutdatedThreshold.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/peer/Pacemaker.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/peer/Peer.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/peer/PeerActivity.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/peer/PeerRegistry.java
+ create mode 100644 src/main/java/com/google/gerrit/plugins/multimaster/peer/Self.java
+
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..650e051
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,8 @@
++/target
++/.classpath
++/.project
++/.settings/org.maven.ide.eclipse.prefs
++/.settings/org.eclipse.m2e.core.prefs
++/.settings/org.eclipse.core.resources.prefs
++/.settings/org.eclipse.jdt.core.prefs
++/multimster.iml
+diff --git a/pom.xml b/pom.xml
+new file mode 100644
+index 0000000..ed68169
+--- /dev/null
++++ b/pom.xml
+@@ -0,0 +1,93 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!--
++Copyright (C) 2012 The Android Open Source Project
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++-->
++<project xmlns="http://maven.apache.org/POM/4.0.0"
++        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
++        xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
++  <modelVersion>4.0.0</modelVersion>
++
++  <groupId>com.google.gerrit.plugins</groupId>
++  <artifactId>multimaster</artifactId>
++  <packaging>jar</packaging>
++  <version>0.1</version>
++  <properties>
++    <Gerrit-ApiType>plugin</Gerrit-ApiType>
++    <Gerrit-ApiVersion>2.5-SNAPSHOT</Gerrit-ApiVersion>
++  </properties>
++
++  <build>
++    <plugins>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-jar-plugin</artifactId>
++        <version>2.4</version>
++        <configuration>
++          <archive>
++            <manifestEntries>
++              <Gerrit-Module>com.google.gerrit.plugins.multimaster.MultiMasterModule</Gerrit-Module>
++
++              <Implementation-Vendor>Gerrit Code Review</Implementation-Vendor>
++              <Implementation-URL>http://code.google.com/p/gerrit/</Implementation-URL>
++
++              <Implementation-Title>Plugin ${project.artifactId}</Implementation-Title>
++              <Implementation-Version>${project.version}</Implementation-Version>
++
++              <Gerrit-ApiType>${Gerrit-ApiType}</Gerrit-ApiType>
++              <Gerrit-ApiVersion>${Gerrit-ApiVersion}</Gerrit-ApiVersion>
++
++              <Gerrit-ReloadMode>restart</Gerrit-ReloadMode>
++            </manifestEntries>
++          </archive>
++        </configuration>
++      </plugin>
++
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-compiler-plugin</artifactId>
++        <version>2.3.2</version>
++        <configuration>
++          <source>1.6</source>
++          <target>1.6</target>
++          <encoding>UTF-8</encoding>
++        </configuration>
++      </plugin>
++    </plugins>
++    <resources>
++      <resource>
++        <directory>./</directory>
++        <includes>
++          <include>Documentation/**/*</include>
++        </includes>
++      </resource>
++    </resources>
++  </build>
++
++  <dependencies>
++    <dependency>
++      <groupId>com.google.gerrit</groupId>
++      <artifactId>gerrit-${Gerrit-ApiType}-api</artifactId>
++      <version>${Gerrit-ApiVersion}</version>
++      <scope>provided</scope>
++    </dependency>
++  </dependencies>
++
++  <repositories>
++    <repository>
++      <id>gerrit-api-repository</id>
++      <url>https://gerrit-api.commondatastorage.googleapis.com/snapshot/</url>
++    </repository>
++  </repositories>
++</project>
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/ConfigProvider.java b/src/main/java/com/google/gerrit/plugins/multimaster/ConfigProvider.java
+new file mode 100644
+index 0000000..ad5c0d6
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/ConfigProvider.java
+@@ -0,0 +1,68 @@
++// Copyright (C) 2012 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.plugins.multimaster;
++
++import java.io.File;
++import java.io.IOException;
++
++import org.eclipse.jgit.errors.ConfigInvalidException;
++import org.eclipse.jgit.lib.Config;
++import org.eclipse.jgit.storage.file.FileBasedConfig;
++import org.eclipse.jgit.util.FS;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.gerrit.extensions.annotations.PluginName;
++import com.google.gerrit.server.config.SitePaths;
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++public class ConfigProvider implements Provider<Config> {
++  private static final Logger log = LoggerFactory
++      .getLogger(ConfigProvider.class);
++
++  private final Config config;
++
++  @Inject
++  ConfigProvider(SitePaths site, @PluginName String pluginName)
++      throws ConfigInvalidException, IOException {
++    config = load(site, pluginName);
++  }
++
++  private static Config load(SitePaths site, String pluginName)
++      throws ConfigInvalidException, IOException {
++    String configPath = site.etc_dir + "/plugins/" + pluginName + ".config";
++    log.info("Loading configuration from " + configPath);
++    FileBasedConfig cfg =
++        new FileBasedConfig(new File(configPath), FS.DETECTED);
++    if (cfg.getFile().exists() && cfg.getFile().length() > 0) {
++      try {
++        cfg.load();
++      } catch (ConfigInvalidException e) {
++        throw new ConfigInvalidException(String.format(
++            "Config file %s is invalid: %s", cfg.getFile(), e.getMessage()), e);
++      } catch (IOException e) {
++        throw new IOException(String.format("Cannot read %s: %s",
++            cfg.getFile(), e.getMessage()), e);
++      }
++    }
++    return cfg;
++  }
++
++  @Override
++  public Config get() {
++    return config;
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/DegradedManager.java b/src/main/java/com/google/gerrit/plugins/multimaster/DegradedManager.java
+new file mode 100644
+index 0000000..98be0ad
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/DegradedManager.java
+@@ -0,0 +1,102 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster;
++
++import java.util.concurrent.Executors;
++import java.util.concurrent.ScheduledExecutorService;
++import java.util.concurrent.ScheduledFuture;
++import java.util.concurrent.TimeUnit;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.gerrit.plugins.multimaster.cache.CacheManager;
++import com.google.gerrit.plugins.multimaster.peer.OutdatedThreshold;
++import com.google.inject.Inject;
++import com.google.inject.Singleton;
++
++@Singleton
++public class DegradedManager {
++  private static final Logger log = LoggerFactory
++      .getLogger(DegradedManager.class);
++
++  private ScheduledExecutorService scheduler = Executors
++      .newSingleThreadScheduledExecutor();
++
++  private volatile ScheduledFuture<?> degradedModeFuture = null;
++
++  private CacheManager cacheManager;
++
++  private long outdatedThreshold;
++
++  @Inject
++  public DegradedManager(CacheManager cacheManager,
++      @OutdatedThreshold long outdatedThreshold) {
++    this.cacheManager = cacheManager;
++    this.outdatedThreshold = outdatedThreshold;
++  }
++
++  public boolean stop() {
++    scheduler.shutdown();
++    long waitTime = 20000;
++    long waitStart = System.currentTimeMillis();
++    while (true) {
++      try {
++        return scheduler.awaitTermination(waitTime, TimeUnit.MILLISECONDS);
++      } catch (InterruptedException e) {
++        waitTime -= System.currentTimeMillis() - waitStart;
++        waitStart = System.currentTimeMillis();
++        continue;
++      }
++    }
++  }
++
++  public synchronized void startDegraded() {
++    if (degradedModeFuture != null) {
++      return;
++    }
++
++    log.info("Starting degraded mode.");
++    degradedModeFuture = scheduler.scheduleWithFixedDelay(new Runnable() {
++      public void run() {
++        cacheManager.flushAll();
++      }
++    }, 0, outdatedThreshold, TimeUnit.MILLISECONDS);
++  }
++
++  public synchronized void stopDegraded() {
++    if (degradedModeFuture == null) {
++      return;
++    }
++
++    log.info("Stopping degraded mode.");
++
++    degradedModeFuture.cancel(false);
++    degradedModeFuture = null;
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/Json.java b/src/main/java/com/google/gerrit/plugins/multimaster/Json.java
+new file mode 100644
+index 0000000..85244dc
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/Json.java
+@@ -0,0 +1,72 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.gson.Gson;
++import com.google.gson.JsonSyntaxException;
++
++public class Json {
++  private static final Logger log = LoggerFactory.getLogger(Json.class);
++
++  private static final Gson GSON = new Gson();
++
++  public String string;
++  public String type;
++
++  public Json(Object obj) {
++    this.string = GSON.toJson(obj);
++    this.type = obj.getClass().getName();
++  }
++
++  public Object getObject() {
++    try {
++      return GSON.fromJson(string, Class.forName(type));
++    } catch (JsonSyntaxException e) {
++      log.error("JSON Syntax exception: " + string, e);
++    } catch (ClassNotFoundException e) {
++      log.error("Class not found exception: " + type, e);
++    }
++
++    return null;
++  }
++
++  @Override
++  public boolean equals(Object o) {
++    if (!(o instanceof Json)) {
++      return false;
++    }
++
++    Json j = (Json) o;
++
++    return string.equals(j.string) && type.equals(j.type);
++  }
++
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterConfig.java b/src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterConfig.java
+new file mode 100644
+index 0000000..1717902
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterConfig.java
+@@ -0,0 +1,44 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster;
++
++import static java.lang.annotation.ElementType.FIELD;
++import static java.lang.annotation.ElementType.METHOD;
++import static java.lang.annotation.ElementType.PARAMETER;
++import static java.lang.annotation.RetentionPolicy.RUNTIME;
++
++import java.lang.annotation.Retention;
++import java.lang.annotation.Target;
++
++import com.google.inject.BindingAnnotation;
++
++@Retention(RUNTIME)
++@BindingAnnotation
++@Target({FIELD, PARAMETER, METHOD})
++public @interface MultiMasterConfig {
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterModule.java b/src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterModule.java
+new file mode 100644
+index 0000000..c2c1b48
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterModule.java
+@@ -0,0 +1,104 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster;
++
++import org.eclipse.jgit.lib.Config;
++import org.eclipse.jgit.lib.PersonIdent;
++
++import com.google.gerrit.extensions.events.LifecycleListener;
++import com.google.gerrit.extensions.registration.DynamicSet;
++import com.google.gerrit.plugins.multimaster.cache.CacheManager;
++import com.google.gerrit.plugins.multimaster.cache.CacheRemovalListenerImpl;
++import com.google.gerrit.plugins.multimaster.impl.git.GitRefModule;
++import com.google.gerrit.plugins.multimaster.impl.udp.UDPModule;
++import com.google.gerrit.plugins.multimaster.peer.OutdatedThreshold;
++import com.google.gerrit.plugins.multimaster.peer.Peer;
++import com.google.gerrit.plugins.multimaster.peer.Self;
++import com.google.gerrit.server.GerritPersonIdent;
++import com.google.gerrit.server.GerritPersonIdentProvider;
++import com.google.gerrit.server.cache.CacheRemovalListener;
++import com.google.gson.Gson;
++import com.google.inject.AbstractModule;
++import com.google.inject.Provides;
++import com.google.inject.Scopes;
++import com.google.inject.internal.UniqueAnnotations;
++
++
++public class MultiMasterModule extends AbstractModule {
++  @Override
++  protected void configure() {
++    bind(ConfigProvider.class).in(Scopes.SINGLETON);
++    bind(Config.class).annotatedWith(MultiMasterConfig.class).toProvider(
++        ConfigProvider.class);
++
++    install(new GitRefModule());
++    install(new UDPModule());
++
++    bind(PersonIdent.class).annotatedWith(GerritPersonIdent.class).toProvider(
++        GerritPersonIdentProvider.class);
++
++    /*
++     * General
++     */
++    bind(Gson.class).toInstance(new Gson());
++
++    bind(DegradedManager.class).in(Scopes.SINGLETON);
++
++    /*
++     * Peers
++     */
++    bind(Peer.class).annotatedWith(Self.class).toInstance(new Peer());
++
++    /*
++     * Caches
++     */
++    bind(CacheManager.class);
++    bind(CacheRemovalListenerImpl.class);
++    DynamicSet.bind(binder(), CacheRemovalListener.class).to(
++        CacheRemovalListenerImpl.class);
++
++    bind(StateMachine.class).in(Scopes.SINGLETON);
++
++    bind(LifecycleListener.class).annotatedWith(UniqueAnnotations.create()).to(
++        OnStartStop.class);
++  }
++
++  @Provides
++  @OutdatedThreshold
++  public Long getOutdatedThreshold(@MultiMasterConfig final Config config) {
++    final String[] want =
++        config.getStringList("General", null, "outdatedThreshold");
++
++    if (want != null && want.length == 1) {
++      return Long.parseLong(want[0]);
++    }
++
++    return 60000L;
++  }
++
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterUtil.java b/src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterUtil.java
+new file mode 100644
+index 0000000..aee0a24
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/MultiMasterUtil.java
+@@ -0,0 +1,92 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster;
++
++public class MultiMasterUtil {
++  private static final double PHI = 1.61803398875d;
++
++  /**
++   * Calculate the nth element in the Fibonacci sequence
++   *
++   * @param n
++   * @return
++   */
++  public static int fib(int n) {
++    if (n < 0) {
++      throw new RuntimeException("Negative index provided.");
++    }
++
++    if (n == 0) {
++      return 0;
++    }
++
++    if (n == 1) {
++      return 1;
++    }
++
++    int[] arr = new int[n + 1];
++    arr[0] = 0;
++    arr[1] = 1;
++    for (int i = 2; i <= n; i++) {
++      arr[i] = arr[i - 1] + arr[i - 2];
++    }
++
++    return arr[n];
++  }
++
++  /**
++   * Calculate the index of the Fibonacci sequence given a value.
++   *
++   * From http://en.wikipedia.org/wiki/Fibonacci_number#Relation_to_the_golden_ratio
++   *
++   * @param k
++   * @return
++   */
++  public static int inverseFib(long k) {
++    return (int) Math
++        .floor(Math.log(k * Math.sqrt(5d)) / Math.log(PHI) + 0.5);
++  }
++
++  /**
++   * Index of Fibonacci sequence such that \sum_i^n{F_n} = k
++   * (This is a naive implementation. It should not be used for performance critical
++   * applications). 
++   * 
++   * @param fib
++   * @return
++   */
++  public static int inverseCumFib(long k) {
++    int n = 0;
++    int sum = 0;
++    while (sum < k) {
++      sum += fib(n++);
++    }
++
++    return n;
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/OnStartStop.java b/src/main/java/com/google/gerrit/plugins/multimaster/OnStartStop.java
+new file mode 100644
+index 0000000..646958c
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/OnStartStop.java
+@@ -0,0 +1,76 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.gerrit.extensions.events.LifecycleListener;
++import com.google.gerrit.plugins.multimaster.cache.Evictor;
++import com.google.gerrit.plugins.multimaster.impl.git.GitRefManager;
++import com.google.gerrit.plugins.multimaster.peer.PeerRegistry;
++import com.google.inject.Inject;
++
++public class OnStartStop implements LifecycleListener {
++  private static final Logger log = LoggerFactory.getLogger(OnStartStop.class);
++
++  private final GitRefManager gitRefManager;
++  private final PeerRegistry peerRegistry;
++  private final Evictor evictor;
++  private final StateMachine stateMachine;
++
++  @Inject
++  OnStartStop(GitRefManager gitRefManager, PeerRegistry peerRegistry,
++      Evictor evictor, StateMachine stateMachine) {
++    this.gitRefManager = gitRefManager;
++    this.peerRegistry = peerRegistry;
++    this.evictor = evictor;
++    this.stateMachine = stateMachine;
++  }
++
++  @Override
++  public void start() {
++    evictor.start();
++    peerRegistry.start();
++  }
++
++  @Override
++  public void stop() {
++    if (!evictor.stop()) {
++      log.warn("Evictor termination timed out.");
++    }
++
++    if (!stateMachine.stop()) {
++      log.warn("State machine termination timed out.");
++    }
++
++    if (!peerRegistry.stop()) {
++      log.warn("Peer registry termination timed out.");
++    }
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/StateMachine.java b/src/main/java/com/google/gerrit/plugins/multimaster/StateMachine.java
+new file mode 100644
+index 0000000..6a2a713
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/StateMachine.java
+@@ -0,0 +1,205 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster;
++
++import java.util.HashSet;
++import java.util.Set;
++import java.util.concurrent.Executors;
++import java.util.concurrent.ScheduledExecutorService;
++import java.util.concurrent.ScheduledFuture;
++import java.util.concurrent.TimeUnit;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.gerrit.plugins.multimaster.cache.CacheManager;
++import com.google.gerrit.plugins.multimaster.cache.EvictNotice;
++import com.google.gerrit.plugins.multimaster.cache.Evictor;
++import com.google.gerrit.plugins.multimaster.peer.OutdatedThreshold;
++import com.google.gerrit.plugins.multimaster.peer.Peer;
++import com.google.gerrit.plugins.multimaster.peer.PeerRegistry;
++import com.google.gerrit.plugins.multimaster.peer.Self;
++import com.google.gson.Gson;
++import com.google.gson.JsonSyntaxException;
++import com.google.inject.Inject;
++
++public class StateMachine implements Evictor.Listener, PeerRegistry.Listener {
++  private static final Logger log = LoggerFactory.getLogger(StateMachine.class);
++
++  private final Gson gson;
++
++  private final Peer self;
++
++  private final long outdatedThreshold;
++
++  private CacheManager cacheManager;
++  private DegradedManager degradedManager;
++
++  private ScheduledExecutorService scheduler = Executors
++      .newSingleThreadScheduledExecutor();
++  private volatile ScheduledFuture<?> hardDegradeRestoreFuture = null;
++
++  // Should notify other peers
++  private volatile boolean isHardDegraded = false;
++
++  private volatile boolean isOutdated = false;
++  private volatile boolean isPeerHardDegraded = false;
++
++  private Set<Peer> degradedPeers = new HashSet<Peer>();
++
++  @Inject
++  public StateMachine(final @Self Peer self, final PeerRegistry peerRegistry,
++      final @OutdatedThreshold long outdatedThreshold, final Evictor evictor,
++      final DegradedManager degradedManager, final CacheManager cacheManager,
++      final Gson gson) {
++    this.self = self;
++    this.outdatedThreshold = outdatedThreshold;
++    this.degradedManager = degradedManager;
++    this.cacheManager = cacheManager;
++    this.gson = gson;
++
++    evictor.addListener(this);
++    peerRegistry.addListener(this);
++
++    self.setProperty("hardDegraded", new Json(false));
++  }
++
++  public boolean stop() {
++    boolean success = false;
++
++    scheduler.shutdown();
++    long waitTime = 20000;
++    long waitStart = System.currentTimeMillis();
++    while (true) {
++      try {
++        success = scheduler.awaitTermination(waitTime, TimeUnit.MILLISECONDS);
++        break;
++      } catch (InterruptedException e) {
++        waitTime -= System.currentTimeMillis() - waitStart;
++        waitStart = System.currentTimeMillis();
++        continue;
++      }
++    }
++
++    return success && degradedManager.stop();
++  }
++
++  private synchronized void updateDegraded() {
++    if (isOutdated || isPeerHardDegraded || isHardDegraded) {
++      degradedManager.startDegraded();
++    } else {
++      degradedManager.stopDegraded();
++    }
++  }
++
++  @Override
++  public void onCannotNotify(Peer peer) {
++    isHardDegraded = true;
++    updateDegraded();
++
++    self.setProperty("hardDegraded", new Json(true));
++
++    // If we already have a restore scheduled cancel it to schedule a new one
++    if (hardDegradeRestoreFuture != null) {
++      hardDegradeRestoreFuture.cancel(false);
++    }
++
++    // Recover after two outdatedThreshold periods to ensure other peers have
++    // read the hard degraded state
++    hardDegradeRestoreFuture = scheduler.schedule(new Runnable() {
++      public void run() {
++        isHardDegraded = false;
++        updateDegraded();
++        hardDegradeRestoreFuture = null;
++
++        self.setProperty("hardDegraded", new Json(false));
++      }
++    }, 2 * outdatedThreshold, TimeUnit.MILLISECONDS);
++  }
++
++  @Override
++  public synchronized void onOutdated() {
++    isOutdated = true;
++    updateDegraded();
++  }
++
++  @Override
++  public synchronized void onAllOutdatedRestored() {
++    isOutdated = false;
++    updateDegraded();
++  }
++
++  @Override
++  public synchronized void onPeerUpdated(Peer peer) {
++    // If hard degraded
++    Json isDegradedProp = peer.getProperty("hardDegraded");
++    Boolean isDegraded =
++        (isDegradedProp == null) ? null : (Boolean) isDegradedProp.getObject();
++
++    if (isDegradedProp == null || isDegraded == null) {
++      log.error("Incompatible configuration for peer " + peer.getId()
++          + ": hardDegraded property not found.");
++      return;
++    }
++
++    if (isDegraded) {
++      degradedPeers.add(peer);
++    } else {
++      degradedPeers.remove(peer);
++    }
++
++    isPeerHardDegraded = !degradedPeers.isEmpty();
++    updateDegraded();
++  }
++
++  @Override
++  public void onPeerJoined(Peer peer) {
++    cacheManager.flushAll();
++  }
++
++  @Override
++  public void onPeerLost(Peer peer) {
++    cacheManager.flushAll();
++  }
++
++  @Override
++  public void onEvictNotice(EvictNotice notice) {
++    Object key;
++    try {
++      key = gson.fromJson(notice.keyJson, Class.forName(notice.keyClass));
++    } catch (JsonSyntaxException e) {
++      log.error("Invalid json syntax for key", e);
++      return;
++    } catch (ClassNotFoundException e) {
++      log.error("Could not find key class", e);
++      return;
++    }
++
++    cacheManager.invalidate(notice.pluginName, notice.cacheName, key);
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/cache/CacheManager.java b/src/main/java/com/google/gerrit/plugins/multimaster/cache/CacheManager.java
+new file mode 100644
+index 0000000..c27c218
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/cache/CacheManager.java
+@@ -0,0 +1,92 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.cache;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.common.cache.Cache;
++import com.google.gerrit.extensions.registration.DynamicMap;
++import com.google.gerrit.plugins.multimaster.peer.PeerRegistry;
++import com.google.gson.Gson;
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++public class CacheManager {
++  private static final Logger log = LoggerFactory.getLogger(CacheManager.class);
++
++  private DynamicMap<Cache<?, ?>> cacheMap;
++
++  @Inject
++  public CacheManager(DynamicMap<Cache<?, ?>> cacheMap, Evictor evictor,
++      PeerRegistry peerRegistry, Gson gson) {
++    this.cacheMap = cacheMap;
++    CacheRemovalListenerImpl.setIgnored(Thread.currentThread());
++  }
++
++  /**
++   * Flushes all caches
++   */
++  public void flushAll() {
++    CacheRemovalListenerImpl.setIgnored(Thread.currentThread());
++
++    log.info("Flushing all caches");
++
++    for (String pluginName : cacheMap.plugins()) {
++      for (Provider<Cache<?, ?>> provider : cacheMap.byPlugin(pluginName)
++          .values()) {
++        provider.get().invalidateAll();
++      }
++    }
++  }
++
++  /**
++   * Flushes a specific cache
++   *
++   * @param pluginName
++   * @param cacheName
++   */
++  public void flush(String pluginName, String cacheName) {
++    CacheRemovalListenerImpl.setIgnored(Thread.currentThread());
++
++    cacheMap.get(pluginName, cacheName).invalidateAll();
++  }
++
++  /**
++   * Invalidates a specific cache entry
++   *
++   * @param pluginName
++   * @param cacheName
++   * @param key
++   */
++  public void invalidate(String pluginName, String cacheName, Object key) {
++    CacheRemovalListenerImpl.setIgnored(Thread.currentThread());
++
++    cacheMap.get(pluginName, cacheName).invalidate(key);
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/cache/CacheRemovalListenerImpl.java b/src/main/java/com/google/gerrit/plugins/multimaster/cache/CacheRemovalListenerImpl.java
+new file mode 100644
+index 0000000..77b36bb
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/cache/CacheRemovalListenerImpl.java
+@@ -0,0 +1,109 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.cache;
++
++import java.util.Collections;
++import java.util.HashSet;
++import java.util.LinkedList;
++import java.util.List;
++import java.util.Set;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.common.cache.RemovalNotification;
++import com.google.gerrit.server.cache.CacheRemovalListener;
++import com.google.gson.Gson;
++
++/**
++ * RemovalListener that notifies its listeners that a cache has been invalidated.
++ *
++ * @param <K>
++ * @param <V>
++ */
++public class CacheRemovalListenerImpl<K, V> implements
++    CacheRemovalListener<K, V> {
++  private static final Logger log = LoggerFactory
++      .getLogger(CacheRemovalListenerImpl.class);
++
++  /*
++   * Listeners
++   */
++  public interface Listener {
++    public void onRemoval(EvictNotice notice);
++  }
++
++  private static List<Listener> listeners = new LinkedList<Listener>();
++
++  public static void addListener(Listener listener) {
++    listeners.add(listener);
++  }
++
++  private static Set<Thread> ignoredThreads = Collections
++      .synchronizedSet(new HashSet<Thread>());
++
++  /**
++   * Sets the thread to be ignored
++   *
++   * @param thread to be ignored
++   */
++  public static void setIgnored(Thread thread) {
++    ignoredThreads.add(thread);
++  }
++
++  /**
++   * Determines whether to ignore the thread or not.
++   *
++   * @param thread to query about
++   * @return true if the thread should be ignored
++   */
++  public static boolean isIgnored(Thread thread) {
++    return ignoredThreads.contains(thread);
++  }
++
++  @Override
++  public void onRemoval(String pluginName, String cacheName,
++      RemovalNotification<K, V> notification) {
++    if (isIgnored(Thread.currentThread())) {
++      return;
++    }
++
++    if (notification.wasEvicted()) {
++      return;
++    }
++
++    Gson gson = new Gson();
++
++    String keyJson = gson.toJson(notification.getKey());
++
++    for (Listener listener : listeners) {
++      listener.onRemoval(new EvictNotice(pluginName, cacheName, keyJson,
++          notification.getKey().getClass().getName()));
++    }
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/cache/EvictNotice.java b/src/main/java/com/google/gerrit/plugins/multimaster/cache/EvictNotice.java
+new file mode 100644
+index 0000000..264bb02
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/cache/EvictNotice.java
+@@ -0,0 +1,52 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.cache;
++
++import com.google.gson.Gson;
++
++public class EvictNotice {
++  public String pluginName;
++  public String cacheName;
++  public String keyJson;
++  public String keyClass;
++  public int id;
++  public long time;
++
++  public EvictNotice(String pluginName, String cacheName, String keyJson,
++      String keyClass) {
++    this.pluginName = pluginName;
++    this.cacheName = cacheName;
++    this.keyJson = keyJson;
++    this.keyClass = keyClass;
++    this.time = System.currentTimeMillis();
++  }
++
++  public String toJson() {
++    return (new Gson()).toJson(this);
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/cache/Evictor.java b/src/main/java/com/google/gerrit/plugins/multimaster/cache/Evictor.java
+new file mode 100644
+index 0000000..cc001bd
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/cache/Evictor.java
+@@ -0,0 +1,53 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.cache;
++
++import com.google.gerrit.plugins.multimaster.peer.Pacemaker;
++import com.google.gerrit.plugins.multimaster.peer.Peer;
++
++
++public interface Evictor extends CacheRemovalListenerImpl.Listener,
++    Pacemaker.Listener {
++  public interface Listener {
++    public void onEvictNotice(EvictNotice notice);
++
++    public void onOutdated();
++
++    public void onAllOutdatedRestored();
++
++    public void onCannotNotify(Peer target);
++  }
++
++  public void addListener(Listener listener);
++
++  public void removeListener(Listener listener);
++
++  public abstract void start();
++
++  public abstract boolean stop();
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefManager.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefManager.java
+new file mode 100644
+index 0000000..5e2ea05
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefManager.java
+@@ -0,0 +1,299 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.git;
++
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.List;
++
++import org.eclipse.jgit.errors.IncorrectObjectTypeException;
++import org.eclipse.jgit.errors.MissingObjectException;
++import org.eclipse.jgit.errors.RepositoryNotFoundException;
++import org.eclipse.jgit.lib.CommitBuilder;
++import org.eclipse.jgit.lib.Constants;
++import org.eclipse.jgit.lib.FileMode;
++import org.eclipse.jgit.lib.ObjectId;
++import org.eclipse.jgit.lib.ObjectInserter;
++import org.eclipse.jgit.lib.ObjectLoader;
++import org.eclipse.jgit.lib.PersonIdent;
++import org.eclipse.jgit.lib.Ref;
++import org.eclipse.jgit.lib.RefUpdate;
++import org.eclipse.jgit.lib.Repository;
++import org.eclipse.jgit.lib.TreeFormatter;
++import org.eclipse.jgit.revwalk.RevCommit;
++import org.eclipse.jgit.revwalk.RevTree;
++import org.eclipse.jgit.revwalk.RevWalk;
++import org.eclipse.jgit.treewalk.TreeWalk;
++import org.eclipse.jgit.treewalk.filter.PathFilter;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.gerrit.plugins.multimaster.peer.Peer;
++import com.google.gerrit.server.GerritPersonIdent;
++import com.google.gerrit.server.config.AllProjectsName;
++import com.google.gerrit.server.git.GitRepositoryManager;
++import com.google.gson.Gson;
++import com.google.inject.Inject;
++import com.google.inject.Singleton;
++
++@Singleton
++public class GitRefManager {
++  private static final Logger log = LoggerFactory
++      .getLogger(GitRefManager.class);
++
++  Gson gson;
++
++  private GitRepositoryManager repoManager;
++  private AllProjectsName repoName;
++
++  private Repository repo;
++  private String refNameBase;
++  private String masterRefBase;
++
++  private PersonIdent gerritIdent;
++
++  @Inject
++  public GitRefManager(GitRepositoryManager repoManager,
++      AllProjectsName repoName, @RefNameBase String refNameBase,
++      @GerritPersonIdent final PersonIdent gerritIdent, Gson gson) {
++    this.repoManager = repoManager;
++    this.gerritIdent = gerritIdent;
++
++    this.repoName = repoName;
++    this.refNameBase = refNameBase;
++
++    this.masterRefBase = "masters/";
++
++    this.gson = gson;
++  }
++
++  public void open() {
++    log.info("Initializing ref manager for repo \"");
++
++    try {
++      repo = repoManager.openRepository(repoName);
++    } catch (RepositoryNotFoundException e) {
++      log.error("Repository not found", e);
++      System.exit(1);
++    } catch (IOException e) {
++      log.error("IOException", e);
++      System.exit(1);
++    }
++
++    log.info("Successfully initialized repo.");
++  }
++
++  public void close() {
++    log.info("Stopping ref manager for repo \"" + repoName + "\"");
++    repo.close();
++  }
++
++  /**
++   * Deletes the specific ref
++   *
++   * @param peerId
++   * @throws IOException
++   */
++  public void delete(final Peer.Id peerId) throws IOException {
++    Ref ref = repo.getRef(refNameBase + masterRefBase + peerId);
++
++    if (ref == null) {
++      return;
++    }
++
++    RefUpdate refUpdate = repo.updateRef(ref.getName());
++    refUpdate.setForceUpdate(true);
++    refUpdate.disableRefLog();
++    switch (refUpdate.delete()) {
++      case NEW:
++      case FAST_FORWARD:
++      case FORCED:
++      case NO_CHANGE:
++        // Successful deletion.
++        break;
++      default:
++        log.warn("IOException while attempting to delete ref.");
++        // TODO: is this a problem?
++    }
++  }
++
++  /**
++   * @return all activity refs
++   */
++  public List<byte[]> getAll() {
++    List<Ref> allMasterRefs = new ArrayList<Ref>();
++    for (String refName : repo.getAllRefs().keySet()) {
++      if (!refName.startsWith(refNameBase + masterRefBase)) {
++        continue;
++      }
++
++      try {
++        allMasterRefs.add(repo.getRef(refName));
++      } catch (IOException e) {
++        continue;
++      }
++    }
++
++    List<byte[]> allActivities = new ArrayList<byte[]>();
++
++    for (Ref ref : allMasterRefs) {
++      byte[] activity = get(ref, "self");
++
++      if (activity != null) {
++        allActivities.add(activity);
++      }
++    }
++
++    return allActivities;
++  }
++
++  public byte[] get(final String refName, final String path) {
++    Ref ref;
++    try {
++      ref = repo.getRef(refNameBase + refName);
++    } catch (IOException e) {
++      return null;
++    }
++
++    if (ref == null) {
++      return null;
++    }
++
++    return get(ref, path);
++  }
++
++  public byte[] get(final Ref ref, final String path) {
++    try {
++      RevWalk revWalk = new RevWalk(repo);
++      RevCommit commit = revWalk.parseCommit(ref.getObjectId());
++      RevTree tree = commit.getTree();
++
++      TreeWalk treeWalk = new TreeWalk(repo);
++      treeWalk.addTree(tree);
++      treeWalk.setRecursive(true);
++      treeWalk.setFilter(PathFilter.create(path));
++      if (!treeWalk.next()) {
++        return null;
++      }
++
++      ObjectId objectId = treeWalk.getObjectId(0);
++      ObjectLoader loader = repo.open(objectId);
++
++      return loader.getBytes();
++    } catch (MissingObjectException e) {
++      e.printStackTrace();
++      return null;
++    } catch (IncorrectObjectTypeException e) {
++      e.printStackTrace();
++      return null;
++    } catch (IOException e) {
++      e.printStackTrace();
++      return null;
++    }
++  }
++
++  /**
++   * @param peerId
++   * @return the bytes specified by a peer id, null if the ref could not be found
++   */
++  public byte[] get(final Peer.Id peerId) {
++    return get(masterRefBase + peerId, "self");
++  }
++
++
++  /**
++   * Set an activity to create a ref
++   *
++   * @param peerId
++   * @param bytes
++   * @return success
++   * @throws IOException
++   */
++  public boolean set(final Peer.Id peerId, final byte[] bytes)
++      throws IOException {
++    if (repo == null) {
++      log.warn("Repository is null");
++      return false;
++    }
++
++    return set("masters/" + peerId, "self", bytes);
++  }
++
++  /**
++   * Set a ref
++   * @param path
++   * @param bytes if null will delete existing
++   * @return true if successful false if not
++   * @throws IOException
++   */
++  public boolean set(final String refName, final String path, final byte[] bytes)
++      throws IOException {
++    log.info("Writing to ref " + refNameBase + refName + " at " + path);
++
++    Ref ref = repo.getRef(refNameBase + refName);
++
++    TreeFormatter treeFormatter = new TreeFormatter();
++    CommitBuilder commitBuilder = new CommitBuilder();
++
++    ObjectInserter inserter = repo.newObjectInserter();
++
++    ObjectId blobId = inserter.insert(Constants.OBJ_BLOB, bytes);
++    treeFormatter.append(path, FileMode.REGULAR_FILE, blobId);
++
++    ObjectId treeId = treeFormatter.insertTo(inserter);
++
++    commitBuilder.setAuthor(gerritIdent);
++    commitBuilder.setCommitter(gerritIdent);
++    commitBuilder.setMessage("Updating cluster");
++    commitBuilder.setTreeId(treeId);
++
++    byte[] commitBytes = commitBuilder.build();
++    ObjectId commitId = inserter.insert(Constants.OBJ_COMMIT, commitBytes);
++
++    inserter.flush();
++
++    RefUpdate refUpdate = null;
++    refUpdate = repo.updateRef(refNameBase + refName);
++
++    refUpdate.setNewObjectId(commitId);
++    RefUpdate.Result updateResult = refUpdate.forceUpdate();
++
++    while (updateResult == RefUpdate.Result.LOCK_FAILURE) {
++      updateResult = refUpdate.forceUpdate();
++    }
++
++    if (updateResult == RefUpdate.Result.IO_FAILURE
++        || updateResult == RefUpdate.Result.REJECTED
++        || updateResult == RefUpdate.Result.NOT_ATTEMPTED) {
++      log.error("Failed to update ref");
++      return false;
++    }
++
++    return true;
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefModule.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefModule.java
+new file mode 100644
+index 0000000..33a5ab9
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefModule.java
+@@ -0,0 +1,63 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.git;
++
++import org.eclipse.jgit.lib.Config;
++
++import com.google.gerrit.plugins.multimaster.MultiMasterConfig;
++import com.google.gerrit.plugins.multimaster.peer.PeerRegistry;
++import com.google.gerrit.server.config.AllProjectsName;
++import com.google.gerrit.server.config.AllProjectsNameProvider;
++import com.google.inject.AbstractModule;
++import com.google.inject.Provides;
++import com.google.inject.Scopes;
++
++public class GitRefModule extends AbstractModule {
++  private static final String CONFIG_TITLE = "GitRefPeerRegistry";
++
++  @Override
++  protected void configure() {
++    bind(AllProjectsName.class).toProvider(AllProjectsNameProvider.class).in(
++        Scopes.SINGLETON);
++    bind(GitRefManager.class).in(Scopes.SINGLETON);
++    bind(PeerRegistry.class).to(GitRefPeerRegistry.class).in(Scopes.SINGLETON);
++  }
++
++  @Provides
++  @RefNameBase
++  public String getRefNameBase(@MultiMasterConfig final Config config) {
++    final String[] want =
++        config.getStringList(CONFIG_TITLE, null, "refNameBase");
++
++    if (want != null && want.length == 1) {
++      return want[0];
++    }
++
++    return "refs/meta/cluster/";
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefPeerRegistry.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefPeerRegistry.java
+new file mode 100644
+index 0000000..d85797b
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/GitRefPeerRegistry.java
+@@ -0,0 +1,369 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.git;
++
++import java.io.IOException;
++import java.util.Collection;
++import java.util.Collections;
++import java.util.HashMap;
++import java.util.HashSet;
++import java.util.LinkedList;
++import java.util.List;
++import java.util.Map;
++import java.util.Set;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import java.util.concurrent.RejectedExecutionException;
++import java.util.concurrent.ScheduledExecutorService;
++import java.util.concurrent.TimeUnit;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.gerrit.plugins.multimaster.peer.OutdatedThreshold;
++import com.google.gerrit.plugins.multimaster.peer.Peer;
++import com.google.gerrit.plugins.multimaster.peer.PeerActivity;
++import com.google.gerrit.plugins.multimaster.peer.PeerRegistry;
++import com.google.gerrit.plugins.multimaster.peer.Self;
++import com.google.gson.Gson;
++import com.google.gson.JsonSyntaxException;
++import com.google.inject.Inject;
++
++public class GitRefPeerRegistry implements PeerRegistry {
++  private static final Logger log = LoggerFactory
++      .getLogger(GitRefPeerRegistry.class);
++
++  private ScheduledExecutorService scheduler = Executors
++      .newScheduledThreadPool(2);
++
++  protected long outdatedThreshold;
++  protected long refreshTime;
++
++  protected Map<Peer.Id, PeerActivity> activities = Collections
++      .synchronizedMap(new HashMap<Peer.Id, PeerActivity>());
++  protected List<Listener> listeners = Collections
++      .synchronizedList(new LinkedList<Listener>());
++
++  protected ExecutorService executor = Executors.newCachedThreadPool();
++
++  private Peer self;
++  private GitRefManager gitRefManager;
++  private Gson gson;
++
++  private boolean started = false;
++
++  @Inject
++  public GitRefPeerRegistry(final @Self Peer self,
++      final GitRefManager gitRefManager, final Gson gson,
++      @OutdatedThreshold long outdatedThreshold) {
++    this.self = self;
++    this.gitRefManager = gitRefManager;
++    this.gson = gson;
++
++    this.outdatedThreshold = outdatedThreshold;
++    this.refreshTime = outdatedThreshold / 10;
++  }
++
++  public void addListener(Listener listener) {
++    listeners.add(listener);
++  }
++
++  public void removeListener(Listener listener) {
++    listeners.remove(listener);
++  }
++
++  public void start() {
++    gitRefManager.open();
++
++    scheduler.scheduleWithFixedDelay(new WriteTask(), 0, refreshTime,
++        TimeUnit.MILLISECONDS);
++    scheduler.execute(new ReadTask());
++
++    started = true;
++  }
++
++  public boolean stop() {
++    if (!started) {
++      return true;
++    }
++
++    boolean success = false;
++
++    scheduler.shutdown();
++    long waitTime = 20000;
++    long waitStart = System.currentTimeMillis();
++    while (true) {
++      try {
++        success = scheduler.awaitTermination(waitTime, TimeUnit.MILLISECONDS);
++        break;
++      } catch (InterruptedException e) {
++        waitTime -= System.currentTimeMillis() - waitStart;
++        waitStart = System.currentTimeMillis();
++        continue;
++      }
++    }
++
++    try {
++      gitRefManager.delete(self.getId());
++    } catch (IOException e) {
++      log.error("Failed to delete self");
++    }
++
++    gitRefManager.close();
++
++    return success;
++  }
++
++  public Set<Peer> getActivePeers() {
++    Set<Peer> activePeers = new HashSet<Peer>();
++    for (PeerActivity activity : activities.values()) {
++      if (System.currentTimeMillis() - activity.lastSeen <= outdatedThreshold) {
++        activePeers.add(activity.peer);
++      }
++    }
++
++    return activePeers;
++  }
++
++  public Collection<PeerActivity> getActivities() {
++    return Collections.unmodifiableCollection(activities.values());
++  }
++
++  public Peer get(Peer.Id id) {
++    return activities.get(id).peer;
++  }
++
++  /**
++   * Shoots the given peer in the head.
++   *
++   * @param peer to shoot
++   */
++  protected void remove(Peer.Id peerId) {
++    log.info("[" + peerId + "] Peer lost. Shooting in head.");
++
++    activities.remove(peerId);
++
++    try {
++      gitRefManager.delete(peerId);
++    } catch (IOException e) {
++      log.error("IOException while attempting to delete peer ref.", e);
++    }
++  }
++
++  /**
++   * Determines whether a peer has been added to the registry before
++   *
++   * @param peer to query about
++   * @return if the peer is known
++   */
++  protected boolean peerKnown(Peer peer) {
++    return activities.containsKey(peer.getId());
++  }
++
++  /**
++   * Adds new peer to map and notifies listeners. The listeners are called on
++   * separate threads.
++   *
++   * @param activity
++   */
++  protected void peerJoined(final PeerActivity activity) {
++    activities.put(activity.peer.getId(), activity);
++    for (final Listener listener : listeners) {
++      executor.execute(new Runnable() {
++        public void run() {
++          listener.onPeerJoined(activity.peer);
++        }
++      });
++    }
++  }
++
++  /**
++   * Updated an existing  peer to map and notifies listeners. The listeners are
++   * called on separate threads.
++   *
++   * @param activity
++   */
++  protected void peerUpdated(final PeerActivity activity) {
++    activities.get(activity.peer.getId()).lastSeen = activity.lastSeen;
++    for (final Listener listener : listeners) {
++      executor.execute(new Runnable() {
++        public void run() {
++          listener.onPeerUpdated(activity.peer);
++        }
++      });
++    }
++  }
++
++  /**
++   * Notifies listeners of a lost peer. The listeners are called on separate
++   * threads.
++   *
++   * @param activity
++   */
++  protected void peerLost(final PeerActivity activity) {
++    for (final Listener listener : listeners) {
++      executor.execute(new Runnable() {
++        public void run() {
++          listener.onPeerLost(activity.peer);
++        }
++      });
++    }
++  }
++
++  /**
++   * Routine task that writes refs to allow other peers to see that this instance
++   * is still alive.
++   */
++  private class WriteTask implements Runnable {
++    public void run() {
++      boolean result;
++      try {
++        result =
++            gitRefManager.set(self.getId(),
++                gson.toJson(new PeerActivity(self, System.currentTimeMillis()))
++                    .getBytes());
++      } catch (IOException e) {
++        // TODO Auto-generated catch block
++        e.printStackTrace();
++        return;
++      }
++
++      if (!result) {
++        System.out.println("Could not write ref");
++      }
++    }
++  }
++
++  /**
++   * Routine task that reads peer activities from the repository and updates the
++   * map.
++   *
++   * It also checks for outdated peers immediately following the reads.
++   *
++   * TODO Current implementation simply shoots the peer in the head when it is
++   *      outdated.
++   */
++  private class ReadTask implements Runnable {
++    public void run() {
++      try {
++        read();
++        check();
++      } catch (RejectedExecutionException e) {
++        log.warn("Server is already shutting down. Could not queue read task.");
++      } catch (Throwable e) {
++        log.error("Uncaught exception", e);
++        System.exit(1);
++      }
++    }
++
++    private void read() {
++      long readStart = System.currentTimeMillis();
++
++      /*
++       * Since this read depends on all refs getting read at the same time it
++       * may be possible that one blocked read will render all others as
++       * outdated. Since this implementation is written with NFS in mind this
++       * will likely be a problem even with separate reads.
++       */
++      for (byte[] refBytes : gitRefManager.getAll()) {
++        String json = new String(refBytes);
++
++        PeerActivity activity;
++        try {
++          activity = gson.fromJson(json, PeerActivity.class);
++        } catch (JsonSyntaxException e) {
++          log.error("JsonSyntaxException", e);
++          continue;
++        }
++
++        if (activity.peer.getId().equals(self.getId())) {
++          continue;
++        }
++
++        if (peerKnown(activity.peer)) {
++          peerUpdated(activity);
++        } else {
++          peerJoined(activity);
++        }
++      }
++
++      long readTime = System.currentTimeMillis() - readStart;
++
++      // Do not waste time rescheduling, reread right away
++      if (readTime > 2 * refreshTime) {
++        log.warn("Read took too long. Re-reading.");
++        read();
++      }
++    }
++
++    private void check() throws JsonSyntaxException, ClassNotFoundException {
++      long earliestPeerUpdate = Long.MAX_VALUE;
++      List<Peer.Id> toRemove = new LinkedList<Peer.Id>();
++      for (final PeerActivity activity : activities.values()) {
++        // If outdated
++        if (System.currentTimeMillis() - activity.lastSeen > outdatedThreshold) {
++          peerLost(activity);
++          toRemove.add(activity.peer.getId());
++        } else {
++          // Find the earliest peer (if it is not already outdated)
++          if (activity.lastSeen < earliestPeerUpdate) {
++            earliestPeerUpdate = activity.lastSeen;
++          }
++        }
++      }
++
++      for (final Peer.Id peerId : toRemove) {
++        // Stonith on separate thread since the git repository or filesystem may
++        // block
++        executor.execute(new Runnable() {
++          public void run() {
++            remove(peerId);
++          }
++        });
++      }
++
++      // If there is no peer then read after refreshTime otherwise read
++      // 2*refreshTime after the earliest a peer was last seen.
++      long nextRead = System.currentTimeMillis() + refreshTime;
++      if (earliestPeerUpdate < Long.MAX_VALUE) {
++        nextRead = earliestPeerUpdate;
++        while (nextRead < System.currentTimeMillis()) {
++          nextRead += 2 * refreshTime;
++        }
++      }
++
++      schedule(nextRead - System.currentTimeMillis());
++    }
++
++    private void schedule(long delay) {
++      if (!scheduler.isShutdown()) {
++        scheduler.schedule(this, delay, TimeUnit.MILLISECONDS);
++      }
++    }
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/RefNameBase.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/RefNameBase.java
+new file mode 100644
+index 0000000..f4b8cb9
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/git/RefNameBase.java
+@@ -0,0 +1,44 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.git;
++
++import static java.lang.annotation.ElementType.FIELD;
++import static java.lang.annotation.ElementType.METHOD;
++import static java.lang.annotation.ElementType.PARAMETER;
++import static java.lang.annotation.RetentionPolicy.RUNTIME;
++
++import java.lang.annotation.Retention;
++import java.lang.annotation.Target;
++
++import com.google.inject.BindingAnnotation;
++
++@Retention(RUNTIME)
++@BindingAnnotation
++@Target({FIELD, PARAMETER, METHOD})
++public @interface RefNameBase {
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPEvictor.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPEvictor.java
+new file mode 100644
+index 0000000..1dd67b9
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPEvictor.java
+@@ -0,0 +1,169 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp;
++
++import java.util.LinkedList;
++import java.util.List;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.gerrit.plugins.multimaster.Json;
++import com.google.gerrit.plugins.multimaster.cache.CacheRemovalListenerImpl;
++import com.google.gerrit.plugins.multimaster.cache.EvictNotice;
++import com.google.gerrit.plugins.multimaster.cache.Evictor;
++import com.google.gerrit.plugins.multimaster.peer.Peer;
++import com.google.gerrit.plugins.multimaster.peer.PeerRegistry;
++import com.google.gerrit.plugins.multimaster.peer.Self;
++import com.google.gson.Gson;
++import com.google.inject.Inject;
++
++
++public class UDPEvictor implements Evictor, UDPMessageReceiver.Listener,
++    UDPMessageSender.Listener {
++  private static final Logger log = LoggerFactory.getLogger(UDPEvictor.class);
++
++  private final Gson gson;
++
++  protected List<Listener> listeners = new LinkedList<Listener>();
++
++  private final Peer self;
++  private final PeerRegistry peerRegistry;
++  private final UDPMessageSender udpMessageSender;
++  private final UDPMessageReceiver udpMessageReceiver;
++  private final UDPPacemaker udpPacemaker;
++
++  private boolean started = false;
++
++  @Inject
++  UDPEvictor(@Self Peer self, PeerRegistry peerRegistry,
++      UDPMessageSender udpMessageSender, UDPMessageReceiver udpMessageReceiver,
++      UDPPacemaker udpPacemaker, Gson gson) {
++    this.self = self;
++    this.peerRegistry = peerRegistry;
++    this.udpMessageSender = udpMessageSender;
++    this.udpMessageReceiver = udpMessageReceiver;
++    this.udpPacemaker = udpPacemaker;
++    this.gson = gson;
++
++    CacheRemovalListenerImpl.addListener(this);
++    udpMessageReceiver.addListener(this);
++    udpMessageSender.addListener(this);
++  }
++
++  public void addListener(Listener listener) {
++    listeners.add(listener);
++  }
++
++  public void removeListener(Listener listener) {
++    listeners.remove(listener);
++  }
++
++  @Override
++  public void start() {
++    log.info("UDPEvictor starting.");
++
++    udpMessageReceiver.start();
++    udpMessageSender.start();
++    udpPacemaker.start();
++
++    started = true;
++  }
++
++  @Override
++  public boolean stop() {
++    if (!started) {
++      return true;
++    }
++
++    log.info("UDPEvictor stopping.");
++    boolean senderTimedOut = !udpMessageSender.stop();
++    boolean pacemakerTimedOut = !udpPacemaker.stop();
++
++    udpMessageReceiver.interrupt();
++    long waitTime = 20000;
++    long waitStart = System.currentTimeMillis();
++    while (true) {
++      try {
++        udpMessageReceiver.join(waitTime);
++        break;
++      } catch (InterruptedException e) {
++        waitTime -= System.currentTimeMillis() - waitStart;
++        continue;
++      }
++    }
++
++    waitTime -= System.currentTimeMillis() - waitStart;
++    boolean receiverTimedOut = waitTime <= 0;
++
++    return !senderTimedOut && !pacemakerTimedOut && !receiverTimedOut;
++  }
++
++  @Override
++  public void onRemoval(EvictNotice notice) {
++    for (Peer peer : peerRegistry.getActivePeers()) {
++      udpMessageSender.submitMessage(new UDPMessage(self, peer,
++          UDPMessage.Type.EVICT_NOTICE, new Json(notice), true));
++    }
++  }
++
++  @Override
++  public void onMessage(final UDPMessage message, final Object jsonObject) {
++    if (message.type != UDPMessage.Type.EVICT_NOTICE
++        || !(jsonObject instanceof EvictNotice)) {
++      return;
++    }
++
++    EvictNotice notice = (EvictNotice) jsonObject;
++
++    for (Listener listener : listeners) {
++      listener.onEvictNotice(notice);
++    }
++  }
++
++  @Override
++  public void onOutdated() {
++    for (Listener listener : listeners) {
++      listener.onOutdated();
++    }
++  }
++
++  @Override
++  public void onAllRestored() {
++    for (Listener listener : listeners) {
++      listener.onAllOutdatedRestored();
++    }
++  }
++
++  @Override
++  public void onCannotSend(UDPMessage message) {
++    for (Listener listener : listeners) {
++      listener.onCannotNotify(message.target);
++    }
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessage.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessage.java
+new file mode 100644
+index 0000000..b668bbe
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessage.java
+@@ -0,0 +1,126 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp;
++
++import com.google.gerrit.plugins.multimaster.Json;
++import com.google.gerrit.plugins.multimaster.peer.Peer;
++import com.google.gson.Gson;
++import com.google.gson.JsonSyntaxException;
++
++public class UDPMessage {
++  public enum Type {
++    EVICT_NOTICE, PULSE, ACK
++  }
++
++  /**
++   * Create a new PULSE message
++   *
++   * @param sourceId
++   * @param targetId
++   * @return PULSE message
++   * @throws ClassNotFoundException 
++   * @throws JsonSyntaxException 
++   */
++  public static UDPMessage newPulse(Peer source, Peer target) {
++    return new UDPMessage(source, target, Type.PULSE, null, false);
++  }
++
++  /**
++   * Create a new ACK message with the same id
++   *
++   * TODO It may be better to give this a different id and pass the id that is
++   * being ACKed in a separate container.
++   *
++   * @param peerId
++   * @param targetId
++   * @param id to ACK
++   * @return ACK message
++   * @throws ClassNotFoundException
++   * @throws JsonSyntaxException
++   */
++  public static UDPMessage newAck(Peer source, Peer target, int id) {
++    UDPMessage msg = new UDPMessage(target, target, Type.ACK, null, false);
++    msg.id = id;
++    return msg;
++  }
++
++  /**
++   * Copy the message and increment numTries on the copy.
++   *
++   * @return copied message
++   */
++  public static UDPMessage newRetry(UDPMessage msg) {
++    UDPMessage copy = new UDPMessage(msg);
++    copy.numTries++;
++    return copy;
++  }
++
++  public Peer source;
++  public Peer target;
++
++  public int id;
++  public Type type;
++  public Json json;
++  public long timestamp;
++  public boolean ackRequired;
++  public int numTries;
++
++  public UDPMessage(Peer source, Peer target, Type type, Json json,
++      boolean ackRequired) {
++    this.source = source;
++    this.target = target;
++    this.type = type;
++    this.json = json;
++    this.timestamp = System.currentTimeMillis();
++    this.ackRequired = ackRequired;
++    this.numTries = 0;
++
++    this.id = hashCode();
++  }
++
++  public UDPMessage(final UDPMessage msg) {
++    this.source = msg.source;
++    this.target = msg.target;
++    this.type = msg.type;
++    this.json = msg.json;
++    this.timestamp = System.currentTimeMillis();
++    this.ackRequired = msg.ackRequired;
++    this.numTries = msg.numTries;
++
++    this.id = msg.id;
++  }
++
++  /**
++   * Serialize to JSON
++   *
++   * @return
++   */
++  public String toJson() {
++    return (new Gson()).toJson(this);
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessageReceiver.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessageReceiver.java
+new file mode 100644
+index 0000000..2290f3f
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessageReceiver.java
+@@ -0,0 +1,201 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp;
++
++import java.io.IOException;
++import java.net.DatagramPacket;
++import java.net.DatagramSocket;
++import java.net.InetSocketAddress;
++import java.net.SocketException;
++import java.util.LinkedList;
++import java.util.List;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.gerrit.plugins.multimaster.Json;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.MaxMessageSize;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.ReceiveHost;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.ReceivePort;
++import com.google.gerrit.plugins.multimaster.peer.Peer;
++import com.google.gerrit.plugins.multimaster.peer.Self;
++import com.google.gerrit.server.util.SocketUtil;
++import com.google.gson.Gson;
++import com.google.gson.JsonSyntaxException;
++import com.google.inject.Inject;
++
++public class UDPMessageReceiver extends Thread {
++  private static final Logger log = LoggerFactory
++      .getLogger(UDPMessageReceiver.class);
++
++  public interface Listener {
++    public void onMessage(final UDPMessage message, final Object jsonObject);
++  }
++
++  private final Gson gson;
++
++  private List<Listener> listeners = new LinkedList<Listener>();
++
++  private Peer self;
++  private UDPMessageSender messageSender;
++
++  private String receiveHost;
++  private InetSocketAddress receiveAddress;
++  private DatagramSocket receiveSocket;
++
++  private ExecutorService executor = Executors.newCachedThreadPool();
++
++  private byte[] buffer;
++  boolean running = false;
++
++  @Inject
++  public UDPMessageReceiver(@Self Peer self, @ReceiveHost String receiveHost,
++      @ReceivePort Integer receivePort, UDPMessageSender messageSender,
++      @MaxMessageSize int maxMessageSize, final Gson gson) {
++    this.self = self;
++    this.receiveHost = receiveHost;
++    this.messageSender = messageSender;
++
++    this.receiveAddress = SocketUtil.resolve(receiveHost, receivePort);
++
++    this.buffer = new byte[maxMessageSize];
++
++    this.gson = gson;
++
++    addListener(messageSender);
++  }
++
++  public void addListener(Listener listener) {
++    listeners.add(listener);
++  }
++
++  public void removeListener(Listener listener) {
++    listeners.remove(listener);
++  }
++
++  @Override
++  public void interrupt() {
++    running = false;
++    super.interrupt();
++    receiveSocket.close();
++  }
++
++  @Override
++  public void run() {
++    try {
++      receiveSocket = new DatagramSocket(receiveAddress);
++    } catch (SocketException e) {
++      log.error("Could not bind socket", e);
++      System.exit(1);
++      return;
++    }
++
++    log.info("Listening on: " + receiveHost + ":"
++        + receiveSocket.getLocalPort());
++
++    self.setProperty("receiveHost", new Json(receiveHost));
++    self.setProperty("receivePort", new Json(receiveSocket.getLocalPort()));
++
++    running = true;
++    try {
++      receive();
++    } finally {
++      if (!receiveSocket.isClosed()) {
++        receiveSocket.close();
++      }
++    }
++  }
++
++  private void receive() {
++    DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
++
++    while (running) {
++      try {
++        receiveSocket.receive(packet);
++      } catch (SocketException e) {
++        log.info("Socket exception. Server is shutting down.");
++        return;
++      } catch (IOException e) {
++        log.info("IOException", e);
++        continue;
++      }
++
++      String receivedJson = new String(buffer, 0, packet.getLength()).trim();
++
++      packet.setLength(buffer.length);
++
++      final UDPMessage message;
++      try {
++        message = gson.fromJson(receivedJson, UDPMessage.class);
++      } catch (JsonSyntaxException e) {
++        log.error("Invalid JSON syntax", e);
++        continue;
++      }
++
++      final Object jsonObject = getJsonObject(message);
++
++      /*
++       * If the contents of the message are not valid continue. This also
++       * prevents an ACK from getting sent so if a message was corrupt it will
++       * be resent
++       */
++      if (jsonObject == null) {
++        switch (message.type) {
++          case PULSE:
++          case ACK:
++            break;
++          case EVICT_NOTICE:
++            continue;
++        }
++      }
++
++      if (message.ackRequired) {
++        messageSender.submitOneshot(UDPMessage.newAck(self, message.source,
++            message.id));
++      }
++
++      for (final Listener listener : listeners) {
++        executor.execute(new Runnable() {
++          public void run() {
++            listener.onMessage(message, jsonObject);
++          }
++        });
++      }
++    }
++  }
++
++  private Object getJsonObject(UDPMessage message) {
++    if (message.json == null) {
++      return null;
++    }
++
++    return message.json.getObject();
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessageSender.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessageSender.java
+new file mode 100644
+index 0000000..c1d81ae
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPMessageSender.java
+@@ -0,0 +1,323 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp;
++
++import java.io.IOException;
++import java.net.DatagramPacket;
++import java.net.DatagramSocket;
++import java.net.InetSocketAddress;
++import java.net.SocketException;
++import java.util.Collections;
++import java.util.HashMap;
++import java.util.LinkedList;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.Callable;
++import java.util.concurrent.Executors;
++import java.util.concurrent.RejectedExecutionException;
++import java.util.concurrent.ScheduledExecutorService;
++import java.util.concurrent.ScheduledFuture;
++import java.util.concurrent.TimeUnit;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.common.util.concurrent.FutureCallback;
++import com.google.common.util.concurrent.Futures;
++import com.google.common.util.concurrent.ListenableFuture;
++import com.google.common.util.concurrent.ListeningExecutorService;
++import com.google.common.util.concurrent.MoreExecutors;
++import com.google.gerrit.plugins.multimaster.Json;
++import com.google.gerrit.plugins.multimaster.MultiMasterUtil;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.BaseRetryTime;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.MaxMessageSize;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.MaxSenders;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.MaxTimeout;
++import com.google.gerrit.plugins.multimaster.peer.Peer;
++import com.google.gerrit.server.util.SocketUtil;
++import com.google.inject.Inject;
++import com.google.inject.Singleton;
++
++@Singleton
++public class UDPMessageSender implements UDPMessageReceiver.Listener {
++  private static final Logger log = LoggerFactory
++      .getLogger(UDPMessageSender.class);
++
++  private final int maxMessageSize;
++  private final long baseRetryTime;
++  private final int maxRetries;
++
++  public interface Listener {
++    public void onCannotSend(UDPMessage message);
++  }
++
++  private List<Listener> listeners = new LinkedList<Listener>();
++
++  private ListeningExecutorService sender;
++
++  private Map<Integer, ScheduledFuture<?>> resendTasks = Collections
++      .synchronizedMap(new HashMap<Integer, ScheduledFuture<?>>());
++  private ScheduledExecutorService resender;
++  private DatagramSocket sendSocket;
++
++  @Inject
++  public UDPMessageSender(@MaxTimeout long maxTimeout,
++      @BaseRetryTime long baseRetryTime, @MaxSenders int maxSenders,
++      @MaxMessageSize int maxMessageSize) {
++    this.baseRetryTime = baseRetryTime;
++    this.maxRetries = MultiMasterUtil.inverseCumFib(maxTimeout / baseRetryTime);
++    this.maxMessageSize = maxMessageSize;
++
++    this.sender =
++        MoreExecutors.listeningDecorator(Executors
++            .newFixedThreadPool(maxSenders));
++
++    this.resender =
++        MoreExecutors.listeningDecorator(Executors
++            .newScheduledThreadPool(maxSenders));
++  }
++
++  public void addListener(Listener listener) {
++    listeners.add(listener);
++  }
++
++  public void removeListener(Listener listener) {
++    listeners.remove(listener);
++  }
++
++  public void start() {
++    log.info("UDPMessageSender starting.");
++
++    try {
++      sendSocket = new DatagramSocket();
++    } catch (SocketException e) {
++      log.error("Failed to initialize socket", e);
++      System.exit(1);
++    }
++  }
++
++  /**
++   * Attempt to gracefully shutdown sending tasks
++   *
++   * @return true if successful, false if timed out
++   */
++  public boolean stop() {
++    log.info("UDPMessageSender stopping.");
++
++    boolean senderTimedOut = false;
++
++    sender.shutdown();
++    long waitTime = 20000;
++    long waitStart = System.currentTimeMillis();
++    while (true) {
++      try {
++        senderTimedOut =
++            !sender.awaitTermination(waitTime, TimeUnit.MILLISECONDS);
++        break;
++      } catch (InterruptedException e) {
++        waitTime -= System.currentTimeMillis() - waitStart;
++        waitStart = System.currentTimeMillis();
++        continue;
++      }
++    }
++
++    boolean resenderTimedOut = false;
++
++    resender.shutdown();
++    waitTime = 20000;
++    waitStart = System.currentTimeMillis();
++    while (true) {
++      try {
++        resenderTimedOut =
++            !resender.awaitTermination(waitTime, TimeUnit.MILLISECONDS);
++        break;
++      } catch (InterruptedException e) {
++        waitTime -= System.currentTimeMillis() - waitStart;
++        waitStart = System.currentTimeMillis();
++        continue;
++      }
++    }
++
++    sendSocket.close();
++
++    return !senderTimedOut && !resenderTimedOut;
++  }
++
++  /**
++   * Submit a message to the executor service for sending
++   *
++   * @param message the message to send
++   */
++  public void submitMessage(final UDPMessage message)
++      throws RejectedExecutionException {
++    ListenableFuture<Peer> future = sender.submit(new SendTask(message));
++
++    if (!message.ackRequired) {
++      return;
++    }
++
++    scheduleRetry(message);
++
++    Futures.addCallback(future, new FutureCallback<Peer>() {
++      public void onSuccess(Peer result) {
++
++      }
++
++      public void onFailure(Throwable t) {
++        log.info("Failed to send message. Cancelling resends.");
++        ScheduledFuture<?> future = resendTasks.remove(message.id);
++        if (future != null) {
++          future.cancel(false);
++        }
++
++        for (Listener listener : listeners) {
++          listener.onCannotSend(message);
++        }
++      }
++    });
++  }
++
++  public void submitOneshot(final UDPMessage message) {
++    sender.submit(new SendTask(message));
++  }
++
++  private void scheduleRetry(final UDPMessage message) {
++    final UDPMessage retry = UDPMessage.newRetry(message);
++
++    ScheduledFuture<?> future = resender.schedule(
++        new Runnable() {
++          public void run() {
++            if (retry.numTries <= maxRetries) {
++              submitMessage(retry);
++            } else {
++              log.error("Message " + retry.id + ": Giving up after "
++                  + maxRetries + " tries.");
++              for (Listener listener : listeners) {
++                listener.onCannotSend(message);
++              }
++            }
++          }
++        }, MultiMasterUtil.fib(message.numTries + 1) * baseRetryTime,
++        TimeUnit.MILLISECONDS);
++
++    resendTasks.put(retry.id, future);
++  }
++
++  /**
++   * If an ack is received cancel the resend job.
++   *
++   * @param id of message to cancel
++   */
++  public void ackReceived(int id) {
++    ScheduledFuture<?> future = resendTasks.remove(id);
++
++    if (future != null) {
++      future.cancel(false);
++    }
++  }
++
++  private class SendTask implements Callable<Peer> {
++    private UDPMessage message;
++    private Map<Peer.Id, InetSocketAddress> cachedAddresses =
++        new HashMap<Peer.Id, InetSocketAddress>();
++
++    public SendTask(UDPMessage msg) {
++      this.message = msg;
++    }
++
++    public Peer call() {
++      if (message.type != UDPMessage.Type.PULSE) {
++        log.info("SEND:" + message.toJson());
++      }
++
++      if (message.numTries > 0) {
++        log.info("Message " + message.id + ": Retry #" + message.numTries);
++      }
++
++      String json = message.toJson();
++
++      if (json.length() > maxMessageSize) {
++        log.error("Message too long to send: " + json);
++        for (Listener listener : listeners) {
++          listener.onCannotSend(message);
++        }
++      }
++
++      byte[] data = message.toJson().getBytes();
++
++      InetSocketAddress sendAddress = null;
++
++      if (!cachedAddresses.containsKey(message.target.getId())) {
++        sendAddress = getAddress(message.target);
++        cachedAddresses.put(message.target.getId(), sendAddress);
++      } else {
++        sendAddress = cachedAddresses.get(message.target.getId());
++      }
++
++      DatagramPacket packet = null;
++      try {
++        packet = new DatagramPacket(data, data.length, sendAddress);
++        sendSocket.send(packet);
++      } catch (SocketException e) {
++        e.printStackTrace();
++      } catch (IOException e) {
++        e.printStackTrace();
++      }
++
++      return message.target;
++    }
++  }
++
++  private InetSocketAddress getAddress(Peer peer) {
++    Json sendHostJson = peer.getProperty("receiveHost");
++    Json sendPortJson = peer.getProperty("receivePort");
++    String sendHost =
++        (sendPortJson == null) ? null : (String) sendHostJson.getObject();
++    Integer sendPort =
++        (sendHostJson == null) ? null : (Integer) sendPortJson.getObject();
++
++    // TODO notify admin?
++    if (sendHost == null || sendPort == null) {
++      log.error("Incompatible configuration detected for peer "
++          + peer.getId()
++          + ". All peers must have the property \"recieveHost\" and \"receivePort\" set");
++      return null;
++    }
++
++    return SocketUtil.resolve(sendHost, sendPort);
++  }
++
++  @Override
++  public void onMessage(final UDPMessage message, final Object jsonObject) {
++    if (message.type != UDPMessage.Type.ACK) {
++      return;
++    }
++
++    ackReceived(message.id);
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPModule.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPModule.java
+new file mode 100644
+index 0000000..b6a0e17
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPModule.java
+@@ -0,0 +1,151 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp;
++
++import org.eclipse.jgit.lib.Config;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.gerrit.plugins.multimaster.ConfigProvider;
++import com.google.gerrit.plugins.multimaster.MultiMasterConfig;
++import com.google.gerrit.plugins.multimaster.cache.Evictor;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.BaseRetryTime;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.MaxMessageSize;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.MaxSenders;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.MaxTimeout;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.ReceiveHost;
++import com.google.gerrit.plugins.multimaster.impl.udp.config.ReceivePort;
++import com.google.inject.AbstractModule;
++import com.google.inject.Provides;
++import com.google.inject.Scopes;
++
++public class UDPModule extends AbstractModule {
++  private static final Logger log = LoggerFactory.getLogger(UDPModule.class);
++
++  private static final String CONFIG_TITLE = "UDPEvictor";
++
++  @Override
++  protected void configure() {
++    bind(UDPMessageSender.class).in(Scopes.SINGLETON);
++    bind(UDPMessageReceiver.class);
++    bind(Evictor.class).to(UDPEvictor.class).in(Scopes.SINGLETON);
++  }
++
++  @Provides
++  @MaxSenders
++  public int getMaxSenders(@MultiMasterConfig final Config config,
++      ConfigProvider factory) {
++    final String[] want =
++        config.getStringList(CONFIG_TITLE, null, "maxSenders");
++
++    if (want != null && want.length == 1) {
++      if (want[0].equals("*")) {
++        return Runtime.getRuntime().availableProcessors();
++      } else {
++        return Integer.parseInt(want[0]);
++      }
++    }
++
++    log.error("Misconfigured number of senders");
++    System.exit(1);
++    return -1;
++  }
++
++  @Provides
++  @ReceiveHost
++  public String getReceiveHost(@MultiMasterConfig final Config config) {
++    final String[] want =
++        config.getStringList(CONFIG_TITLE, null, "receiveHost");
++
++    if (want != null && want.length == 1) {
++      return want[0];
++    }
++
++    log.error("Misconfigured host.");
++    System.exit(1);
++    return null;
++  }
++
++  @Provides
++  @ReceivePort
++  public int getReceivePort(@MultiMasterConfig final Config config) {
++    final String[] want =
++        config.getStringList(CONFIG_TITLE, null, "receivePort");
++
++    if (want != null && want.length == 1) {
++      if (want[0].equals("*")) {
++        return 0;
++      } else {
++        return Integer.parseInt(want[0]);
++      }
++    }
++
++    log.error("Misconfigured port");
++    System.exit(1);
++    return -1;
++  }
++
++  @Provides
++  @BaseRetryTime
++  public long getBaseRetryTime(@MultiMasterConfig final Config config) {
++    final String[] want =
++        config.getStringList(CONFIG_TITLE, null, "baseRetryTime");
++
++    if (want != null && want.length == 1) {
++      return Long.parseLong(want[0]);
++    }
++
++    return 500L;
++  }
++
++  @Provides
++  @MaxTimeout
++  public long getMaxTimeout(@MultiMasterConfig final Config config) {
++    final String[] want =
++        config.getStringList(CONFIG_TITLE, null, "maxTimeout");
++
++    if (want != null && want.length == 1) {
++      return Long.parseLong(want[0]);
++    }
++
++    return 10000L;
++  }
++
++  @Provides
++  @MaxMessageSize
++  public int getMaxMessageSize(@MultiMasterConfig final Config config) {
++    final String[] want =
++        config.getStringList(CONFIG_TITLE, null, "maxMessageSize");
++
++    if (want != null && want.length == 1) {
++      return Integer.parseInt(want[0]);
++    }
++
++    return 1400;
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPPacemaker.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPPacemaker.java
+new file mode 100644
+index 0000000..f545df5
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/UDPPacemaker.java
+@@ -0,0 +1,225 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp;
++
++import java.util.HashMap;
++import java.util.HashSet;
++import java.util.LinkedList;
++import java.util.List;
++import java.util.Map;
++import java.util.Set;
++import java.util.concurrent.Executors;
++import java.util.concurrent.RejectedExecutionException;
++import java.util.concurrent.ScheduledExecutorService;
++import java.util.concurrent.TimeUnit;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.gerrit.plugins.multimaster.peer.OutdatedThreshold;
++import com.google.gerrit.plugins.multimaster.peer.Pacemaker;
++import com.google.gerrit.plugins.multimaster.peer.Peer;
++import com.google.gerrit.plugins.multimaster.peer.PeerActivity;
++import com.google.gerrit.plugins.multimaster.peer.PeerRegistry;
++import com.google.gerrit.plugins.multimaster.peer.Self;
++import com.google.inject.Inject;
++
++public class UDPPacemaker implements Pacemaker, UDPMessageReceiver.Listener {
++  private static final Logger log = LoggerFactory.getLogger(UDPPacemaker.class);
++
++  protected List<Listener> listeners = new LinkedList<Listener>();
++
++  private Peer self;
++
++  private PeerRegistry peerRegistry;
++  private UDPMessageSender udpMessageSender;
++
++  protected Map<Peer.Id, PeerActivity> activities =
++      new HashMap<Peer.Id, PeerActivity>();
++  protected Set<Peer> outdatedPeers = new HashSet<Peer>();
++
++  private ScheduledExecutorService scheduler = Executors
++      .newScheduledThreadPool(2);
++
++  private long outdatedThreshold;
++  private long refreshTime;
++
++  @Inject
++  UDPPacemaker(@Self Peer self, PeerRegistry peerRegistry,
++      UDPMessageSender udpMessageSender, UDPMessageReceiver udpMessageReceiver,
++      @OutdatedThreshold long outdatedThreshold) {
++    this.self = self;
++    this.peerRegistry = peerRegistry;
++    this.udpMessageSender = udpMessageSender;
++
++    this.outdatedThreshold = outdatedThreshold;
++    this.refreshTime = outdatedThreshold / 10;
++
++    peerRegistry.addListener(this);
++    udpMessageReceiver.addListener(this);
++  }
++
++  public void addListener(Listener listener) {
++    listeners.add(listener);
++  }
++
++  public void removeListener(Listener listener) {
++    listeners.remove(listener);
++  }
++
++  @Override
++  public void start() {
++    scheduler.scheduleWithFixedDelay(new HeartBeatSender(), 0, refreshTime,
++        TimeUnit.MILLISECONDS);
++    scheduler.execute(new HeartBeatChecker());
++  }
++
++
++  @Override
++  public boolean stop() {
++    scheduler.shutdown();
++    long waitTime = 20000;
++    long waitStart = System.currentTimeMillis();
++    while (true) {
++      try {
++        return scheduler.awaitTermination(waitTime, TimeUnit.MILLISECONDS);
++      } catch (InterruptedException e) {
++        waitTime -= System.currentTimeMillis() - waitStart;
++        waitStart = System.currentTimeMillis();
++        continue;
++      }
++    }
++  }
++
++  @Override
++  public void onMessage(final UDPMessage message, final Object jsonObject) {
++    activities.put(message.source.getId(), new PeerActivity(message.source,
++        System.currentTimeMillis()));
++  }
++
++  @Override
++  public void onPeerJoined(Peer peer) {
++    activities.put(peer.getId(),
++        new PeerActivity(peer, System.currentTimeMillis()));
++  }
++
++  @Override
++  public void onPeerUpdated(Peer peer) {
++    activities.put(peer.getId(),
++        new PeerActivity(peer, System.currentTimeMillis()));
++  }
++
++  @Override
++  public void onPeerLost(Peer peer) {
++    activities.remove(peer.getId());
++  }
++
++  /**
++   * Task that sends a pulse to each known peer
++   */
++  private class HeartBeatSender implements Runnable {
++    public void run() {
++      try {
++        for (Peer target : peerRegistry.getActivePeers()) {
++          udpMessageSender.submitMessage(UDPMessage.newPulse(self, target));
++        }
++      } catch (RejectedExecutionException e) {
++        log.warn("Could not queue hearbeat because server is shutting down.", e);
++      }
++    }
++  }
++
++  /**
++   * Task that checks whether messages are being received from all known peers.
++   * If a message is not received within a certain threshold an event is sent to
++   * all listeners.
++   */
++  private class HeartBeatChecker implements Runnable {
++    private long earliestPeerUpdate = Long.MAX_VALUE;
++
++    public void run() {
++      long nextRead = System.currentTimeMillis() + refreshTime;
++
++      try {
++        check();
++      } catch (Exception e) {
++        log.error("Uncaught exception", e);
++      } finally {
++        // If there is no peer then read after refreshTime otherwise read
++        // 2*refreshTime after the earliest a peer was last seen.
++        //
++        // The objective is to attempt to not read until the next write occurs.
++        // If we read when the next write is scheduled to happen it might be too
++        // early, so wait a full cycle after that to give it time to be written
++        // and read, but don't wait so long that we are way into the next cycle
++        // either.
++        if (earliestPeerUpdate < Long.MAX_VALUE) {
++          nextRead = earliestPeerUpdate;
++          while (nextRead <= System.currentTimeMillis()) {
++            nextRead += 2 * refreshTime;
++          }
++        }
++
++        schedule(nextRead - System.currentTimeMillis());
++      }
++    }
++
++    private void check() {
++      Set<Peer> outdatedStage = new HashSet<Peer>();
++
++      for (Peer peer : peerRegistry.getActivePeers()) {
++        PeerActivity activity = activities.get(peer.getId());
++        if (System.currentTimeMillis() - activity.lastSeen > outdatedThreshold) {
++          outdatedStage.add(peer);
++        } else {
++          if (activity.lastSeen < earliestPeerUpdate) {
++            earliestPeerUpdate = activity.lastSeen;
++          }
++        }
++      }
++
++      if (!outdatedStage.isEmpty()) {
++        for (Listener listener : listeners) {
++          listener.onOutdated();
++        }
++      } else {
++        for (Listener listener : listeners) {
++          listener.onAllRestored();
++        }
++      }
++
++      outdatedPeers = outdatedStage;
++    }
++
++    private void schedule(long delay) {
++      if (!scheduler.isShutdown()) {
++        scheduler.schedule(this, delay, TimeUnit.MILLISECONDS);
++      }
++    }
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/BaseRetryTime.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/BaseRetryTime.java
+new file mode 100644
+index 0000000..64b5fa1
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/BaseRetryTime.java
+@@ -0,0 +1,44 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp.config;
++
++import static java.lang.annotation.ElementType.FIELD;
++import static java.lang.annotation.ElementType.METHOD;
++import static java.lang.annotation.ElementType.PARAMETER;
++import static java.lang.annotation.RetentionPolicy.RUNTIME;
++
++import java.lang.annotation.Retention;
++import java.lang.annotation.Target;
++
++import com.google.inject.BindingAnnotation;
++
++@Retention(RUNTIME)
++@BindingAnnotation
++@Target({FIELD, PARAMETER, METHOD})
++public @interface BaseRetryTime {
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxMessageSize.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxMessageSize.java
+new file mode 100644
+index 0000000..71da3a1
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxMessageSize.java
+@@ -0,0 +1,44 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp.config;
++
++import static java.lang.annotation.ElementType.FIELD;
++import static java.lang.annotation.ElementType.METHOD;
++import static java.lang.annotation.ElementType.PARAMETER;
++import static java.lang.annotation.RetentionPolicy.RUNTIME;
++
++import java.lang.annotation.Retention;
++import java.lang.annotation.Target;
++
++import com.google.inject.BindingAnnotation;
++
++@Retention(RUNTIME)
++@BindingAnnotation
++@Target({FIELD, PARAMETER, METHOD})
++public @interface MaxMessageSize {
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxSenders.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxSenders.java
+new file mode 100644
+index 0000000..6033fd2
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxSenders.java
+@@ -0,0 +1,44 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp.config;
++
++import static java.lang.annotation.ElementType.FIELD;
++import static java.lang.annotation.ElementType.METHOD;
++import static java.lang.annotation.ElementType.PARAMETER;
++import static java.lang.annotation.RetentionPolicy.RUNTIME;
++
++import java.lang.annotation.Retention;
++import java.lang.annotation.Target;
++
++import com.google.inject.BindingAnnotation;
++
++@Retention(RUNTIME)
++@BindingAnnotation
++@Target({FIELD, PARAMETER, METHOD})
++public @interface MaxSenders {
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxTimeout.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxTimeout.java
+new file mode 100644
+index 0000000..e360357
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/MaxTimeout.java
+@@ -0,0 +1,44 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp.config;
++
++import static java.lang.annotation.ElementType.FIELD;
++import static java.lang.annotation.ElementType.METHOD;
++import static java.lang.annotation.ElementType.PARAMETER;
++import static java.lang.annotation.RetentionPolicy.RUNTIME;
++
++import java.lang.annotation.Retention;
++import java.lang.annotation.Target;
++
++import com.google.inject.BindingAnnotation;
++
++@Retention(RUNTIME)
++@BindingAnnotation
++@Target({FIELD, PARAMETER, METHOD})
++public @interface MaxTimeout {
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/ReceiveHost.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/ReceiveHost.java
+new file mode 100644
+index 0000000..11f1f91
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/ReceiveHost.java
+@@ -0,0 +1,44 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp.config;
++
++import static java.lang.annotation.ElementType.FIELD;
++import static java.lang.annotation.ElementType.METHOD;
++import static java.lang.annotation.ElementType.PARAMETER;
++import static java.lang.annotation.RetentionPolicy.RUNTIME;
++
++import java.lang.annotation.Retention;
++import java.lang.annotation.Target;
++
++import com.google.inject.BindingAnnotation;
++
++@Retention(RUNTIME)
++@BindingAnnotation
++@Target({FIELD, PARAMETER, METHOD})
++public @interface ReceiveHost {
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/ReceivePort.java b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/ReceivePort.java
+new file mode 100644
+index 0000000..97105d2
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/impl/udp/config/ReceivePort.java
+@@ -0,0 +1,44 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.impl.udp.config;
++
++import static java.lang.annotation.ElementType.FIELD;
++import static java.lang.annotation.ElementType.METHOD;
++import static java.lang.annotation.ElementType.PARAMETER;
++import static java.lang.annotation.RetentionPolicy.RUNTIME;
++
++import java.lang.annotation.Retention;
++import java.lang.annotation.Target;
++
++import com.google.inject.BindingAnnotation;
++
++@Retention(RUNTIME)
++@BindingAnnotation
++@Target({FIELD, PARAMETER, METHOD})
++public @interface ReceivePort {
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/peer/OutdatedThreshold.java b/src/main/java/com/google/gerrit/plugins/multimaster/peer/OutdatedThreshold.java
+new file mode 100644
+index 0000000..16a938b
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/peer/OutdatedThreshold.java
+@@ -0,0 +1,44 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.peer;
++
++import static java.lang.annotation.ElementType.FIELD;
++import static java.lang.annotation.ElementType.METHOD;
++import static java.lang.annotation.ElementType.PARAMETER;
++import static java.lang.annotation.RetentionPolicy.RUNTIME;
++
++import java.lang.annotation.Retention;
++import java.lang.annotation.Target;
++
++import com.google.inject.BindingAnnotation;
++
++@Retention(RUNTIME)
++@BindingAnnotation
++@Target({FIELD, PARAMETER, METHOD})
++public @interface OutdatedThreshold {
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/peer/Pacemaker.java b/src/main/java/com/google/gerrit/plugins/multimaster/peer/Pacemaker.java
+new file mode 100644
+index 0000000..9b4fff6
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/peer/Pacemaker.java
+@@ -0,0 +1,46 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.peer;
++
++
++
++public interface Pacemaker extends PeerRegistry.Listener {
++  public interface Listener {
++    public void onOutdated();
++
++    public void onAllRestored();
++  }
++
++  public void addListener(Listener listener);
++
++  public void removeListener(Listener listener);
++
++  public abstract void start();
++
++  public abstract boolean stop();
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/peer/Peer.java b/src/main/java/com/google/gerrit/plugins/multimaster/peer/Peer.java
+new file mode 100644
+index 0000000..0c37e37
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/peer/Peer.java
+@@ -0,0 +1,107 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.peer;
++
++import java.util.HashMap;
++import java.util.Map;
++
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++import com.google.common.hash.Hashing;
++import com.google.gerrit.plugins.multimaster.Json;
++
++
++public class Peer {
++  private static final Logger log = LoggerFactory.getLogger(Peer.class);
++
++  public static class Id {
++    public String string;
++
++    public Id() {
++      // TODO generate proper unique ID. This still has a chance to create
++      // colliding IDs
++      String str =
++          Long.toString(System.currentTimeMillis())
++              + Double.toString(Math.random());
++      this.string = Hashing.sha1().hashString(str).toString();
++    }
++
++    @Override
++    public String toString() {
++      return string;
++    }
++
++    @Override
++    public int hashCode() {
++      return string.hashCode();
++    }
++
++    @Override
++    public boolean equals(Object o) {
++      if (o instanceof Id) {
++        return ((Id) o).string.equals(string);
++      }
++
++      return false;
++    }
++  }
++
++  private Id id;
++  private Map<String, Json> properties;
++
++  public Peer() {
++    this.id = new Id();
++    this.properties = new HashMap<String, Json>();
++  }
++
++  public Peer(Peer.Id id, Map<String, Json> properties) {
++    this.id = id;
++    this.properties = new HashMap<String, Json>(properties);
++  }
++
++  public Id getId() {
++    return id;
++  }
++
++  public void setProperty(String key, Json value) {
++    log.info("[" + id + "] Property \"" + key + "\" set to \"" + value.string
++        + "\"");
++
++    properties.put(key, value);
++  }
++
++  public Json getProperty(String key) {
++    return properties.get(key);
++  }
++
++  @Override
++  public int hashCode() {
++    return id.hashCode();
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/peer/PeerActivity.java b/src/main/java/com/google/gerrit/plugins/multimaster/peer/PeerActivity.java
+new file mode 100644
+index 0000000..8fe4ec0
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/peer/PeerActivity.java
+@@ -0,0 +1,39 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.peer;
++
++
++public class PeerActivity {
++  public Peer peer;
++  public long lastSeen;
++
++  public PeerActivity(Peer peer, long lastSeen) {
++    this.peer = peer;
++    this.lastSeen = lastSeen;
++  }
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/peer/PeerRegistry.java b/src/main/java/com/google/gerrit/plugins/multimaster/peer/PeerRegistry.java
+new file mode 100644
+index 0000000..e1f492d
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/peer/PeerRegistry.java
+@@ -0,0 +1,86 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.peer;
++
++import java.util.Collection;
++import java.util.Set;
++
++
++public interface PeerRegistry {
++  public interface Listener {
++    public void onPeerJoined(Peer peer);
++
++    public void onPeerUpdated(Peer peer);
++
++    public void onPeerLost(Peer peer);
++  }
++
++  /**
++   * Start logic
++   */
++  abstract public void start();
++
++  /**
++   * Stop logic
++   *
++   * @return true if successful, false if timed out
++   */
++  abstract public boolean stop();
++
++  /**
++   * Add listener
++   *
++   * @param listener to add
++   */
++  public void addListener(Listener listener);
++
++  /**
++   * Remove listener
++   *
++   * @param listener to remove
++   */
++  public void removeListener(Listener listener);
++
++  /**
++   * @return the set of currently active peers
++   */
++  public Set<Peer> getActivePeers();
++
++  /**
++   * @return activities of all known peers (even if outdated)
++   */
++  public Collection<PeerActivity> getActivities();
++
++  /**
++   * Get a specific peer
++   *
++   * @param id of peer to fetch
++   * @return peer or null if peer id is uknown
++   */
++  public Peer get(Peer.Id id);
++}
+diff --git a/src/main/java/com/google/gerrit/plugins/multimaster/peer/Self.java b/src/main/java/com/google/gerrit/plugins/multimaster/peer/Self.java
+new file mode 100644
+index 0000000..d23e132
+--- /dev/null
++++ b/src/main/java/com/google/gerrit/plugins/multimaster/peer/Self.java
+@@ -0,0 +1,44 @@
++// Copyright (c) 2012, Code Aurora Forum. All rights reserved.
++//
++// Redistribution and use in source and binary forms, with or without
++// modification, are permitted provided that the following conditions are
++// met:
++// * Redistributions of source code must retain the above copyright
++// notice, this list of conditions and the following disclaimer.
++// * Redistributions in binary form must reproduce the above
++// copyright notice, this list of conditions and the following
++// disclaimer in the documentation and/or other materials provided
++// with the distribution.
++// * Neither the name of Code Aurora Forum, Inc. nor the names of its
++// contributors may be used to endorse or promote products derived
++// from this software without specific prior written permission.
++//
++// THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++// BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++// IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++
++package com.google.gerrit.plugins.multimaster.peer;
++
++import static java.lang.annotation.ElementType.FIELD;
++import static java.lang.annotation.ElementType.METHOD;
++import static java.lang.annotation.ElementType.PARAMETER;
++import static java.lang.annotation.RetentionPolicy.RUNTIME;
++
++import java.lang.annotation.Retention;
++import java.lang.annotation.Target;
++
++import com.google.inject.BindingAnnotation;
++
++@Retention(RUNTIME)
++@BindingAnnotation
++@Target({FIELD, PARAMETER, METHOD})
++public @interface Self {
++}
+-- 
+1.7.8.3
+

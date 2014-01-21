@@ -1,0 +1,111 @@
+From afc0f0017697108cc933b566ff0a19188bef14d8 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Fri, 23 Jul 2010 10:26:08 -0600
+Subject: [PATCH] Use internal templates to simplify minor formatting commands.
+
+Use internal templates in getChangeMessageThreadId, and to set
+the listId headers, and to set the fromline.  These are not
+admin editable templates (they are not in files), they simply
+make the code a bit more readable and editable at very little
+cost since we already support velocity templating in emails.
+---
+ .../com/google/gerrit/server/mail/ChangeEmail.java |   33 ++++++--------------
+ .../google/gerrit/server/mail/OutgoingEmail.java   |   24 +++++---------
+ 2 files changed, 19 insertions(+), 38 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+index 6c2e83f..3c82fc6 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+@@ -177,21 +177,17 @@ public abstract class ChangeEmail extends OutgoingEmail {
+ 
+   private void setListIdHeader() {
+     // Set a reasonable list id so that filters can be used to sort messages
+-    //
+-    final StringBuilder listid = new StringBuilder();
+-    listid.append("gerrit-");
+-    listid.append(projectName.replace('/', '-'));
+-    listid.append("@");
+-    listid.append(getGerritHost());
+-
+-    final String listidStr = listid.toString();
+-    setHeader("Mailing-List", "list " + listidStr);
+-    setHeader("List-Id", "<" + listidStr.replace('@', '.') + ">");
++    setVHeader("Mailing-List", "list $email.listId");
++    setVHeader("List-Id", "<$email.listId.replace('@', '.')>");
+     if (getSettingsUrl() != null) {
+-      setHeader("List-Unsubscribe", "<" + getSettingsUrl() + ">");
++      setVHeader("List-Unsubscribe", "<$email.settingsUrl>");
+     }
+   }
+ 
++  public String getListId() {
++    return velocify("gerrit-$projectName.replace('/', '-')@$email.gerritHost");
++  }
++
+   private void setChangeUrlHeader() {
+     final String u = getChangeUrl();
+     if (u != null) {
+@@ -247,18 +243,9 @@ public abstract class ChangeEmail extends OutgoingEmail {
+     return null;
+   }
+ 
+-  protected String getChangeMessageThreadId() {
+-    final StringBuilder r = new StringBuilder();
+-    r.append('<');
+-    r.append("gerrit");
+-    r.append('.');
+-    r.append(change.getCreatedOn().getTime());
+-    r.append('.');
+-    r.append(change.getKey().get());
+-    r.append('@');
+-    r.append(getGerritHost());
+-    r.append('>');
+-    return r.toString();
++  public String getChangeMessageThreadId() {
++    return velocify("<gerrit.${change.createdOn.time}.$change.key.get()" +
++                    "@$email.gerritHost>");
+   }
+ 
+   private void openFooter() {
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
+index 9d43289..26946c6 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
+@@ -185,24 +185,18 @@ public abstract class OutgoingEmail {
+     body = new StringBuilder();
+ 
+     if (fromId != null && args.fromAddressGenerator.isGenericAddress(fromId)) {
+-      final Account account = args.accountCache.get(fromId).getAccount();
+-      final String name = account.getFullName();
+-      final String email = account.getPreferredEmail();
+-
+-      if ((name != null && !name.isEmpty())
+-          || (email != null && !email.isEmpty())) {
+-        body.append("From");
+-        if (name != null && !name.isEmpty()) {
+-          body.append(" ").append(name);
+-        }
+-        if (email != null && !email.isEmpty()) {
+-          body.append(" <").append(email).append(">");
+-        }
+-        body.append(":\n\n");
+-      }
++      appendText(getFromLine());
+     }
+   }
+ 
++  private String getFromLine() {
++    velocityContext.put("from", args.accountCache.get(fromId).getAccount());
++    return velocify("#if ($from.fullName || $from.preferredEmail)From"+
++                    "#if ($from.fullName) $from.fullName#endif" +
++                    "#if ($from.preferredEmail) <$from.preferredEmail>#endif" +
++                    ":\n\n#endif");
++  }
++
+   protected String getGerritHost() {
+     if (getGerritUrl() != null) {
+       try {
+-- 
+1.7.1.1
+

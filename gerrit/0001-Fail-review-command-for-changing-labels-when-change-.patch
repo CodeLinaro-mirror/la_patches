@@ -1,0 +1,65 @@
+From ec9a6e443935dad61748723dfea78d3d5cb25a11 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Thu, 16 Jun 2011 18:32:22 -0600
+Subject: [PATCH] Fail review command for changing labels when change is closed
+
+If a reviewer attempts to change a review label (approval)
+after a change is closed using the ssh review command, cause
+it to fail the command and output a message.
+
+Change-Id: Ibdaf82652bb07761203e18a07c0c3306e60c21ff
+---
+ .../gerrit/server/patch/PublishComments.java       |    6 +++++-
+ .../google/gerrit/sshd/commands/ReviewCommand.java |    4 ++--
+ 2 files changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/patch/PublishComments.java b/gerrit-server/src/main/java/com/google/gerrit/server/patch/PublishComments.java
+index db297ae..244648a 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/patch/PublishComments.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/patch/PublishComments.java
+@@ -30,6 +30,7 @@ import com.google.gerrit.server.IdentifiedUser;
+ import com.google.gerrit.server.mail.CommentSender;
+ import com.google.gerrit.server.mail.EmailException;
+ import com.google.gerrit.server.project.ChangeControl;
++import com.google.gerrit.server.project.InvalidChangeOperationException;
+ import com.google.gerrit.server.project.NoSuchChangeException;
+ import com.google.gerrit.server.workflow.FunctionState;
+ import com.google.gwtjsonrpc.client.VoidResult;
+@@ -104,7 +105,8 @@ public class PublishComments implements Callable<VoidResult> {
+   }
+ 
+   @Override
+-  public VoidResult call() throws NoSuchChangeException, OrmException {
++  public VoidResult call() throws NoSuchChangeException,
++      InvalidChangeOperationException, OrmException {
+     final Change.Id changeId = patchSetId.getParentKey();
+     final ChangeControl ctl = changeControlFactory.validateFor(changeId);
+     change = ctl.getChange();
+@@ -119,6 +121,8 @@ public class PublishComments implements Callable<VoidResult> {
+     final boolean isCurrent = patchSetId.equals(change.currentPatchSetId());
+     if (isCurrent && change.getStatus().isOpen()) {
+       publishApprovals();
++    } else if (! approvals.isEmpty()) {
++      throw new InvalidChangeOperationException("Change is closed");
+     } else {
+       publishMessageOnly();
+     }
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java
+index 93b2ba5..729fb57 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ReviewCommand.java
+@@ -222,9 +222,9 @@ public class ReviewCommand extends BaseCommand {
+       }
+     }
+ 
+-    publishCommentsFactory.create(patchSetId, changeComment, aps).call();
+-
+     try {
++      publishCommentsFactory.create(patchSetId, changeComment, aps).call();
++
+       if (abandonChange) {
+         if (changeControl.canAbandon()) {
+           ChangeUtil.abandon(patchSetId, currentUser, changeComment, db,
+-- 
+1.7.3.1
+

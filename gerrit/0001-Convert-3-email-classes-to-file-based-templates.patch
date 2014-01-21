@@ -1,0 +1,695 @@
+From 50f137dc6fd4a366fab94e4705e5db8ad58e0fea Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Wed, 21 Jul 2010 11:46:21 -0600
+Subject: [PATCH] Convert 3 email classes to file based templates.
+
+Convert the NewChange, RegisterNewEmail and ReplacePatchSet
+classes to use file based velocity templates which an admin
+may edit.  Factor out getChangeDetail and getReviewersNames
+from formatChangeDetail and formatSalutation respectively
+to enable this.
+---
+ .../gerrit/pgm/init/SitePathInitializer.java       |   13 +++
+ .../com/google/gerrit/server/mail/ChangeEmail.java |   25 +++--
+ .../google/gerrit/server/mail/NewChangeSender.java |   71 ++------------
+ .../google/gerrit/server/mail/OutgoingEmail.java   |    4 +-
+ .../gerrit/server/mail/RegisterNewEmailSender.java |   33 +------
+ .../gerrit/server/mail/ReplacePatchSetSender.java  |   74 ++-------------
+ .../com/google/gerrit/server/mail/NewChange.vm     |  103 ++++++++++++++++++++
+ .../google/gerrit/server/mail/RegisterNewEmail.vm  |   82 ++++++++++++++++
+ .../google/gerrit/server/mail/ReplacePatchSet.vm   |  103 ++++++++++++++++++++
+ 9 files changed, 334 insertions(+), 174 deletions(-)
+ create mode 100644 gerrit-server/src/main/resources/com/google/gerrit/server/mail/NewChange.vm
+ create mode 100644 gerrit-server/src/main/resources/com/google/gerrit/server/mail/RegisterNewEmail.vm
+ create mode 100644 gerrit-server/src/main/resources/com/google/gerrit/server/mail/ReplacePatchSet.vm
+
+diff --git a/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java b/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java
+index 74e7548..e9ccf13 100644
+--- a/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java
++++ b/gerrit-pgm/src/main/java/com/google/gerrit/pgm/init/SitePathInitializer.java
+@@ -25,11 +25,13 @@ import static com.google.gerrit.pgm.init.InitUtil.version;
+ import com.google.gerrit.pgm.Init;
+ import com.google.gerrit.pgm.util.ConsoleUI;
+ import com.google.gerrit.server.config.SitePaths;
++import com.google.gerrit.server.mail.OutgoingEmail;
+ import com.google.inject.Binding;
+ import com.google.inject.Inject;
+ import com.google.inject.Injector;
+ import com.google.inject.TypeLiteral;
+ 
++import java.io.File;
+ import java.util.ArrayList;
+ import java.util.List;
+ 
+@@ -66,6 +68,7 @@ public class SitePathInitializer {
+     mkdir(site.etc_dir);
+     mkdir(site.lib_dir);
+     mkdir(site.logs_dir);
++    mkdir(site.mail_dir);
+     mkdir(site.static_dir);
+ 
+     for (InitStep step : steps) {
+@@ -82,11 +85,21 @@ public class SitePathInitializer {
+     extract(site.gerrit_sh, Init.class, "gerrit.sh");
+     chmod(0755, site.gerrit_sh);
+ 
++    extractMailExample("NewChange.vm");
++    extractMailExample("RegisterNewEmail.vm");
++    extractMailExample("ReplacePatchSet.vm");
++
+     if (!ui.isBatch()) {
+       System.err.println();
+     }
+   }
+ 
++  private void extractMailExample (String orig) throws Exception {
++    File ex = new File(site.mail_dir, "/" + orig + ".example");
++    extract(ex, OutgoingEmail.class, orig);
++    chmod(0444, ex);
++  }
++
+   private static List<InitStep> stepsOf(final Injector injector) {
+     final ArrayList<InitStep> r = new ArrayList<InitStep>();
+     for (Binding<InitStep> b : all(injector)) {
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+index fd31f16..41ad645 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ChangeEmail.java
+@@ -227,7 +227,7 @@ public abstract class ChangeEmail extends OutgoingEmail {
+   }
+ 
+   /** Get a link to the change; null if the server doesn't know its own address. */
+-  protected String getChangeUrl() {
++  public String getChangeUrl() {
+     if (change != null && getGerritUrl() != null) {
+       final StringBuilder r = new StringBuilder();
+       r.append(getGerritUrl());
+@@ -268,7 +268,7 @@ public abstract class ChangeEmail extends OutgoingEmail {
+   }
+ 
+   /** Get the text of the "cover letter", from {@link ChangeMessage}. */
+-  protected String getCoverLetter() {
++  public String getCoverLetter() {
+     if (changeMessage != null) {
+       final String txt = changeMessage.getMessage();
+       if (txt != null) {
+@@ -280,23 +280,30 @@ public abstract class ChangeEmail extends OutgoingEmail {
+ 
+   /** Format the change message and the affected file list. */
+   protected void formatChangeDetail() {
++    appendText(getChangeDetail());
++  }
++
++  /** Create the change message and the affected file list. */
++  public String getChangeDetail() {
++    StringBuilder detail = new StringBuilder();
++
+     if (patchSetInfo != null) {
+-      appendText(patchSetInfo.getMessage().trim());
+-      appendText("\n");
++      detail.append(patchSetInfo.getMessage().trim() + "\n");
+     } else {
+-      appendText(change.getSubject().trim());
+-      appendText("\n");
++      detail.append(change.getSubject().trim() + "\n");
+     }
+ 
+     if (patchSet != null) {
+-      appendText("---\n");
++      detail.append("---\n");
+       for (PatchListEntry p : getPatchList().getPatches()) {
+-        appendText(p.getChangeType().getCode() + " " + p.getNewName() + "\n");
++        detail.append(p.getChangeType().getCode() + " " + p.getNewName() + "\n");
+       }
+-      appendText("\n");
++      detail.append("\n");
+     }
++    return detail.toString();
+   }
+ 
++
+   /** Get the patch list corresponding to this patch set. */
+   protected PatchList getPatchList() {
+     if (patchSet != null) {
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/NewChangeSender.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/NewChangeSender.java
+index dc8c2c2..0340961 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/NewChangeSender.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/NewChangeSender.java
+@@ -20,6 +20,7 @@ import com.google.gerrit.server.ssh.SshInfo;
+ 
+ import com.jcraft.jsch.HostKey;
+ 
++import java.util.ArrayList;
+ import java.util.Collection;
+ import java.util.HashSet;
+ import java.util.Iterator;
+@@ -58,73 +59,15 @@ public abstract class NewChangeSender extends ChangeEmail {
+ 
+   @Override
+   protected void formatChange() {
+-    formatSalutation();
+-    formatChangeDetail();
+-
+-    appendText("\n");
+-    appendText("  " + getPullUrl() + "\n");
++    appendText(velocifyFile("NewChange.vm"));
+   }
+ 
+-  private void formatSalutation() {
+-    final String changeUrl = getChangeUrl();
+-
+-    if (reviewers.isEmpty()) {
+-      formatDest();
+-      if (changeUrl != null) {
+-        appendText("\n");
+-        appendText("    " + changeUrl + "\n");
+-        appendText("\n");
+-      }
+-      appendText("\n");
+-
+-    } else {
+-      appendText("Hello");
+-      for (final Iterator<Account.Id> i = reviewers.iterator(); i.hasNext();) {
+-        appendText(" ");
+-        appendText(getNameFor(i.next()));
+-        appendText(",");
+-      }
+-      appendText("\n");
+-      appendText("\n");
+-
+-      appendText("I'd like you to do a code review.");
+-      if (changeUrl != null) {
+-        appendText("  Please visit\n");
+-        appendText("\n");
+-        appendText("    " + changeUrl + "\n");
+-        appendText("\n");
+-        appendText("to review the following change:\n");
+-      }
+-      appendText("\n");
+-
+-      formatDest();
+-      appendText("\n");
++  public List<String> getReviewersNames() {
++    List<String> names = new ArrayList<String>();
++    for (final Iterator<Account.Id> i = reviewers.iterator(); i.hasNext();) {
++      names.add(getNameFor(i.next()));
+     }
+-  }
+-
+-  private void formatDest() {
+-    appendText("Change " + change.getKey().abbreviate());
+-    appendText(" for ");
+-    appendText(change.getDest().getShortName());
+-    appendText(" in ");
+-    appendText(projectName);
+-    appendText(":\n");
+-  }
+-
+-  private String getPullUrl() {
+-    final String host = getSshHost();
+-    if (host == null) {
+-      return "";
+-    }
+-
+-    final StringBuilder r = new StringBuilder();
+-    r.append("git pull ssh://");
+-    r.append(host);
+-    r.append("/");
+-    r.append(projectName);
+-    r.append(" ");
+-    r.append(patchSet.getRefName());
+-    return r.toString();
++    return names;
+   }
+ 
+   public String getSshHost() {
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
+index 27c45a3..9aa7351 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/OutgoingEmail.java
+@@ -190,7 +190,7 @@ public abstract class OutgoingEmail {
+     }
+   }
+ 
+-  protected String getGerritHost() {
++  public String getGerritHost() {
+     if (getGerritUrl() != null) {
+       try {
+         return new URL(getGerritUrl()).getHost();
+@@ -216,7 +216,7 @@ public abstract class OutgoingEmail {
+     return null;
+   }
+ 
+-  protected String getGerritUrl() {
++  public String getGerritUrl() {
+     return args.urlProvider.get();
+   }
+ 
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/RegisterNewEmailSender.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/RegisterNewEmailSender.java
+index 9b201fd..31c8b68 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/RegisterNewEmailSender.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/RegisterNewEmailSender.java
+@@ -53,38 +53,7 @@ public class RegisterNewEmailSender extends OutgoingEmail {
+ 
+   @Override
+   protected void format() {
+-    final StringBuilder url = new StringBuilder();
+-    url.append(getGerritUrl());
+-    url.append("#VE,");
+-    url.append(getEmailRegistrationToken());
+-
+-    appendText("Welcome to Gerrit Code Review at ");
+-    appendText(getGerritHost());
+-    appendText(".\n");
+-
+-    appendText("\n");
+-    appendText("To add a verified email address to your user account, please\n");
+-    appendText("click on the following link:\n");
+-    appendText("\n");
+-    appendText(url.toString());
+-    appendText("\n");
+-
+-    appendText("\n");
+-    appendText("If you have received this mail in error,"
+-        + " you do not need to take any\n");
+-    appendText("action to cancel the account."
+-        + " The account will not be activated, and\n");
+-    appendText("you will not receive any further emails.\n");
+-
+-    appendText("\n");
+-    appendText("If clicking the link above does not work,"
+-        + " copy and paste the URL in a\n");
+-    appendText("new browser window instead.\n");
+-
+-    appendText("\n");
+-    appendText("This is a send-only email address."
+-        + "  Replies to this message will not\n");
+-    appendText("be read or answered.\n");
++    appendText(velocifyFile("RegisterNewEmail.vm"));
+   }
+ 
+   public String getEmailRegistrationToken() {
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java
+index 841aa35..148104b 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/mail/ReplacePatchSetSender.java
+@@ -22,6 +22,7 @@ import com.google.inject.assistedinject.Assisted;
+ 
+ import com.jcraft.jsch.HostKey;
+ 
++import java.util.ArrayList;
+ import java.util.Collection;
+ import java.util.HashSet;
+ import java.util.Iterator;
+@@ -68,76 +69,15 @@ public class ReplacePatchSetSender extends ReplyToChangeSender {
+ 
+   @Override
+   protected void formatChange() {
+-    formatSalutation();
+-    formatChangeDetail();
+-
+-    appendText("\n");
+-    appendText("  " + getPullUrl() + "\n");
++    appendText(velocifyFile("ReplacePatchSet.vm"));
+   }
+ 
+-  private void formatSalutation() {
+-    final String changeUrl = getChangeUrl();
+-
+-    if (reviewers.isEmpty()) {
+-      formatDest();
+-      if (changeUrl != null) {
+-        appendText("\n");
+-        appendText("    " + changeUrl + "\n");
+-        appendText("\n");
+-      }
+-      appendText("\n");
+-
+-    } else {
+-      appendText("Hello");
+-      for (final Iterator<Account.Id> i = reviewers.iterator(); i.hasNext();) {
+-        appendText(" ");
+-        appendText(getNameFor(i.next()));
+-        appendText(",");
+-      }
+-      appendText("\n");
+-      appendText("\n");
+-
+-      appendText("I'd like you to reexamine change "
+-          + change.getKey().abbreviate() + ".");
+-      if (changeUrl != null) {
+-        appendText("  Please visit\n");
+-        appendText("\n");
+-        appendText("    " + changeUrl + "\n");
+-        appendText("\n");
+-        appendText("to look at patch set " + patchSet.getPatchSetId());
+-        appendText(":\n");
+-      }
+-      appendText("\n");
+-
+-      formatDest();
+-      appendText("\n");
++  public List<String> getReviewersNames() {
++    List<String> names = new ArrayList<String>();
++    for (final Iterator<Account.Id> i = reviewers.iterator(); i.hasNext();) {
++      names.add(getNameFor(i.next()));
+     }
+-  }
+-
+-  private void formatDest() {
+-    appendText("Change " + change.getKey().abbreviate());
+-    appendText(" (patch set " + patchSet.getPatchSetId() + ")");
+-    appendText(" for ");
+-    appendText(change.getDest().getShortName());
+-    appendText(" in ");
+-    appendText(projectName);
+-    appendText(":\n");
+-  }
+-
+-  private String getPullUrl() {
+-    final String host = getSshHost();
+-    if (host == null) {
+-      return "";
+-    }
+-
+-    final StringBuilder r = new StringBuilder();
+-    r.append("git pull ssh://");
+-    r.append(host);
+-    r.append("/");
+-    r.append(projectName);
+-    r.append(" ");
+-    r.append(patchSet.getRefName());
+-    return r.toString();
++    return names;
+   }
+ 
+   public String getSshHost() {
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/NewChange.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/NewChange.vm
+new file mode 100644
+index 0000000..63e1995
+--- /dev/null
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/NewChange.vm
+@@ -0,0 +1,103 @@
++## Copyright (c) 2010, Code Aurora Forum. All rights reserved.
++##
++## Redistribution and use in source and binary forms, with or without
++## modification, are permitted provided that the following conditions are
++## met:
++##     * Redistributions of source code must retain the above copyright
++##       notice, this list of conditions and the following disclaimer.
++##     * Redistributions in binary form must reproduce the above
++##       copyright notice, this list of conditions and the following
++##       disclaimer in the documentation and/or other materials provided
++##       with the distribution.
++##     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++##       contributors may be used to endorse or promote products derived
++##       from this software without specific prior written permission.
++##
++## THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++## WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++## MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++## ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++## BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++## CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++## SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++## BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++## WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++## OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++## IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++##
++##
++## Template Type:
++## -------------
++## This is a velocity template, see: http://velocity.apache.org/
++##
++## Template File Names and extensions:
++## ----------------------------------
++## Gerrit will use templates ending in ".vm" but will ignore templates ending
++## in ".vm.example".  If a .vm template does not exist, the default internal
++## gerrit template which is the same as the .vm.example will be used.  If you
++## want to override the default template, copy the .vm.exmaple file to a .vm
++## file and edit it appropriately.
++##
++## Template Purposes;
++## -----------------
++## The NewChange.vm template will determine the contents of the email related
++## to a user submitting a new change for review (see also ChangeSubject.vm and
++## ChangeFooter.vm).
++##
++## Template Resources:
++## ------------------
++## Writting templates for gerrit emails is likely to require some basic
++## knowledge of the class structure to be useful, so browsing the source
++## code might be necessary.  All outgoing emails have the following
++## variables available to them:
++##
++##  $email          a reference to the class constructing the current email.
++##                  With this reference it is possible to call any public
++##                  method on the email class.
++##
++##  $messageClass   a String containing the messageClass
++##
++##  StringUtils     a reference to the apaache StringUtils class.  This can
++##                  be very usefull for formatting strings.
++##
++##
++## All change related emails have the following additional variables available
++## to them:
++##
++##  $change         a reference to the current change object
++##
++##  $branch         a reference to the bracn of this change
++##
++##  $projectName    the name of this change's project
++##
++##  $patchSet       a reference to the current patchSet
++##
++##  $patchSetInfo   a reference to the current patchSetInfo
++##
++## Of particular interest to this class is likely:
++##
++##  $email.reviewersNames  a list of the names of each reviewer.
++##
++#set ($destination = "Change $change.key.abbreviate() for $change.dest.shortName in $projectName:")
++#if($email.reviewersNames)
++Hello $StringUtils.join($email.reviewersNames, ' ,'),
++
++I'd like you to do a code review.#if($email.changeUrl)  Please visit
++
++    $email.changeUrl
++
++to review the following change:
++#end
++
++$destination
++#else
++$destination
++#if($email.changeUrl)
++
++    $email.changeUrl
++
++#end
++#end
++
++$email.changeDetail
++  git pull ssh://$email.sshHost/$projectName $patchSet.refName
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/RegisterNewEmail.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/RegisterNewEmail.vm
+new file mode 100644
+index 0000000..f5e7205
+--- /dev/null
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/RegisterNewEmail.vm
+@@ -0,0 +1,82 @@
++## Copyright (c) 2010, Code Aurora Forum. All rights reserved.
++##
++## Redistribution and use in source and binary forms, with or without
++## modification, are permitted provided that the following conditions are
++## met:
++##     * Redistributions of source code must retain the above copyright
++##       notice, this list of conditions and the following disclaimer.
++##     * Redistributions in binary form must reproduce the above
++##       copyright notice, this list of conditions and the following
++##       disclaimer in the documentation and/or other materials provided
++##       with the distribution.
++##     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++##       contributors may be used to endorse or promote products derived
++##       from this software without specific prior written permission.
++##
++## THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++## WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++## MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++## ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++## BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++## CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++## SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++## BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++## WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++## OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++## IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++##
++##
++## Template Type:
++## -------------
++## This is a velocity template, see: http://velocity.apache.org/
++##
++## Template File Names and extensions:
++## ----------------------------------
++## Gerrit will use templates ending in ".vm" but will ignore templates ending
++## in ".vm.example".  If a .vm template does not exist, the default internal
++## gerrit template which is the same as the .vm.example will be used.  If you
++## want to override the default template, copy the .vm.exmaple file to a .vm
++## file and edit it appropriately.
++##
++## Template Purposes;
++## -----------------
++## The RegisterNewEmail.vm template will determine the contents of the email
++## related to registering new email accounts.
++##
++## Template Resources:
++## ------------------
++## Writting templates for gerrit emails is likely to require some basic
++## knowledge of the class structure to be useful, so browsing the source
++## code might be necessary.  All outgoing emails have the following
++## variables available to them:
++##
++##  $email          a reference to the class constructing the current email.
++##                  With this reference it is possible to call any public
++##                  method on the email class.
++##
++##  $messageClass   a String containing the messageClass
++##
++##  StringUtils     a reference to the apaache StringUtils class.  This can
++##                  be very usefull for formatting strings.
++##
++## Of particular interest to this class is likely:
++##
++##  $email.emailRegistrationToken  an authorization token that will be
++##                                 recognized by gerritHost
++##
++Welcome to Gerrit Code Review at ${email.gerritHost}.
++
++To add a verified email address to your user account, please
++click on the following link:
++
++$email.gerritUrl#VE,$email.emailRegistrationToken
++
++If you have received this mail in error, you do not need to take any
++action to cancel the account.  The account will not be activated, and
++you will not receive any further emails.
++
++If clicking the link above does not work, copy and paste the URL in a
++new browser window instead.
++
++This is a send-only email address.  Replies to this message will not
++be read or answered.
+diff --git a/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ReplacePatchSet.vm b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ReplacePatchSet.vm
+new file mode 100644
+index 0000000..a14a6cf
+--- /dev/null
++++ b/gerrit-server/src/main/resources/com/google/gerrit/server/mail/ReplacePatchSet.vm
+@@ -0,0 +1,103 @@
++## Copyright (c) 2010, Code Aurora Forum. All rights reserved.
++##
++## Redistribution and use in source and binary forms, with or without
++## modification, are permitted provided that the following conditions are
++## met:
++##     * Redistributions of source code must retain the above copyright
++##       notice, this list of conditions and the following disclaimer.
++##     * Redistributions in binary form must reproduce the above
++##       copyright notice, this list of conditions and the following
++##       disclaimer in the documentation and/or other materials provided
++##       with the distribution.
++##     * Neither the name of Code Aurora Forum, Inc. nor the names of its
++##       contributors may be used to endorse or promote products derived
++##       from this software without specific prior written permission.
++##
++## THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
++## WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
++## MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT
++## ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS
++## BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
++## CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
++## SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
++## BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
++## WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
++## OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
++## IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++##
++##
++## Template Type:
++## -------------
++## This is a velocity template, see: http://velocity.apache.org/
++##
++## Template File Names and extensions:
++## ----------------------------------
++## Gerrit will use templates ending in ".vm" but will ignore templates ending
++## in ".vm.example".  If a .vm template does not exist, the default internal
++## gerrit template which is the same as the .vm.example will be used.  If you
++## want to override the default template, copy the .vm.exmaple file to a .vm
++## file and edit it appropriately.
++##
++## Template Purposes;
++## -----------------
++## The ReplacePatchSer.vm template will determine the contents of the email
++## related to a user submitting a new patchset for a change (see also
++## ChangeSubject.vm and ChangeFooter.vm).
++##
++## Template Resources:
++## ------------------
++## Writting templates for gerrit emails is likely to require some basic
++## knowledge of the class structure to be useful, so browsing the source
++## code might be necessary.  All outgoing emails have the following
++## variables available to them:
++##
++##  $email          a reference to the class constructing the current email.
++##                  With this reference it is possible to call any public
++##                  method on the email class.
++##
++##  $messageClass   a String containing the messageClass
++##
++##  StringUtils     a reference to the apaache StringUtils class.  This can
++##                  be very usefull for formatting strings.
++##
++##
++## All change related emails have the following additional variables available
++## to them:
++##
++##  $change         a reference to the current change object
++##
++##  $branch         a reference to the bracn of this change
++##
++##  $projectName    the name of this change's project
++##
++##  $patchSet       a reference to the current patchSet
++##
++##  $patchSetInfo   a reference to the current patchSetInfo
++##
++## Of particular interest to this class is likely:
++##
++##  $email.reviewersNames  a list of the names of each reviewer.
++##
++#set ($destination = "Change $change.key.abbreviate() (patch set $patchSet.patchSetId) for $change.dest.shortName in $projectName:")
++#if($email.reviewersNames)
++Hello $StringUtils.join($email.reviewersNames, ' ,'),
++
++I'd like you to reexamine change ${change.key.abbreviate()}.#if($email.changeUrl)  Please visit
++
++    $email.changeUrl
++
++to look at patch set $patchSet.patchSetId
++#end
++
++$destination
++#else
++$destination
++#if($email.changeUrl)
++
++    $email.changeUrl
++
++#end
++#end
++
++$email.changeDetail
++  git pull ssh://$email.sshHost/$projectName $patchSet.refName
+-- 
+1.7.1.1
+

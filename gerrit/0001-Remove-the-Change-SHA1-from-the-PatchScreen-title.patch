@@ -1,0 +1,57 @@
+From d8d842afa6ae4344fb5f79afc321e0ee76ac22fd Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Fri, 10 Jun 2011 11:31:11 -0600
+Subject: [PATCH] Remove the 'Change SHA1:' from the PatchScreen title
+
+This extra info in the title is not useful so removing
+it makes the PatchScreen less cluttered by default.
+
+Change-Id: Ib760287410e718eb023005c13a456d875b9e5edc
+---
+ .../gerrit/client/patches/PatchMessages.java       |    2 --
+ .../gerrit/client/patches/PatchMessages.properties |    3 ---
+ .../google/gerrit/client/patches/PatchScreen.java  |    4 ++--
+ 3 files changed, 2 insertions(+), 7 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchMessages.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchMessages.java
+index d48c2f8..0f4adab 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchMessages.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchMessages.java
+@@ -19,8 +19,6 @@ import com.google.gwt.i18n.client.Messages;
+ import java.util.Date;
+ 
+ public interface PatchMessages extends Messages {
+-  String patchWindowTitle(String changeId, String file);
+-  String patchPageTitle(String changeId, String path);
+   String patchSkipRegion(@PluralCount int lineCnt);
+   String draftSaved(Date when);
+ }
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchMessages.properties b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchMessages.properties
+index 961b0e5..9d7a2fb 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchMessages.properties
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchMessages.properties
+@@ -1,6 +1,3 @@
+-patchWindowTitle = Change {0}: {1}
+-patchPageTitle = Change {0}: {1}
+-
+ patchSkipRegion = (... skipping {0} common lines ...)
+ 
+ draftSaved = Draft saved at {0,time,short}
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
+index df523b9..1792758 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
+@@ -395,8 +395,8 @@ public abstract class PatchScreen extends Screen implements
+       fileName = fileName.substring(last + 1);
+     }
+ 
+-    setWindowTitle(PatchUtil.M.patchWindowTitle(cid.abbreviate(), fileName));
+-    setPageTitle(PatchUtil.M.patchPageTitle(cid.abbreviate(), path));
++    setWindowTitle(fileName);
++    setPageTitle(path);
+ 
+     if (idSideB.equals(patchSetDetail.getPatchSet().getId())) {
+       commitMessageBlock.setVisible(true);
+-- 
+1.7.4.1
+

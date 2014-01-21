@@ -1,0 +1,1919 @@
+From 4a272250f9326f641b958cb71490a16970afb190 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Wed, 27 Apr 2011 14:42:18 -0600
+Subject: [PATCH] Enable multiple parent project inheritance
+
+Add a new relation object ProjectParent and migrate
+the old parent information to this new relation.  Update
+the Project object to have plural get/setParents(), and
+update all users to be able to handle multiple parents
+for a project.  Rename the admin command set-project-parent
+to the plural version, also update the command to be able
+to clear, set, add and remove project parents.  Allow
+multiple parents to be created on project creation. Updated
+docs for these commands.
+
+Enhance RefControlTest to be able to make projects inherit
+from each other (instead of simulating it by setting the
+inheritedRights on ProjectStates).  Add tests to verify
+inheritance setup, to test grandparents and the wildProject,
+and to test multiple parent inheritance.
+
+Bug: issue 710
+Change-Id: Iee4919e40a6aaff63a01b0b680544971c53d23a7
+---
+ Documentation/cmd-create-project.txt               |    4 +-
+ Documentation/cmd-set-project-parent.txt           |   51 ---
+ Documentation/cmd-set-project-parents.txt          |   74 ++++
+ .../gerrit/client/admin/ProjectAccessScreen.java   |   41 ++-
+ .../gerrit/httpd/rpc/project/VisibleProjects.java  |    6 +
+ .../java/com/google/gerrit/reviewdb/Project.java   |   19 +-
+ .../com/google/gerrit/reviewdb/ProjectParent.java  |  107 ++++++
+ .../gerrit/reviewdb/ProjectParentAccess.java       |   31 ++
+ .../java/com/google/gerrit/reviewdb/ReviewDb.java  |    3 +
+ .../gerrit/server/project/ProjectCacheImpl.java    |    1 +
+ .../google/gerrit/server/project/ProjectState.java |  160 ++++++----
+ .../google/gerrit/server/project/ProjectUtil.java  |  108 ++++++
+ .../google/gerrit/server/schema/SchemaVersion.java |    2 +-
+ .../com/google/gerrit/server/schema/Schema_53.java |   62 ++++
+ .../gerrit/server/project/RefControlTest.java      |  360 ++++++++++++++++++--
+ .../gerrit/sshd/commands/AdminSetParent.java       |  138 --------
+ .../gerrit/sshd/commands/AdminSetParents.java      |  161 +++++++++
+ .../google/gerrit/sshd/commands/CreateProject.java |   30 ++-
+ .../google/gerrit/sshd/commands/ListProjects.java  |   32 +--
+ .../gerrit/sshd/commands/MasterCommandModule.java  |    2 +-
+ 20 files changed, 1064 insertions(+), 328 deletions(-)
+ delete mode 100644 Documentation/cmd-set-project-parent.txt
+ create mode 100644 Documentation/cmd-set-project-parents.txt
+ create mode 100644 gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ProjectParent.java
+ create mode 100644 gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ProjectParentAccess.java
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectUtil.java
+ create mode 100644 gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_53.java
+ delete mode 100644 gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/AdminSetParent.java
+ create mode 100644 gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/AdminSetParents.java
+
+diff --git a/Documentation/cmd-create-project.txt b/Documentation/cmd-create-project.txt
+index 71c0d1f..b7213bf 100644
+--- a/Documentation/cmd-create-project.txt
++++ b/Documentation/cmd-create-project.txt
+@@ -12,7 +12,7 @@ SYNOPSIS
+  --name <NAME> \
+  [--branch <REF>] \
+  [\--owner <GROUP> ...] \
+- [\--parent <NAME>] \
++ [\--parent <NAME> ...] \
+  [\--permissions-only] \
+  [\--description <DESC>] \
+  [\--submit-type <TYPE>] \
+@@ -67,7 +67,7 @@ repository.*.createGroup will be used. If they don't exist,
+ `Administrators` will be used.
+ 
+ \--parent::
+-	Name of the parent project to inherit access rights
++	Name of the parent project(s) to inherit access rights
+ 	through. If not specified, the parent is set to the default
+ 	project `\-- All Projects \--`.
+ 
+diff --git a/Documentation/cmd-set-project-parent.txt b/Documentation/cmd-set-project-parent.txt
+deleted file mode 100644
+index 699d76f..0000000
+--- a/Documentation/cmd-set-project-parent.txt
++++ /dev/null
+@@ -1,51 +0,0 @@
+-gerrit set-project-parent
+-=========================
+-
+-NAME
+-----
+-gerrit set-project-parent - Change the project permissions are inherited from.
+-
+-SYNOPSIS
+---------
+-[verse]
+-'ssh' -p <port> <host> 'gerrit set-project-parent' \
+-[\--parent <NAME>] \
+-<NAME> ...
+-
+-DESCRIPTION
+------------
+-Changes the project that permissions are inherited through.
+-Every project inherits permissions from another project, by
+-default this is `\-- All Projects \--`.  This command sets
+-the project to inherit through another one.
+-
+-ACCESS
+-------
+-Caller must be a member of the privileged 'Administrators' group.
+-
+-SCRIPTING
+----------
+-This command is intended to be used in scripts.
+-
+-OPTIONS
+--------
+-\--parent::
+-	Name of the parent to inherit through.	If not specified,
+-	the parent is set back to the default `\-- All Projects \--`.
+-
+-EXAMPLES
+---------
+-Configure `kernel/omap` to inherit permissions from `kernel/common`:
+-
+-====
+-	$ ssh -p 29418 review.example.com gerrit set-project-parent --parent kernel/common kernel/omap
+-====
+-
+-SEE ALSO
+---------
+-
+-* link:access-control.html[Access Controls]
+-
+-GERRIT
+-------
+-Part of link:index.html[Gerrit Code Review]
+diff --git a/Documentation/cmd-set-project-parents.txt b/Documentation/cmd-set-project-parents.txt
+new file mode 100644
+index 0000000..0bdbe14
+--- /dev/null
++++ b/Documentation/cmd-set-project-parents.txt
+@@ -0,0 +1,74 @@
++gerrit set-project-parents
++==========================
++
++NAME
++----
++gerrit set-project-parents - Changes the project(s) that permissions are inherited through.
++
++SYNOPSIS
++--------
++[verse]
++'ssh' -p <port> <host> 'gerrit set-project-parents' \
++[\--clear] [\--set <NAME>] [\--remove <NAME>] [\--add <NAME>] \
++<NAME> ...
++
++DESCRIPTION
++-----------
++Changes the project(s) that permissions are inherited through.
++Every project inherits permissions from at least one other project,
++by default this is `\-- All Projects \--`.  This command sets
++the project to inherit through other projects.  Options for this
++command are processed one project at a time in the following order:
++`--clear`, then `--set`, then `--delete`, and finally `--add`.  All
++the operations will modify every project.  After altering the
++parent set of a project, if the set is to become null for that
++project, the parent set will be reset to `\-- All Projects \--`.
++
++ACCESS
++------
++Caller must be a member of the privileged 'Administrators' group.
++
++SCRIPTING
++---------
++This command is intended to be used in scripts.
++
++OPTIONS
++-------
++\--clear::
++  Clear all project parents, the parent is set back to the
++  default `\-- All Projects \--`.
++
++\--set::
++  Name of the parent(s) to inherit through.  This is an exact
++  list.  Current parents not in the list will be deleted.
++
++\--remove::
++  Name of the parent(s) to no longer inherit through.
++
++\--parent::
++  Name of the parent(s) to additionally inherit through.
++
++EXAMPLES
++--------
++Configure `kernel/omap` to inherit permissions only from `kernel/common`:
++
++====
++	$ ssh -p 29418 review.example.com gerrit set-project-parents --set kernel/common kernel/omap
++====
++
++
++Configure `kernel/omap` to no longer inherit permissions from `kernel/common`,
++but to additionally inherit permissions from kernel/msm:
++
++====
++  $ ssh -p 29418 review.example.com gerrit set-project-parents -r kernel/common -a kernel/msm kernel/omap
++====
++
++SEE ALSO
++--------
++
++* link:access-control.html[Access Controls]
++
++GERRIT
++------
++Part of link:index.html[Gerrit Code Review]
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
+index eb74aa8..361403e 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/admin/ProjectAccessScreen.java
+@@ -35,6 +35,8 @@ import com.google.gwt.event.logical.shared.ValueChangeEvent;
+ import com.google.gwt.event.logical.shared.ValueChangeHandler;
+ import com.google.gwt.user.client.ui.Button;
+ import com.google.gwt.user.client.ui.CheckBox;
++import com.google.gwt.user.client.ui.Composite;
++import com.google.gwt.user.client.ui.FlowPanel;
+ import com.google.gwt.user.client.ui.Grid;
+ import com.google.gwt.user.client.ui.Panel;
+ import com.google.gwt.user.client.ui.VerticalPanel;
+@@ -45,10 +47,31 @@ import com.google.gwtexpui.safehtml.client.SafeHtmlBuilder;
+ import java.util.HashSet;
+ import java.util.List;
+ import java.util.Map;
++import java.util.Set;
+ 
+ public class ProjectAccessScreen extends ProjectScreen {
++  private class ParentNames extends Composite {
++    FlowPanel fp = new FlowPanel();
++    public ParentNames() {
++      setWidget(fp);
++    }
++
++    public void setParents(Set<Project.NameKey> parents) {
++      fp.clear();
++
++      if (parents.isEmpty()) {
++        final Project.NameKey wildKey = Gerrit.getConfig().getWildProject();
++        fp.add(new Hyperlink(wildKey.get(), Dispatcher.toProjectAdmin(wildKey, ACCESS)));
++      } else {
++        for (final Project.NameKey p : parents) {
++          fp.add(new Hyperlink(p.get(), Dispatcher.toProjectAdmin(p, ACCESS)));
++        }
++      }
++    }
++  }
++
+   private Panel parentPanel;
+-  private Hyperlink parentName;
++  private ParentNames parentNames;
+ 
+   private RightsTable rights;
+   private Button delRight;
+@@ -84,7 +107,7 @@ public class ProjectAccessScreen extends ProjectScreen {
+   }
+ 
+   private void initParent() {
+-    parentName = new Hyperlink("", "");
++    parentNames = new ParentNames();
+ 
+     showInherited = new CheckBox();
+     showInherited.setChecked(true);
+@@ -96,7 +119,7 @@ public class ProjectAccessScreen extends ProjectScreen {
+ 
+     Grid g = new Grid(2, 3);
+     g.setWidget(0, 0, new SmallHeading(Util.C.headingParentProjectName()));
+-    g.setWidget(1, 0, parentName);
++    g.setWidget(1, 0, parentNames);
+     g.setWidget(1, 1, showInherited);
+     g.setText(1, 2, Util.C.headingShowInherited());
+ 
+@@ -135,16 +158,8 @@ public class ProjectAccessScreen extends ProjectScreen {
+     final Project project = result.project;
+ 
+     final Project.NameKey wildKey = Gerrit.getConfig().getWildProject();
+-    final boolean isWild = wildKey.equals(project.getNameKey());
+-    Project.NameKey parent = project.getParent();
+-    if (parent == null) {
+-      parent = wildKey;
+-    }
+-
+-    parentPanel.setVisible(!isWild);
+-    parentName.setTargetHistoryToken(Dispatcher.toProjectAdmin(parent, ACCESS));
+-    parentName.setText(parent.get());
+-
++    parentPanel.setVisible(!wildKey.equals(project.getNameKey()));
++    parentNames.setParents(project.getParents());
+     rights.display(result.groups, result.rights);
+ 
+     rightEditor.setVisible(result.canModifyAccess);
+diff --git a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/project/VisibleProjects.java b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/project/VisibleProjects.java
+index 2588350..989b35c 100644
+--- a/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/project/VisibleProjects.java
++++ b/gerrit-httpd/src/main/java/com/google/gerrit/httpd/rpc/project/VisibleProjects.java
+@@ -21,6 +21,7 @@ import com.google.gerrit.reviewdb.ReviewDb;
+ import com.google.gerrit.server.CurrentUser;
+ import com.google.gerrit.server.project.NoSuchProjectException;
+ import com.google.gerrit.server.project.ProjectControl;
++import com.google.gerrit.server.project.ProjectUtil;
+ import com.google.gwtorm.client.OrmException;
+ import com.google.inject.Inject;
+ 
+@@ -64,6 +65,11 @@ class VisibleProjects extends Handler<List<Project>> {
+         }
+       }
+     }
++
++    for (Project p : result) {
++      ProjectUtil.populateParents(db, p);
++    }
++
+     Collections.sort(result, new Comparator<Project>() {
+       public int compare(final Project a, final Project b) {
+         return a.getName().compareTo(b.getName());
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Project.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Project.java
+index 409547a..524b8ad 100644
+--- a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Project.java
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/Project.java
+@@ -17,6 +17,8 @@ package com.google.gerrit.reviewdb;
+ import com.google.gwtorm.client.Column;
+ import com.google.gwtorm.client.StringKey;
+ 
++import java.util.Set;
++
+ /** Projects match a source code repository managed by Gerrit */
+ public final class Project {
+   /** Project name key */
+@@ -96,15 +98,14 @@ public final class Project {
+   @Column(id = 5)
+   protected char submitType;
+ 
+-  @Column(id = 6, notNull = false, name = "parent_name")
+-  protected NameKey parent;
+-
+-  @Column(id = 7)
++  @Column(id = 6)
+   protected boolean requireChangeID;
+ 
+-  @Column(id = 8)
++  @Column(id = 7)
+   protected boolean useContentMerge;
+ 
++  protected Set<NameKey> parents; // must be loaded and saved separately
++
+   protected Project() {
+   }
+ 
+@@ -179,11 +180,11 @@ public final class Project {
+     submitType = update.submitType;
+   }
+ 
+-  public Project.NameKey getParent() {
+-    return parent;
++  public Set<Project.NameKey> getParents() {
++    return parents;
+   }
+ 
+-  public void setParent(final Project.NameKey parentProjectName) {
+-      parent = parentProjectName;
++  public void setParents(final Set<Project.NameKey> parents) {
++      this.parents = parents;
+   }
+ }
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ProjectParent.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ProjectParent.java
+new file mode 100644
+index 0000000..f724a9d
+--- /dev/null
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ProjectParent.java
+@@ -0,0 +1,107 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.reviewdb;
++
++import com.google.gwtorm.client.Column;
++import com.google.gwtorm.client.CompoundKey;
++
++/** Parents are simply other Projects */
++public final class ProjectParent {
++  /** ProjectParent key */
++  public static class Key extends CompoundKey<Project.NameKey> {
++    private static final long serialVersionUID = 1L;
++
++    @Column(id = 1)
++    protected Project.NameKey project;
++
++    @Column(id = 2)
++    protected Project.NameKey parent;
++
++    protected Key() {
++      this(new Project.NameKey(), new Project.NameKey());
++    }
++
++    public Key(final Project.NameKey project, final Project.NameKey parent) {
++      setProjectKey(project);
++      setParentKey(parent);
++    }
++
++    public Project.NameKey getProjectKey() {
++      return project;
++    }
++
++    protected void setProjectKey(final Project.NameKey project) {
++      if (project == null) {
++        throw new NullPointerException();
++      }
++      this.project = project;
++    }
++
++    @Override
++    public Project.NameKey getParentKey() {
++      return parent;
++    }
++
++    public void setParentKey(final Project.NameKey parent) {
++      if (parent == null) {
++        throw new NullPointerException();
++      }
++      this.parent = parent;
++    }
++
++    @Override
++    public com.google.gwtorm.client.Key<?>[] members() {
++      return new com.google.gwtorm.client.Key<?>[] {project, parent};
++    }
++
++    @Override
++    public boolean equals(final Object o) {
++      if (o instanceof ProjectParent.Key) {
++        ProjectParent.Key other = (ProjectParent.Key) o;
++        return getProjectKey().equals(other.getProjectKey()) &&
++               getParentKey().equals(other.getParentKey());
++      }
++      return false;
++    }
++  }
++
++  @Column(id = 1)
++  protected Key key;
++
++  protected ProjectParent() {
++  }
++
++  public ProjectParent(final Project.NameKey project,
++      final Project.NameKey parent) {
++    key = new Key(project, parent);
++  }
++
++  public Project.NameKey getParentKey() {
++    return key.getParentKey();
++  }
++
++  public Project.NameKey getProjectKey() {
++    return key.getProjectKey();
++  }
++
++  @Override
++  public boolean equals(final Object o) {
++    if (o instanceof ProjectParent) {
++      ProjectParent other = (ProjectParent) o;
++      return key.equals(other.key);
++    }
++    return false;
++  }
++}
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ProjectParentAccess.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ProjectParentAccess.java
+new file mode 100644
+index 0000000..9bd7c80
+--- /dev/null
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ProjectParentAccess.java
+@@ -0,0 +1,31 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.reviewdb;
++
++import com.google.gwtorm.client.Access;
++import com.google.gwtorm.client.OrmException;
++import com.google.gwtorm.client.PrimaryKey;
++import com.google.gwtorm.client.Query;
++import com.google.gwtorm.client.ResultSet;
++
++public interface ProjectParentAccess
++    extends Access<ProjectParent, ProjectParent.Key> {
++  @PrimaryKey("key")
++  ProjectParent get(ProjectParent.Key key) throws OrmException;
++
++  @Query("WHERE key.project = ?")
++  ResultSet<ProjectParent> byProject(Project.NameKey project)
++    throws OrmException;
++}
+diff --git a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ReviewDb.java b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ReviewDb.java
+index 49e07ff..86a5457 100644
+--- a/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ReviewDb.java
++++ b/gerrit-reviewdb/src/main/java/com/google/gerrit/reviewdb/ReviewDb.java
+@@ -97,6 +97,9 @@ public interface ReviewDb extends Schema {
+   ProjectAccess projects();
+ 
+   @Relation
++  ProjectParentAccess projectParents();
++
++  @Relation
+   ChangeAccess changes();
+ 
+   @Relation
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectCacheImpl.java b/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectCacheImpl.java
+index 48eef87..4224240 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectCacheImpl.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectCacheImpl.java
+@@ -96,6 +96,7 @@ public class ProjectCacheImpl implements ProjectCache {
+         if (p == null) {
+           return null;
+         }
++        ProjectUtil.populateParents(db, p);
+ 
+         final Collection<RefRight> rights =
+             Collections.unmodifiableCollection(db.refRights().byProject(
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectState.java b/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectState.java
+index 68e80ee..0f60361 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectState.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectState.java
+@@ -45,11 +45,12 @@ public class ProjectState {
+   private final ProjectControl.AssistedFactory projectControlFactory;
+ 
+   private final Project project;
++  private Set<List<Project.NameKey>> ancestorLines;
++  private Set<List<RefRight>> inheritedRightsLines;
++  private Collection<RefRight> inheritedRights;
+   private final Collection<RefRight> localRights;
+   private final Set<AccountGroup.Id> owners;
+ 
+-  private volatile Collection<RefRight> inheritedRights;
+-
+   @Inject
+   protected ProjectState(final AnonymousUser anonymousUser,
+       final ProjectCache projectCache,
+@@ -89,63 +90,90 @@ public class ProjectState {
+     return project;
+   }
+ 
+-  /** Get the rights that pertain only to this project. */
+-  public Collection<RefRight> getLocalRights() {
+-    return localRights;
+-  }
+-
+-  /**
+-   * Get the rights that pertain only to this project.
+-   *
+-   * @param action the category requested.
+-   * @return immutable collection of rights for the requested category.
+-   */
+-  public Collection<RefRight> getLocalRights(ApprovalCategory.Id action) {
+-    return filter(getLocalRights(), action);
++  public Set<List<Project.NameKey>> getAncestorLines() {
++    if (ancestorLines == null) {
++      ancestorLines = computeAncestorLines();
++    }
++    return ancestorLines;
+   }
+ 
+-  /** Get the rights this project inherits from the wild project. */
+-  public Collection<RefRight> getInheritedRights() {
+-    if (inheritedRights == null) {
+-      inheritedRights = computeInheritedRights();
++  private Set<List<Project.NameKey>> computeAncestorLines() {
++    final Set<List<Project.NameKey>> lines =
++      new HashSet<List<Project.NameKey>>();
++
++    if (project.getParents() == null || project.getParents().size() == 0) {
++      final List<Project.NameKey> line = new LinkedList();
++      line.add(getProject().getNameKey());
++      line.add(wildProject);
++      lines.add(line);
++    } else {
++      for (final Project.NameKey p: project.getParents()) {
++        final ProjectState s = projectCache.get(p);
++        if (s != null) {
++          final Set<List<Project.NameKey>> subLines = s.getAncestorLines();
++          for (final List<Project.NameKey> l: subLines) {
++            final List<Project.NameKey> line = new LinkedList(l);
++            line.add(0, getProject().getNameKey());
++            lines.add(line);
++          }
++        }
++      }
+     }
+-    return inheritedRights;
++    return Collections.unmodifiableSet(lines);
+   }
+ 
+-  void setInheritedRights(Collection<RefRight> all) {
+-    inheritedRights = all;
++  /** Get the rights this project inherits from the parent lines. */
++  public Set<List<RefRight>> getInheritedRightsLines() {
++    if (inheritedRightsLines == null) {
++      inheritedRightsLines = computeInheritedRightsLines();
++    }
++    return inheritedRightsLines;
+   }
+ 
+-  private Collection<RefRight> computeInheritedRights() {
+-    if (isSpecialWildProject()) {
+-      return Collections.emptyList();
++  private Set<List<RefRight>> computeInheritedRightsLines() {
++    final Set<List<RefRight>> rightLines = new HashSet<List<RefRight>>();
++    for (final List<Project.NameKey> line : getAncestorLines()) {
++      rightLines.add(computeRightsLine(line));
+     }
++    return Collections.unmodifiableSet(rightLines);
++  }
+ 
+-    List<RefRight> inherited = new ArrayList<RefRight>();
+-    Set<Project.NameKey> seen = new HashSet<Project.NameKey>();
+-    Project.NameKey parent = project.getParent();
+-
+-    while (parent != null && seen.add(parent)) {
+-      ProjectState s = projectCache.get(parent);
++  private List<RefRight> computeRightsLine(List<Project.NameKey> line) {
++    final List<RefRight> rights = new LinkedList<RefRight>();
++    for (final Project.NameKey a : line) {
++      final ProjectState s = projectCache.get(a);
+       if (s != null) {
+-        inherited.addAll(s.getLocalRights());
+-        parent = s.getProject().getParent();
+-      } else {
+-        break;
++        rights.addAll(s.getLocalRights());
+       }
+     }
++    return Collections.unmodifiableList(rights);
++  }
+ 
+-    // Wild project is the parent, or the root of the tree
+-    if (parent == null) {
+-      inherited.addAll(getWildProjectRights());
++  /** Get the rights this project inherits from all ancestors. */
++  public Collection<RefRight> getInheritedRights() {
++    if (inheritedRights == null) {
++      inheritedRights = computeInheritedRights();
+     }
++    return inheritedRights;
++  }
+ 
++  private Collection<RefRight> computeInheritedRights() {
++    Set<RefRight> inherited = new HashSet<RefRight>();
++    for (Project.NameKey a : project.getParents()) {
++      ProjectState s = projectCache.get(a);
++      if (s != null) {
++        Set<List<RefRight>> lines = s.getInheritedRightsLines();
++        for (final List<RefRight> line : lines) {
++          inherited.addAll(line);
++        }
++      }
++    }
+     return Collections.unmodifiableCollection(inherited);
+   }
+ 
+-  private Collection<RefRight> getWildProjectRights() {
+-    final ProjectState s = projectCache.get(wildProject);
+-    return s != null ? s.getLocalRights() : Collections.<RefRight> emptyList();
++  /** Get the rights that pertain only to this project. */
++  public Collection<RefRight> getLocalRights() {
++    return localRights;
+   }
+ 
+   /**
+@@ -177,7 +205,7 @@ public class ProjectState {
+   }
+ 
+   /**
+-   * Get the rights this project has and inherits from the wild project.
++   * Get the rights this project has and inherits from other projects.
+    *
+    * @param action the category requested.
+    * @param dropOverridden whether to remove inherited permissions in case if we have a
+@@ -185,26 +213,32 @@ public class ProjectState {
+    * @return immutable collection of rights for the requested category.
+    */
+   public Collection<RefRight> getAllRights(ApprovalCategory.Id action, boolean dropOverridden) {
+-    Collection<RefRight> rights = new LinkedList<RefRight>(getLocalRights(action));
+-    rights.addAll(filter(getInheritedRights(), action));
+-    if (dropOverridden) {
+-      Set<Grant> grants = new HashSet<Grant>();
+-      Iterator<RefRight> iter = rights.iterator();
+-      while (iter.hasNext()) {
+-        RefRight right = iter.next();
+-
+-        Grant grant = new Grant(right.getAccountGroupId(), right.getRefPattern());
+-        if (grants.contains(grant)) {
+-          iter.remove();
+-        } else {
+-          grants.add(grant);
+-        }
++    final Collection<RefRight> rights = new LinkedList<RefRight>();
++    for (final List<RefRight> line : getInheritedRightsLines()) {
++      final List<RefRight> filtered = filter2(line, action);
++      if (dropOverridden) {
++        rights.addAll(dropOverriddenRights(filtered));
++      } else {
++        rights.addAll(filtered);
+       }
+     }
+     return Collections.unmodifiableCollection(rights);
+   }
+ 
+-  /** Is this the special wild project which manages inherited rights? */
++  private static List<RefRight> dropOverriddenRights(List<RefRight> rights) {
++    List<RefRight> granted = new ArrayList<RefRight>();
++    final Set<Grant> grants = new HashSet<Grant>();
++    for (final RefRight right: rights) {
++      final Grant grant = new Grant(right.getAccountGroupId(), right.getRefPattern());
++      if (! grants.contains(grant)) {
++        grants.add(grant);
++        granted.add(right);
++      }
++    }
++    return granted;
++  }
++
++  /** Is this the special wild project? */
+   public boolean isSpecialWildProject() {
+     return project.getNameKey().equals(wildProject);
+   }
+@@ -221,12 +255,18 @@ public class ProjectState {
+     return projectControlFactory.create(user, this);
+   }
+ 
+-  private static Collection<RefRight> filter(Collection<RefRight> all,
++  // ~ should eventually not be needed
++  private static List<RefRight> filter(Collection<RefRight> all,
++      ApprovalCategory.Id actionId) {
++    return filter2(new ArrayList<RefRight>(all), actionId);
++  }
++
++  private static List<RefRight> filter2(List<RefRight> all,
+       ApprovalCategory.Id actionId) {
+     if (all.isEmpty()) {
+       return Collections.emptyList();
+     }
+-    final Collection<RefRight> mine = new ArrayList<RefRight>(all.size());
++    final List<RefRight> mine = new ArrayList<RefRight>(all.size());
+     for (final RefRight right : all) {
+       if (right.getApprovalCategoryId().equals(actionId)) {
+         mine.add(right);
+@@ -235,6 +275,6 @@ public class ProjectState {
+     if (mine.isEmpty()) {
+       return Collections.emptyList();
+     }
+-    return Collections.unmodifiableCollection(mine);
++    return Collections.unmodifiableList(mine);
+   }
+ }
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectUtil.java b/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectUtil.java
+new file mode 100644
+index 0000000..dc3d9cc
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/project/ProjectUtil.java
+@@ -0,0 +1,108 @@
++// Copyright (C) 2009 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.server.project;
++
++import com.google.gerrit.reviewdb.Project;
++import com.google.gerrit.reviewdb.ProjectParent;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.server.config.WildProjectName;
++import com.google.gwtorm.client.OrmDuplicateKeyException;
++import com.google.gwtorm.client.OrmException;
++import com.google.inject.Inject;
++
++import java.util.Collections;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Set;
++
++public class ProjectUtil {
++
++  @Inject
++  private ReviewDb db;
++
++  @Inject
++  private ProjectCache projectCache;
++
++  @Inject
++  @WildProjectName
++  private Project.NameKey wildProject;
++
++  public ProjectUtil() {
++  }
++
++  public String addParent(ProjectControl cCtrl, ProjectControl pCtrl)
++      throws OrmException {
++    final Project.NameKey cKey = cCtrl.getProject().getNameKey();
++    final Project.NameKey pKey = pCtrl.getProject().getNameKey();
++    final String cname = cCtrl.getProject().getName();
++    final String pname = pCtrl.getProject().getName();
++
++    if (cKey.equals(pKey)) {
++      return "error: Cannot set parent of '" + cname + "' to itself\n";
++    }
++
++    if (wildProject.equals(cKey)) {
++      // Don't allow the wild card project to have a parent.
++      //
++      return "error: Cannot set parent of '" + cname + "'\n";
++    }
++
++    if (getAncestors(Collections.singleton(pKey)).contains(cKey)) {
++      // Try to avoid creating a cycle in the parent pointers.
++      //
++      return "error: Cycle exists between '" + cname + "' and '" + pname + "'\n";
++    }
++
++    final Project child = db.projects().get(cKey);
++    if (child == null) {
++      // Race condition? Its in the cache, but not the database.
++      //
++      return "error: Project '" + cname + "' not found\n";
++    }
++
++    ProjectParent pp = new ProjectParent(child.getNameKey(), pKey);
++    try {
++      db.projectParents().insert(Collections.singleton(pp));
++    } catch (OrmDuplicateKeyException e) {
++      return "error: Project '" + pname + "' already parent of '" + cname + "'\n";
++    }
++    return "";
++  }
++
++  private Set<Project.NameKey> getAncestors(Set<Project.NameKey> parents) {
++    final Set<Project.NameKey> ancestors = new HashSet<Project.NameKey>();
++    ancestors.add(wildProject);
++    ancestors.addAll(parents);
++
++    for (final Project.NameKey p: parents) {
++      final ProjectState s = projectCache.get(p);
++      if (s != null) {
++        ancestors.addAll(getAncestors(s.getProject().getParents()));
++      }
++    }
++    return ancestors;
++  }
++
++  public static void populateParents(final ReviewDb db, final Project p)
++      throws OrmException {
++    List<ProjectParent> parents =
++      db.projectParents().byProject(p.getNameKey()).toList();
++    Set<Project.NameKey> keys = new HashSet<Project.NameKey>(parents.size());
++    for (ProjectParent pa: parents) {
++      keys.add(pa.getParentKey());
++    }
++    p.setParents(keys);
++  }
++}
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java b/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
+index b0cb88a..0db29d5 100644
+--- a/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/schema/SchemaVersion.java
+@@ -32,7 +32,7 @@ import java.util.List;
+ /** A version of the database schema. */
+ public abstract class SchemaVersion {
+   /** The current schema version. */
+-  private static final Class<? extends SchemaVersion> C = Schema_52.class;
++  private static final Class<? extends SchemaVersion> C = Schema_53.class;
+ 
+   public static class Module extends AbstractModule {
+     @Override
+diff --git a/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_53.java b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_53.java
+new file mode 100644
+index 0000000..ef5d94f
+--- /dev/null
++++ b/gerrit-server/src/main/java/com/google/gerrit/server/schema/Schema_53.java
+@@ -0,0 +1,62 @@
++// Copyright (C) 2011 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License.
++
++package com.google.gerrit.server.schema;
++
++import com.google.gerrit.reviewdb.Project;
++import com.google.gerrit.reviewdb.ProjectParent;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gwtorm.client.OrmException;
++import com.google.gwtorm.jdbc.JdbcSchema;
++
++import com.google.inject.Inject;
++import com.google.inject.Provider;
++
++import java.sql.ResultSet;
++import java.sql.SQLException;
++import java.sql.Statement;
++
++import java.util.Collections;
++
++public class Schema_53 extends SchemaVersion {
++  @Inject
++  Schema_53(Provider<Schema_52> prior) {
++    super(prior);
++  }
++
++  @Override
++  protected void migrateData(ReviewDb db, UpdateUI ui) throws OrmException, SQLException
++  {
++    JdbcSchema jdbc = (JdbcSchema) db;
++
++    Statement s = jdbc.getConnection().createStatement();
++    try {
++      ResultSet r = s.executeQuery("SELECT name, parent_name FROM projects");
++      try {
++        while (r.next()) {
++          final Project.NameKey project = new Project.NameKey(r.getString(1));
++          final Project.NameKey parent = new Project.NameKey(r.getString(2));
++          if (parent.get() != null) {
++            ProjectParent pp = new ProjectParent(project, parent);
++            db.projectParents().insert(Collections.singleton(pp));
++          }
++        }
++      } finally {
++        r.close();
++      }
++    } finally {
++      s.close();
++    }
++  }
++}
+diff --git a/gerrit-server/src/test/java/com/google/gerrit/server/project/RefControlTest.java b/gerrit-server/src/test/java/com/google/gerrit/server/project/RefControlTest.java
+index cf5d264..379f9cf 100644
+--- a/gerrit-server/src/test/java/com/google/gerrit/server/project/RefControlTest.java
++++ b/gerrit-server/src/test/java/com/google/gerrit/server/project/RefControlTest.java
+@@ -45,17 +45,139 @@ import java.util.ArrayList;
+ import java.util.Arrays;
+ import java.util.Collection;
+ import java.util.Collections;
++import java.util.HashMap;
+ import java.util.HashSet;
+ import java.util.List;
++import java.util.Map;
+ import java.util.Set;
+ 
+ public class RefControlTest extends TestCase {
++
++  // "Setup" tests ensure that we have working parents, ancestorslines
++  // and rightslines
++
++  public void testSetup_Parents() {
++    initProjectStates();
++
++    assertTrue("local == 1", projectCache.get(local).getProject().getParents().size() == 1);
++    assertTrue("parent == 1", projectCache.get(parent).getProject().getParents().size() == 1);
++    assertTrue("gparent == 0", projectCache.get(gparent).getProject().getParents().size() == 0);
++    assertTrue("multi == 2", projectCache.get(multi).getProject().getParents().size() == 2);
++    assertTrue("parentA == 1", projectCache.get(parentA).getProject().getParents().size() == 1);
++    assertTrue("parentB == 1", projectCache.get(parentB).getProject().getParents().size() == 1);
++  }
++
++  public void testSetup_AncestorLines() {
++    initProjectStates();
++
++    assertTrue("local == 1", 1==projectCache.get(local).getAncestorLines().size());
++    assertTrue("parent == 1", 1==projectCache.get(parent).getAncestorLines().size());
++    assertTrue("gparent == 1", 1==projectCache.get(gparent).getAncestorLines().size());
++    assertTrue("multi == 2", 2==projectCache.get(multi).getAncestorLines().size());
++    assertTrue("parentA == 1", 1==projectCache.get(parentA).getAncestorLines().size());
++    assertTrue("parentB == 1", 1==projectCache.get(parentB).getAncestorLines().size());
++  }
++
++  public void testSetup_AncestorLine() {
++    initProjectStates();
++
++    Set<List<Project.NameKey>> lines = projectCache.get(local).getAncestorLines();
++    List<Project.NameKey> line = (List<Project.NameKey>) lines.toArray()[0];
++    assertTrue("local == 4", 4==line.size());
++
++    lines = projectCache.get(multi).getAncestorLines();
++    line = (List<Project.NameKey>) lines.toArray()[0];
++    assertTrue("multi0 == 4", 4==line.size());
++
++    line = (List<Project.NameKey>) lines.toArray()[1];
++    assertTrue("multi1 == 4", 4==line.size());
++
++    lines = projectCache.get(parent).getAncestorLines();
++    line = (List<Project.NameKey>) lines.toArray()[0];
++    assertTrue("parent == 3", 3==line.size());
++
++    lines = projectCache.get(parentA).getAncestorLines();
++    line = (List<Project.NameKey>) lines.toArray()[0];
++    assertTrue("parentA == 3", 3==line.size());
++
++    lines = projectCache.get(parentB).getAncestorLines();
++    line = (List<Project.NameKey>) lines.toArray()[0];
++    assertTrue("parentB == 3", 3==line.size());
++
++    lines = projectCache.get(gparent).getAncestorLines();
++    line = (List<Project.NameKey>) lines.toArray()[0];
++    assertTrue("gparent == 2", 2==line.size());
++  }
++
++  public void testSetup_InheritedLines() {
++    grant(local, READ, registered, "refs/*", 1);
++    grant(multi, READ, registered, "refs/*", 1);
++    grant(parent, READ, registered, "refs/*", 1);
++    grant(parentA, READ, registered, "refs/*", 1);
++    grant(parentB, READ, registered, "refs/*", 1);
++    grant(gparent, READ, registered, "refs/*", 1);
++
++    initProjectStates();
++
++    assertTrue("local == 1", 1==projectCache.get(local).getInheritedRightsLines().size());
++    assertTrue("parent == 1", 1==projectCache.get(parent).getInheritedRightsLines().size());
++    assertTrue("gparent == 1", 1==projectCache.get(gparent).getInheritedRightsLines().size());
++    assertTrue("multi == 2", 2==projectCache.get(multi).getInheritedRightsLines().size());
++    assertTrue("parentA == 1", 1==projectCache.get(parentA).getInheritedRightsLines().size());
++    assertTrue("parentB == 1", 1==projectCache.get(parentB).getInheritedRightsLines().size());
++  }
++
++  public void testSetup_InheritedLine() {
++    grant(local, READ, registered, "refs/*", 1);
++    grant(local, READ, devs, "refs/*", 2);
++    grant(local, READ, fixers, "refs/*", 3);
++    grant(local, READ, anonymous, "refs/*", 0);
++    grant(multi, READ, registered, "refs/*", 1);
++    grant(multi, READ, devs, "refs/*", 2);
++    grant(multi, READ, fixers, "refs/*", 3);
++    grant(multi, READ, anonymous, "refs/*", 0);
++    grant(parent, READ, registered, "refs/*", 1);
++    grant(parent, READ, devs, "refs/*", 2);
++    grant(parentA, READ, registered, "refs/*", 1);
++    grant(parentA, READ, devs, "refs/*", 2);
++    grant(parentB, READ, registered, "refs/*", 1);
++    grant(parentB, READ, devs, "refs/*", 2);
++    grant(gparent, READ, registered, "refs/*", 1);
++
++    initProjectStates();
++
++    Set<List<RefRight>> lines = projectCache.get(local).getInheritedRightsLines();
++    List<RefRight> line = (List<RefRight>) lines.toArray()[0];
++    assertTrue("local == 7", 7==line.size());
++
++    lines = projectCache.get(multi).getInheritedRightsLines();
++    line = (List<RefRight>) lines.toArray()[0];
++    assertTrue("multi0 == 7", 7==line.size());
++    line = (List<RefRight>) lines.toArray()[1];
++    assertTrue("multi1 == 7", 7==line.size());
++
++    lines = projectCache.get(parent).getInheritedRightsLines();
++    line = (List<RefRight>) lines.toArray()[0];
++    assertTrue("parent == 3", 3==line.size());
++
++    lines = projectCache.get(parentA).getInheritedRightsLines();
++    line = (List<RefRight>) lines.toArray()[0];
++    assertTrue("parentA == 3", 3==line.size());
++
++    lines = projectCache.get(parentB).getInheritedRightsLines();
++    line = (List<RefRight>) lines.toArray()[0];
++    assertTrue("parentB == 3", 3==line.size());
++
++    lines = projectCache.get(gparent).getInheritedRightsLines();
++    line = (List<RefRight>) lines.toArray()[0];
++    assertTrue("gparent == 1", 1==line.size());
++  }
++
+   public void testOwnerProject() {
+     grant(local, OWN, admin, "refs/*", 1);
+ 
+     ProjectControl uBlah = user(devs);
+     ProjectControl uAdmin = user(devs, admin);
+-
+     assertFalse("not owner", uBlah.isOwner());
+     assertTrue("is owner", uAdmin.isOwner());
+   }
+@@ -74,6 +196,12 @@ public class RefControlTest extends TestCase {
+ 
+     assertNotOwner("refs/*", uDev);
+     assertNotOwner("refs/heads/master", uDev);
++    assertNotOwner("refs/heads/master/x", uDev);
++
++    // Crazy wild stuff
++    assertNotOwner("refs/heads/*/x", uDev);
++    assertNotOwner("refs/*/x", uDev);
++    assertNotOwner("refs/heads/y/../x/*", uDev);
+   }
+ 
+   public void testBranchDelegation2() {
+@@ -81,6 +209,10 @@ public class RefControlTest extends TestCase {
+     grant(local, OWN, devs, "refs/heads/x/*", 1);
+     grant(local, OWN, fixers, "-refs/heads/x/y/*", 1);
+ 
++    ProjectControl uAdmin = user(devs, admin);
++    assertTrue("owns ref", uAdmin.isOwner());
++    assertOwner("refs/heads/x/y/*", uAdmin);
++
+     ProjectControl uDev = user(devs);
+     assertFalse("not owner", uDev.isOwner());
+     assertTrue("owns ref", uDev.isOwnerAnyRef());
+@@ -95,8 +227,8 @@ public class RefControlTest extends TestCase {
+     assertFalse("not owner", uFix.isOwner());
+     assertTrue("owns ref", uFix.isOwnerAnyRef());
+ 
+-    assertOwner("refs/heads/x/y/*", uFix);
+     assertOwner("refs/heads/x/y/bar", uFix);
++    assertOwner("refs/heads/x/y/*", uFix);
+     assertNotOwner("refs/heads/x/*", uFix);
+     assertNotOwner("refs/heads/x/y", uFix);
+     assertNotOwner("refs/*", uFix);
+@@ -117,6 +249,20 @@ public class RefControlTest extends TestCase {
+         u.controlForRef("refs/heads/foobar").canUpload());
+   }
+ 
++  public void testInheritRead_GParent() {
++    grant(gparent, READ, registered, "refs/*", 1);
++
++    ProjectControl u = user();
++    assertTrue("can read", u.isVisible());
++  }
++
++  public void testInheritRead_WildProject() {
++    grant(wildProject, READ, registered, "refs/*", 1);
++
++    ProjectControl u = user();
++    assertTrue("can read", u.isVisible());
++  }
++
+   public void testInheritRead_SingleBranchDoesNotOverrideInherited() {
+     grant(parent, READ, registered, "refs/*", 1, 2);
+     grant(local, READ, registered, "refs/heads/foobar", 1);
+@@ -139,6 +285,31 @@ public class RefControlTest extends TestCase {
+     assertFalse("can't read", u.isVisible());
+   }
+ 
++  public void testInheritRead_OverrideGParentWithDeny() {
++    grant(gparent, READ, registered, "refs/*", 1);
++    grant(local, READ, registered, "refs/*", 0);
++
++    ProjectControl u = user();
++    assertFalse("can't read", u.isVisible());
++  }
++
++  public void testInheritRead_ParentOverridesGParentWithDeny() {
++    grant(gparent, READ, registered, "refs/*", 1);
++    grant(parent, READ, registered, "refs/*", 0);
++
++    ProjectControl u = user();
++    assertFalse("can't read", u.isVisible());
++  }
++
++  public void testInheritRead_AllowParentOverrideGParentOverrideParentWithDeny() {
++    grant(gparent, READ, registered, "refs/*", 2);
++    grant(parent, READ, registered, "refs/*", 1);
++    grant(local, READ, registered, "refs/*", 0);
++
++    ProjectControl u = user();
++    assertFalse("can't read", u.isVisible());
++  }
++
+   public void testInheritRead_AppendWithDenyOfRef() {
+     grant(parent, READ, registered, "refs/*", 1);
+     grant(local, READ, registered, "refs/heads/*", 0);
+@@ -183,11 +354,82 @@ public class RefControlTest extends TestCase {
+         u.controlForRef("refs/heads/master").canUpload());
+   }
+ 
++  public void testMultiRead_FromSingleParent() {
++    grant(parentA, READ, devs, "refs/*", 1);
++    grant(parentB, READ, fixers, "refs/*", 1);
++
++    ProjectControl uDev = multi(devs);
++    ProjectControl uFix = multi(fixers);
++    assertTrue("can read", uDev.isVisible());
++    assertTrue("can read", uFix.isVisible());
++  }
++
++  public void testMultiRead_HighestOfSiblings() {
++    grant(parentA, READ, devs, "refs/*", 0);
++    grant(parentB, READ, devs, "refs/*", 1);
++    grant(parentA, READ, fixers, "refs/*", 0);
++    grant(parentB, READ, fixers, "refs/*", 1);
++
++    ProjectControl uDev = multi(devs);
++    ProjectControl uFix = multi(fixers);
++    assertTrue("can read", uDev.isVisible());
++    assertTrue("can read", uFix.isVisible());
++  }
++
++  public void testMultiRead_SingleParentDoesNotOverrideGParent() {
++    grant(gparent, READ, devs, "refs/*", 1);
++    grant(parentA, READ, devs, "refs/*", 0);
++    grant(gparent, READ, fixers, "refs/*", 1);
++    grant(parentB, READ, fixers, "refs/*", 0);
++
++    ProjectControl uDev = multi(devs);
++    ProjectControl uFix = multi(fixers);
++    assertTrue("can read", uDev.isVisible());
++    assertTrue("can read", uFix.isVisible());
++  }
++
++  public void testMultiRead_GParentOverridenByParents() {
++    grant(gparent, READ, registered, "refs/*", 1);
++    grant(parentA, READ, registered, "refs/*", 0);
++    grant(parentB, READ, registered, "refs/*", 0);
++
++    ProjectControl u = multi();
++    assertFalse("can't read", u.isVisible());
++  }
++
++  public void testMultiRead_SingleParentDoesNotOverrideWildProject() {
++    grant(wildProject, READ, devs, "refs/*", 1);
++    grant(parentA, READ, devs, "refs/*", 0);
++    grant(wildProject, READ, fixers, "refs/*", 1);
++    grant(parentB, READ, fixers, "refs/*", 0);
++
++    ProjectControl uDev = multi(devs);
++    ProjectControl uFix = multi(fixers);
++    assertTrue("can read", uDev.isVisible());
++    assertTrue("can read", uFix.isVisible());
++  }
++
++  public void testMultiRead_ParentDoesOverrideWildProject() {
++    grant(wildProject, READ, registered, "refs/*", 1);
++    grant(gparent, READ, registered, "refs/*", 0);
++
++    ProjectControl u = multi();
++    assertFalse("can't read", u.isVisible());
++  }
+ 
+   // -----------------------------------------------------------------------
+ 
+-  private final Project.NameKey local = new Project.NameKey("test");
++  private final Project.NameKey wildProject = new Project.NameKey("-- All Projects --");
++
++  private final Project.NameKey local = new Project.NameKey("single");
++  private final Project.NameKey multi = new Project.NameKey("multi");
++
+   private final Project.NameKey parent = new Project.NameKey("parent");
++  private final Project.NameKey parentA = new Project.NameKey("parentA");
++  private final Project.NameKey parentB = new Project.NameKey("parentB");
++
++  private final Project.NameKey gparent = new Project.NameKey("gparent");
++
+   private final AccountGroup.Id admin = new AccountGroup.Id(1);
+   private final AccountGroup.Id anonymous = new AccountGroup.Id(2);
+   private final AccountGroup.Id registered = new AccountGroup.Id(3);
+@@ -200,6 +442,9 @@ public class RefControlTest extends TestCase {
+   private final AuthConfig authConfig;
+   private final AnonymousUser anonymousUser;
+ 
++  private final ProjectControl.AssistedFactory projectControlFactory = null;
++
++
+   public RefControlTest() {
+     systemConfig = SystemConfig.create();
+     systemConfig.adminGroupId = admin;
+@@ -230,14 +475,26 @@ public class RefControlTest extends TestCase {
+     anonymousUser = injector.getInstance(AnonymousUser.class);
+   }
+ 
+-  private List<RefRight> localRights;
+-  private List<RefRight> inheritedRights;
++  private Map<Project.NameKey,List<RefRight>> rightsByProject;
++  private HashProjectCacheImpl projectCache;
++  private boolean initedProjectStates;
+ 
+   @Override
+   protected void setUp() throws Exception {
+     super.setUp();
+-    localRights = new ArrayList<RefRight>();
+-    inheritedRights = new ArrayList<RefRight>();
++    initedProjectStates = false;
++    projectCache = new HashProjectCacheImpl();
++    rightsByProject = new HashMap<Project.NameKey,List<RefRight>>();
++
++    rightsByProject.put(wildProject, new ArrayList<RefRight>());
++
++    rightsByProject.put(local, new ArrayList<RefRight>());
++    rightsByProject.put(parent, new ArrayList<RefRight>());
++    rightsByProject.put(gparent, new ArrayList<RefRight>());
++
++    rightsByProject.put(multi, new ArrayList<RefRight>());
++    rightsByProject.put(parentA, new ArrayList<RefRight>());
++    rightsByProject.put(parentB, new ArrayList<RefRight>());
+   }
+ 
+   private static void assertOwner(String ref, ProjectControl u) {
+@@ -255,42 +512,69 @@ public class RefControlTest extends TestCase {
+ 
+   private void grant(Project.NameKey project, ApprovalCategory.Id categoryId, AccountGroup.Id group,
+       String ref, int minValue, int maxValue) {
+-    RefRight right =
+-        new RefRight(new RefRight.Key(project, new RefPattern(ref),
+-            categoryId, group));
+-    right.setMinValue((short) minValue);
+-    right.setMaxValue((short) maxValue);
+-
+-    if (project == parent) {
+-      inheritedRights.add(right);
+-    } else if (project == local) {
+-      localRights.add(right);
++    if (initedProjectStates) {
++      fail("Project States are already inited, cannot modify " + project);
+     } else {
+-      fail("Unknown project key: " + project);
++      RefRight right =
++          new RefRight(new RefRight.Key(project, new RefPattern(ref),
++              categoryId, group));
++      right.setMinValue((short) minValue);
++      right.setMaxValue((short) maxValue);
++
++      List<RefRight> rights = rightsByProject.get(project);
++      if (rights == null) {
++        fail("Unknown project key: " + project);
++      } else {
++        rights.add(right);
++      }
+     }
+   }
+ 
+   private ProjectControl user(AccountGroup.Id... memberOf) {
++    return controlFor(local, memberOf);
++  }
++
++  private ProjectControl multi(AccountGroup.Id... memberOf) {
++    return controlFor(multi, memberOf);
++  }
++
++  private ProjectControl controlFor(Project.NameKey project,
++      AccountGroup.Id... memberOf) {
+     RefControl.Factory refControlFactory = new RefControl.Factory() {
+       @Override
+       public RefControl create(final ProjectControl projectControl, final String ref) {
+         return new RefControl(systemConfig, projectControl, ref);
+       }
+     };
++    initProjectStates();
+     return new ProjectControl(Collections.<AccountGroup.Id> emptySet(),
+         Collections.<AccountGroup.Id> emptySet(), refControlFactory,
+-        new MockUser(memberOf), newProjectState());
++        new MockUser(memberOf), projectCache.get(project));
+   }
+ 
+-  private ProjectState newProjectState() {
+-    ProjectCache projectCache = null;
+-    Project.NameKey wildProject = new Project.NameKey("-- All Projects --");
+-    ProjectControl.AssistedFactory projectControlFactory = null;
+-    ProjectState ps =
++  private void initProjectStates() {
++    if (! initedProjectStates) {
++      initedProjectStates = true;
++      initProjectState(wildProject);
++
++      initProjectState(gparent);
++
++      initProjectState(parent, gparent);
++      initProjectState(parentA, gparent);
++      initProjectState(parentB, gparent);
++
++      initProjectState(local, parent);
++      initProjectState(multi, parentA, parentB);
++    }
++  }
++
++  private void initProjectState(Project.NameKey child, Project.NameKey... parents) {
++    Project project = new Project(child);
++    project.setParents(new HashSet<Project.NameKey>(Arrays.asList(parents)));
++    projectCache.put(child,
+         new ProjectState(anonymousUser, projectCache, wildProject,
+-            projectControlFactory, new Project(parent), localRights);
+-    ps.setInheritedRights(inheritedRights);
+-    return ps;
++            projectControlFactory, project, rightsByProject.get(child))
++      );
+   }
+ 
+   private class MockUser extends CurrentUser {
+@@ -318,4 +602,26 @@ public class RefControlTest extends TestCase {
+       return Collections.emptySet();
+     }
+   }
++
++  private static class HashProjectCacheImpl implements ProjectCache {
++    private final Map<Project.NameKey, ProjectState> byName;
++
++    public HashProjectCacheImpl() {
++      byName = new HashMap<Project.NameKey, ProjectState>();
++    }
++
++    public ProjectState get(Project.NameKey projectName) {
++      return byName.get(projectName);
++    }
++
++    public void put(Project.NameKey projectName, ProjectState ps) {
++      byName.put(projectName, ps);
++    }
++
++    public void evict(Project p) {
++    }
++
++    public void evictAll() {
++    }
++  }
+ }
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/AdminSetParent.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/AdminSetParent.java
+deleted file mode 100644
+index bf82a42..0000000
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/AdminSetParent.java
++++ /dev/null
+@@ -1,138 +0,0 @@
+-// Copyright (C) 2010 The Android Open Source Project
+-//
+-// Licensed under the Apache License, Version 2.0 (the "License");
+-// you may not use this file except in compliance with the License.
+-// You may obtain a copy of the License at
+-//
+-// http://www.apache.org/licenses/LICENSE-2.0
+-//
+-// Unless required by applicable law or agreed to in writing, software
+-// distributed under the License is distributed on an "AS IS" BASIS,
+-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-// See the License for the specific language governing permissions and
+-// limitations under the License
+-
+-package com.google.gerrit.sshd.commands;
+-
+-import com.google.gerrit.reviewdb.Project;
+-import com.google.gerrit.reviewdb.ReviewDb;
+-import com.google.gerrit.server.config.WildProjectName;
+-import com.google.gerrit.server.project.ProjectCache;
+-import com.google.gerrit.server.project.ProjectControl;
+-import com.google.gerrit.server.project.ProjectState;
+-import com.google.gerrit.sshd.AdminCommand;
+-import com.google.gerrit.sshd.BaseCommand;
+-import com.google.gwtorm.client.OrmException;
+-import com.google.inject.Inject;
+-
+-import org.apache.sshd.server.Environment;
+-import org.kohsuke.args4j.Argument;
+-import org.kohsuke.args4j.Option;
+-
+-import java.util.ArrayList;
+-import java.util.Collections;
+-import java.util.HashSet;
+-import java.util.List;
+-import java.util.Set;
+-
+-@AdminCommand
+-final class AdminSetParent extends BaseCommand {
+-  @Option(name = "--parent", aliases = {"-p"}, metaVar = "NAME", usage = "new parent project")
+-  private ProjectControl newParent;
+-
+-  @Argument(index = 0, required = true, multiValued = true, metaVar = "NAME", usage = "projects to modify")
+-  private List<ProjectControl> children = new ArrayList<ProjectControl>();
+-
+-  @Inject
+-  private ReviewDb db;
+-
+-  @Inject
+-  private ProjectCache projectCache;
+-
+-  @Inject
+-  @WildProjectName
+-  private Project.NameKey wildProject;
+-
+-  @Override
+-  public void start(final Environment env) {
+-    startThread(new CommandRunnable() {
+-      @Override
+-      public void run() throws Exception {
+-        parseCommandLine();
+-        updateParents();
+-      }
+-    });
+-  }
+-
+-  private void updateParents() throws OrmException, UnloggedFailure {
+-    final StringBuilder err = new StringBuilder();
+-    final Set<Project.NameKey> grandParents = new HashSet<Project.NameKey>();
+-    Project.NameKey newParentKey;
+-
+-    grandParents.add(wildProject);
+-
+-    if (newParent != null) {
+-      newParentKey = newParent.getProject().getNameKey();
+-
+-      // Catalog all grandparents of the "parent", we want to
+-      // catch a cycle in the parent pointers before it occurs.
+-      //
+-      Project.NameKey gp = newParent.getProject().getParent();
+-      while (gp != null && grandParents.add(gp)) {
+-        final ProjectState s = projectCache.get(gp);
+-        if (s != null) {
+-          gp = s.getProject().getParent();
+-        } else {
+-          break;
+-        }
+-      }
+-    } else {
+-      // If no parent was selected, set to NULL to use the default.
+-      //
+-      newParentKey = null;
+-    }
+-
+-    for (final ProjectControl pc : children) {
+-      final Project.NameKey key = pc.getProject().getNameKey();
+-      final String name = pc.getProject().getName();
+-
+-      if (wildProject.equals(key)) {
+-        // Don't allow the wild card project to have a parent.
+-        //
+-        err.append("error: Cannot set parent of '" + name + "'\n");
+-        continue;
+-      }
+-
+-      if (grandParents.contains(key)) {
+-        // Try to avoid creating a cycle in the parent pointers.
+-        //
+-        err.append("error: Cycle exists between '" + name + "' and '"
+-            + (newParentKey != null ? newParentKey.get() : wildProject.get())
+-            + "'\n");
+-        continue;
+-      }
+-
+-      final Project child = db.projects().get(key);
+-      if (child == null) {
+-        // Race condition? Its in the cache, but not the database.
+-        //
+-        err.append("error: Project '" + name + "' not found\n");
+-        continue;
+-      }
+-
+-      child.setParent(newParentKey);
+-      db.projects().update(Collections.singleton(child));
+-    }
+-
+-    // Invalidate all projects in cache since inherited rights were changed.
+-    //
+-    projectCache.evictAll();
+-
+-    if (err.length() > 0) {
+-      while (err.charAt(err.length() - 1) == '\n') {
+-        err.setLength(err.length() - 1);
+-      }
+-      throw new UnloggedFailure(1, err.toString());
+-    }
+-  }
+-}
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/AdminSetParents.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/AdminSetParents.java
+new file mode 100644
+index 0000000..0fee861
+--- /dev/null
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/AdminSetParents.java
+@@ -0,0 +1,161 @@
++// Copyright (C) 2010 The Android Open Source Project
++//
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy of the License at
++//
++// http://www.apache.org/licenses/LICENSE-2.0
++//
++// Unless required by applicable law or agreed to in writing, software
++// distributed under the License is distributed on an "AS IS" BASIS,
++// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++// See the License for the specific language governing permissions and
++// limitations under the License
++
++package com.google.gerrit.sshd.commands;
++
++import com.google.gerrit.reviewdb.Project;
++import com.google.gerrit.reviewdb.ProjectParent;
++import com.google.gerrit.reviewdb.ReviewDb;
++import com.google.gerrit.server.IdentifiedUser;
++import com.google.gerrit.server.config.WildProjectName;
++import com.google.gerrit.server.project.ProjectCache;
++import com.google.gerrit.server.project.ProjectControl;
++import com.google.gerrit.server.project.ProjectState;
++import com.google.gerrit.server.project.ProjectUtil;
++import com.google.gerrit.sshd.AdminCommand;
++import com.google.gerrit.sshd.BaseCommand;
++import com.google.gwtorm.client.OrmDuplicateKeyException;
++import com.google.gwtorm.client.OrmException;
++import com.google.inject.Inject;
++
++import org.apache.sshd.server.Environment;
++import org.kohsuke.args4j.Argument;
++import org.kohsuke.args4j.Option;
++
++import java.util.ArrayList;
++import java.util.Collections;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Set;
++
++@AdminCommand
++final class AdminSetParents extends BaseCommand {
++  @Option(name = "--clear", aliases = {"-c"}, usage = "clear all parent projects (except for wildcard)")
++  private boolean clear;
++
++  @Option(name = "--set", aliases = {"-s"}, metaVar = "NAME", usage = "set parent project(s)")
++  private List<ProjectControl> setParents = new ArrayList<ProjectControl>();
++
++  @Option(name = "--add", aliases = {"-a"}, metaVar = "NAME", usage = "add parent project(s)")
++  private List<ProjectControl> addParents = new ArrayList<ProjectControl>();
++
++  @Option(name = "--remove", aliases = {"-r"}, metaVar = "NAME", usage = "remove parent project(s)")
++  private List<ProjectControl> rmParents = new ArrayList<ProjectControl>();
++
++  @Argument(index = 0, required = true, multiValued = true, metaVar = "NAME", usage = "projects to modify")
++  private List<ProjectControl> children = new ArrayList<ProjectControl>();
++
++  @Inject
++  private ReviewDb db;
++
++  @Inject
++  private ProjectCache projectCache;
++
++  @Inject
++  private ProjectUtil util;
++
++  @Inject
++  private IdentifiedUser currentUser;
++
++  @Override
++  public void start(final Environment env) {
++    startThread(new CommandRunnable() {
++      @Override
++      public void run() throws Exception {
++        parseCommandLine();
++        updateParents();
++      }
++    });
++  }
++
++  private void updateParents() throws OrmException, UnloggedFailure {
++    final StringBuilder err = new StringBuilder();
++    List<ProjectControl> empty = new ArrayList<ProjectControl>(0);
++
++    for (final ProjectControl cCtrl : children) {
++      if (clear) {
++        err.append(setParents(cCtrl, empty));
++      }
++
++      if (setParents.size() > 0) {
++        err.append(setParents(cCtrl, setParents));
++      }
++
++      // Delete first since old parents might prevent new ones from being added
++      for (final ProjectControl pCtrl : rmParents) {
++        err.append(removeParent(cCtrl, pCtrl));
++      }
++      for (final ProjectControl pCtrl : addParents) {
++        err.append(util.addParent(cCtrl, pCtrl));
++      }
++    }
++
++    // Invalidate all projects in cache since inherited rights were changed.
++    //
++    projectCache.evictAll();
++
++    if (err.length() > 0) {
++      while (err.charAt(err.length() - 1) == '\n') {
++        err.setLength(err.length() - 1);
++      }
++      throw new UnloggedFailure(1, err.toString());
++    }
++  }
++
++  private String setParents(ProjectControl cCtrl, List<ProjectControl> pCtrl)
++      throws OrmException {
++    final StringBuilder err = new StringBuilder();
++    final Project.NameKey cKey = cCtrl.getProject().getNameKey();
++
++    Set<ProjectParent> remove = new HashSet(
++      db.projectParents().byProject(cKey).toList());
++
++    Set<ProjectControl> add = new HashSet(pCtrl.size());
++    for (ProjectControl pc: pCtrl) {
++      ProjectParent pp = new ProjectParent(cKey, pc.getProject().getNameKey());
++      if (! remove.remove(pp)) {
++        add.add(pc);
++      }
++    }
++
++    // Delete first since old parents might prevent new ones from being added
++    for (ProjectParent pp: remove) {
++      err.append(removeParent(cCtrl,
++        projectCache.get(pp.getParentKey()).controlFor(currentUser)));
++    }
++
++    for (ProjectControl pc: add) {
++      err.append(util.addParent(cCtrl, pc));
++    }
++    return err.toString();
++  }
++
++  private String removeParent(ProjectControl cCtrl, ProjectControl pCtrl)
++      throws OrmException {
++    final Project.NameKey cKey = cCtrl.getProject().getNameKey();
++    final Project.NameKey pKey = pCtrl.getProject().getNameKey();
++    final ProjectParent.Key key = new ProjectParent.Key(cKey, pKey);
++
++    final ProjectParent pp = db.projectParents().get(key);
++    if (pp == null) {
++      final String cname = cCtrl.getProject().getName();
++      final String pname = pCtrl.getProject().getName();
++      return "error: Project '" + cname + "' is not a child of '" + pname + "'\n";
++    }
++
++    db.projectParents().delete(Collections.singleton(pp));
++
++    return "";
++  }
++}
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/CreateProject.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/CreateProject.java
+index 0be02fd..fec2ecd 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/CreateProject.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/CreateProject.java
+@@ -27,7 +27,9 @@ import com.google.gerrit.server.config.ProjectCreatorGroups;
+ import com.google.gerrit.server.config.ProjectOwnerGroups;
+ import com.google.gerrit.server.git.GitRepositoryManager;
+ import com.google.gerrit.server.git.ReplicationQueue;
++import com.google.gerrit.server.project.ProjectCache;
+ import com.google.gerrit.server.project.ProjectControl;
++import com.google.gerrit.server.project.ProjectUtil;
+ import com.google.gerrit.sshd.BaseCommand;
+ import com.google.gwtorm.client.OrmException;
+ import com.google.inject.Inject;
+@@ -65,8 +67,8 @@ final class CreateProject extends BaseCommand {
+   @Option(name = "--owner", aliases = {"-o"}, usage = "owner(s) of project")
+   private List<AccountGroup.Id> ownerIds;
+ 
+-  @Option(name = "--parent", aliases = {"-p"}, metaVar = "NAME", usage = "parent project")
+-  private ProjectControl newParent;
++  @Option(name = "--parent", aliases = {"-p"}, metaVar = "NAME", usage = "parent project(s)")
++  private List<ProjectControl> parents = new ArrayList<ProjectControl>();
+ 
+   @Option(name = "--permissions-only", usage = "create project for use only as parent")
+   private boolean permissionsOnly;
+@@ -101,6 +103,12 @@ final class CreateProject extends BaseCommand {
+   private ReviewDb db;
+ 
+   @Inject
++  private ProjectUtil util;
++
++  @Inject
++  private ProjectCache projectCache;
++
++  @Inject
+   private GitRepositoryManager repoManager;
+ 
+   @Inject
+@@ -207,7 +215,7 @@ final class CreateProject extends BaseCommand {
+     }
+   }
+ 
+-  private void createProject() throws OrmException {
++  private void createProject() throws OrmException, Failure {
+     List<RefRight> access = new ArrayList<RefRight>();
+     for (AccountGroup.Id ownerId : ownerIds) {
+       final RefRight.Key prk =
+@@ -227,11 +235,21 @@ final class CreateProject extends BaseCommand {
+     newProject.setUseSignedOffBy(signedOffBy);
+     newProject.setUseContentMerge(contentMerge);
+     newProject.setRequireChangeID(requireChangeID);
+-    if (newParent != null) {
+-      newProject.setParent(newParent.getProject().getNameKey());
+-    }
+ 
+     db.projects().insert(Collections.singleton(newProject));
++
++    if (parents.size() > 0) {
++      final StringBuilder err = new StringBuilder();
++      ProjectControl ctrl = projectCache.get(nameKey).controlFor(currentUser);
++      for (ProjectControl parent: parents) {
++        err.append(util.addParent(ctrl, parent));
++      }
++      projectCache.evictAll();
++      String e = err.toString();
++      if (! "".equals(e)) {
++        throw new Failure(1, e);
++      }
++    }
+   }
+ 
+   private void validateParameters() throws Failure {
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ListProjects.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ListProjects.java
+index bb04f7a..f92d5bb 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ListProjects.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/ListProjects.java
+@@ -35,6 +35,7 @@ import java.io.IOException;
+ import java.io.PrintWriter;
+ import java.util.ArrayList;
+ import java.util.List;
++import java.util.Set;
+ import java.util.TreeMap;
+ 
+ final class ListProjects extends BaseCommand {
+@@ -93,7 +94,7 @@ final class ListProjects extends BaseCommand {
+     }
+ 
+     try {
+-      for (final Project p : db.projects().all()) {
++      for (Project p : db.projects().all()) {
+         if (p.getNameKey().equals(wildProject)) {
+           // This project "doesn't exist". At least not as a repository.
+           //
+@@ -106,6 +107,7 @@ final class ListProjects extends BaseCommand {
+           //
+           continue;
+         }
++        p = e.getProject();
+ 
+         final ProjectControl pctl = e.controlFor(currentUser);
+ 
+@@ -142,13 +144,15 @@ final class ListProjects extends BaseCommand {
+         // Builds the inheritance tree using a list.
+         //
+         for (final TreeNode key : treeMap.values()) {
+-          final String parentName = key.getParentName();
+-          if (parentName != null) {
+-            final TreeNode node = treeMap.get((String)parentName);
+-            if (node != null) {
+-              node.addChild(key);
+-            } else {
+-              sortedNodes.add(key);
++          Set<Project.NameKey> parents = key.getProject().getParents();
++          if (parents.size() > 0) {
++            for (Project.NameKey parent : parents) {
++              final TreeNode node = treeMap.get(parent.get());
++              if (node != null) {
++                node.addChild(key);
++              } else {
++                sortedNodes.add(key);
++              }
+             }
+           } else {
+             sortedNodes.add(key);
+@@ -217,18 +221,6 @@ final class ListProjects extends BaseCommand {
+     }
+ 
+     /**
+-     * Returns the project parent name
+-     * @return Project parent name
+-     */
+-    public String getParentName() {
+-      if (project.getParent() != null) {
+-        return project.getParent().get();
+-      }
+-
+-      return null;
+-    }
+-
+-    /**
+      * Adds a child to the list
+      * @param node TreeNode child
+      */
+diff --git a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/MasterCommandModule.java b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/MasterCommandModule.java
+index 466d454..0599d89 100644
+--- a/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/MasterCommandModule.java
++++ b/gerrit-sshd/src/main/java/com/google/gerrit/sshd/commands/MasterCommandModule.java
+@@ -32,7 +32,7 @@ public class MasterCommandModule extends CommandModule {
+     command(gerrit, "gsql").to(AdminQueryShell.class);
+     command(gerrit, "receive-pack").to(Receive.class);
+     command(gerrit, "replicate").to(AdminReplicate.class);
+-    command(gerrit, "set-project-parent").to(AdminSetParent.class);
++    command(gerrit, "set-project-parents").to(AdminSetParents.class);
+     command(gerrit, "review").to(ReviewCommand.class);
+   }
+ }
+-- 
+1.7.4.1
+

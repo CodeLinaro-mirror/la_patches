@@ -1,0 +1,140 @@
+From 531cfaf85c23ca89a60dad757a46ae9caa943584 Mon Sep 17 00:00:00 2001
+From: Martin Fick <mfick@codeaurora.org>
+Date: Wed, 23 Nov 2011 14:13:47 -0700
+Subject: [PATCH] Remove reviewed checkbox from the diff preferences
+
+Since the reviewed checkbox is now on the filelist,
+it is redundant to be on the preferences header.
+It was always a bit out of place next to the
+preferences due to the way that it updated the DB
+right away, but the preferences did not.  Of course,
+the fact that it is not really a diff preference
+didn't help either.
+
+Change-Id: Iaab90351e9feaccfe4eeb322d028b747019ff798
+---
+ .../google/gerrit/client/patches/PatchScreen.java  |   12 +-----------
+ .../client/patches/PatchScriptSettingsPanel.java   |    8 --------
+ .../client/patches/PatchScriptSettingsPanel.ui.xml |    9 ---------
+ .../google/gerrit/client/ui/ListenableValue.java   |    7 +++++++
+ 4 files changed, 8 insertions(+), 28 deletions(-)
+
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
+index 39e7316..bc0980e 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScreen.java
+@@ -165,13 +165,6 @@ public abstract class PatchScreen extends Screen implements
+         });
+ 
+     settingsPanel = new PatchScriptSettingsPanel(prefs);
+-    settingsPanel.getReviewedCheckBox().addValueChangeHandler(
+-        new ValueChangeHandler<Boolean>() {
+-          @Override
+-          public void onValueChange(ValueChangeEvent<Boolean> event) {
+-            setReviewedByCurrentUser(event.getValue());
+-          }
+-        });
+   }
+ 
+   @Override
+@@ -186,9 +179,7 @@ public abstract class PatchScreen extends Screen implements
+ 
+   private void update(AccountDiffPreference dp) {
+     // Did the user just turn on auto-review?
+-    if (!settingsPanel.getReviewedCheckBox().getValue() &&
+-        !dp.isManualReview()) {
+-      settingsPanel.getReviewedCheckBox().setValue(true);
++    if (prefs.getOld().isManualReview() && !dp.isManualReview()) {
+       setReviewedByCurrentUser(true);
+     }
+ 
+@@ -451,7 +442,6 @@ public abstract class PatchScreen extends Screen implements
+ 
+     // Mark this file reviewed as soon we display the diff screen
+     if (Gerrit.isSignedIn() && isFirst && !prefs.get().isManualReview()) {
+-      settingsPanel.getReviewedCheckBox().setValue(true);
+       setReviewedByCurrentUser(true /* reviewed */);
+     }
+ 
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.java
+index 8663be0..941994a 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.java
+@@ -79,9 +79,6 @@ public class PatchScriptSettingsPanel extends Composite implements
+   CheckBox showTabs;
+ 
+   @UiField
+-  CheckBox reviewed;
+-
+-  @UiField
+   CheckBox manualReview;
+ 
+   @UiField
+@@ -122,7 +119,6 @@ public class PatchScriptSettingsPanel extends Composite implements
+     initIgnoreWhitespace(ignoreWhitespace);
+     initContext(context);
+     if (!Gerrit.isSignedIn()) {
+-      reviewed.setVisible(false);
+       save.setVisible(false);
+     }
+ 
+@@ -191,10 +187,6 @@ public class PatchScriptSettingsPanel extends Composite implements
+     syntaxHighlighting.setTitle(title);
+   }
+ 
+-  public CheckBox getReviewedCheckBox() {
+-    return reviewed;
+-  }
+-
+   public AccountDiffPreference getValue() {
+     return listenablePrefs.get();
+   }
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.ui.xml b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.ui.xml
+index 4976f1b..0a31a11 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.ui.xml
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/patches/PatchScriptSettingsPanel.ui.xml
+@@ -173,15 +173,6 @@ limitations under the License.
+         <ui:attribute name='text'/>
+       </g:Button>
+     </td>
+-
+-    <td>
+-      <g:CheckBox
+-          ui:field='reviewed'
+-          text='Reviewed'
+-          tabIndex='16'>
+-        <ui:attribute name='text'/>
+-      </g:CheckBox>
+-    </td>
+   </tr>
+ 
+   <tr valign='top'>
+diff --git a/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/ListenableValue.java b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/ListenableValue.java
+index 6dad875..228c6a5 100644
+--- a/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/ListenableValue.java
++++ b/gerrit-gwtui/src/main/java/com/google/gerrit/client/ui/ListenableValue.java
+@@ -27,14 +27,21 @@ public class ListenableValue<T> implements HasValueChangeHandlers<T> {
+   private HandlerManager manager = new HandlerManager(this);
+ 
+   private T value;
++  private T old;
+ 
+   public T get() {
+     return value;
+   }
+ 
++  public T getOld() {
++    return old;
++  }
++
+   public void set(final T value) {
++    old = this.value;
+     this.value = value;
+     fireEvent(new ValueChangeEvent<T>(value) {});
++    old = null;  // Make sure the old value can be gced.
+   }
+ 
+   public void fireEvent(GwtEvent<?> event) {
+-- 
+1.7.6
+
