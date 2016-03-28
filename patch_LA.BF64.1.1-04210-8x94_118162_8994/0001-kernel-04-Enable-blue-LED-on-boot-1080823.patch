@@ -1,0 +1,42 @@
+From d94e74ec26816f5419ed5bff2ae4fc4249ddf4f0 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 26 Aug 2015 11:28:07 -0700
+Subject: [PATCH] kernel-04-Enable-blue-LED-on-boot-1080823
+
+Change-Id: I86d3b4a399a78863006ff801b13c18b5e2ea4ff5
+---
+ arch/arm/boot/dts/qcom/msm-pmi8994.dtsi    | 1 +
+ arch/arm/boot/dts/qcom/msm8994-liquid.dtsi | 5 +++++
+ 2 files changed, 6 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/msm-pmi8994.dtsi b/arch/arm/boot/dts/qcom/msm-pmi8994.dtsi
+index 790b7ae..aecbc2b 100644
+--- a/arch/arm/boot/dts/qcom/msm-pmi8994.dtsi
++++ b/arch/arm/boot/dts/qcom/msm-pmi8994.dtsi
+@@ -579,6 +579,7 @@
+ 				qcom,max-current = <12>;
+ 				qcom,default-state = "off";
+ 				linux,name = "blue";
++				linux,default-trigger = "boot-indication";
+ 			};
+ 		};
+ 
+diff --git a/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi b/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi
+index 95dec29..ec12da6 100644
+--- a/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi
++++ b/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi
+@@ -64,6 +64,11 @@
+ &dsi_dual_jdi_4k_video_1 {
+ 	qcom,cont-splash-enabled;
+ };
++
++&mdss_fb0 {
++	qcom,boot-indication-enabled;
++};
++
+ &mdss_dsi0 {
+ 	qcom,dsi-pref-prim-pan = <&dsi_dual_jdi_4k_video_0>;
+ 	pinctrl-names = "mdss_default", "mdss_sleep";
+-- 
+1.8.2.1
+

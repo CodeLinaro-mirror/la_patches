@@ -1,0 +1,306 @@
+From 747b1d237d7092295d2367fd3b98b01c56af57f3 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 20:02:25 -0700
+Subject: [PATCH 1/2] target: Support dual display on SBC8016
+
+Support LCD/HDMI switching via "oem select" on the SBC8016.
+Use below commands to set 1080p hdmi display, the settings are
+persistent across power cycles:
+* Reboot the device into fastboot mode
+* fastboot oem select-display-panel adv7533_1080p
+* Reboot device
+Use below commands to set 720p hdmi display, the settings are
+persistent across power cycles:
+* Reboot the device into fastboot mode
+* fastboot oem select-display-panel adv7533_720p
+* Reboot device
+Use below commands to set 1080p DSI LCD display,
+the settings are persistent across power cycles:
+* Reboot the device into fastboot mode
+* fastboot oem select-display-panel jdi_1080p_video
+* Reboot device
+
+Change-Id: I3bb97c9acde84bd4e483e45e66b197112b80a819
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ 0001-target-Support-dual-display-on-SBC8016.patch  | 111 +++++++++++++++++++++
+ ...target-msm8916-Enable-boot-LED-indication.patch |  67 +++++++++++++
+ target/msm8916/include/target/display.h            |  13 ++-
+ target/msm8916/init.c                              |   1 +
+ target/msm8916/target_display.c                    |  32 +++++-
+ 5 files changed, 222 insertions(+), 2 deletions(-)
+ create mode 100644 0001-target-Support-dual-display-on-SBC8016.patch
+ create mode 100644 0002-target-msm8916-Enable-boot-LED-indication.patch
+
+diff --git a/0001-target-Support-dual-display-on-SBC8016.patch b/0001-target-Support-dual-display-on-SBC8016.patch
+new file mode 100644
+index 0000000..0affd13
+--- /dev/null
++++ b/0001-target-Support-dual-display-on-SBC8016.patch
+@@ -0,0 +1,111 @@
++From 066a4852bd49932ccaa7f4d935f9ac9c63f90ef2 Mon Sep 17 00:00:00 2001
++From: Ilia Lin <ilialin@codeaurora.org>
++Date: Thu, 16 Apr 2015 11:51:24 +0300
++Subject: [PATCH 1/2] target: Support dual display on SBC8016
++
++Support LCD/HDMI switching via "oem select" on the SBC8016.
++Use below commands to set 1080p hdmi display, the settings are
++persistent across power cycles:
++* Reboot the device into fastboot mode
++* fastboot oem select-display-panel adv7533_1080p
++* Reboot device
++Use below commands to set 720p hdmi display, the settings are
++persistent across power cycles:
++* Reboot the device into fastboot mode
++* fastboot oem select-display-panel adv7533_720p
++* Reboot device
++Use below commands to set 1080p DSI LCD display,
++the settings are persistent across power cycles:
++* Reboot the device into fastboot mode
++* fastboot oem select-display-panel jdi_1080p_video
++* Reboot device
++
++Change-Id: I4edca59c42a0fe81b71698c1529d2a3dd339d8e7
++---
++ target/msm8916/include/target/display.h | 13 ++++++++++++-
++ target/msm8916/init.c                   |  1 +
++ target/msm8916/target_display.c         | 32 +++++++++++++++++++++++++++++++-
++ 3 files changed, 44 insertions(+), 2 deletions(-)
++
++diff --git a/target/msm8916/include/target/display.h b/target/msm8916/include/target/display.h
++index 5b90130..8a0ccc5 100755
++--- a/target/msm8916/include/target/display.h
+++++ b/target/msm8916/include/target/display.h
++@@ -118,7 +118,18 @@ static const uint32_t panel_physical_ctrl[] = {
++ /*---------------------------------------------------------------------------*/
++ /* Other Configuration                                                       */
++ /*---------------------------------------------------------------------------*/
++-#define DISPLAY_CMDLINE_PREFIX " mdss_mdp.panel="
+++#define DISPLAY_CMDLINE_PREFIX	" mdss_mdp.panel="
+++#define ADV7533_CMDLINE_PREFIX	" adv7533_dsi2hdmi.panel="
+++#define HDMI_PANEL_NAME			"hdmi"
+++#define HDMI_CONTROLLER_STRING	"hdmi:0"
+++#define DSI_PANEL_DT_PREFIX				"1:dsi:0:qcom,mdss_dsi_"
+++#define ADV7533_DSI_HDMI_STRING	"dsi:0:qcom,mdss_dsi_adv7533_1080p"
+++#define ADV7533_DSI_HDMI_720p_STRING	"dsi:0:qcom,mdss_dsi_adv7533_720p"
+++#define ADV7533_I2C_HDMI_STRING			"hdmi1080p"
+++#define ADV7533_I2C_HDMI_720p_STRING	"hdmi720p"
+++#define ADV7533_DSI_DSI_STRING	"dsi:0:qcom,mdss_dsi_jdi_1080p_video"
+++#define ADV7533_I2C_DSI_STRING	"dsi"
+++#define ADV7533_MAX_STRING_LEN	73
++ 
++ #define MIPI_FB_ADDR 0x83200000
++ 
++diff --git a/target/msm8916/init.c b/target/msm8916/init.c
++index 691ef6a..766c4f6 100644
++--- a/target/msm8916/init.c
+++++ b/target/msm8916/init.c
++@@ -412,6 +412,7 @@ int target_cont_splash_screen()
++ 		case HW_PLATFORM_MTP:
++ 		case HW_PLATFORM_SURF:
++ 		case HW_PLATFORM_QRD:
+++		case HW_PLATFORM_SBC:
++ 			splash_screen = 1;
++ 			break;
++ 		default:
++diff --git a/target/msm8916/target_display.c b/target/msm8916/target_display.c
++index d0687f7..ea79a59 100755
++--- a/target/msm8916/target_display.c
+++++ b/target/msm8916/target_display.c
++@@ -367,7 +367,37 @@ int target_ldo_ctrl(uint8_t enable, struct msm_panel_info *pinfo)
++ 
++ bool target_display_panel_node(char *panel_name, char *pbuf, uint16_t buf_size)
++ {
++-	return gcdb_display_cmdline_arg(panel_name, pbuf, buf_size);
+++	uint32_t hw_id = board_hardware_id();
+++
+++	dprintf(INFO, "%s:%d: hw_id=%d panel_name=\"%s\"\n", __func__, __LINE__, hw_id, panel_name);
+++
+++	switch (hw_id) {
+++	case HW_PLATFORM_SBC:
+++		while (panel_name[0] == ' ')
+++			panel_name++;
+++
+++		if (0 == strlen(panel_name))
+++			return gcdb_display_cmdline_arg(panel_name, pbuf, buf_size);
+++
+++		strlcpy(pbuf, ADV7533_CMDLINE_PREFIX, buf_size);
+++
+++		if (strstr(panel_name, "adv7533_1080p"))
+++			strlcat(pbuf, ADV7533_I2C_HDMI_STRING, buf_size);
+++		else if (strstr(panel_name, "adv7533_720p"))
+++			strlcat(pbuf, ADV7533_I2C_HDMI_720p_STRING, buf_size);
+++		else
+++			strlcat(pbuf, ADV7533_I2C_DSI_STRING, buf_size);
+++
+++		strlcat(pbuf, DISPLAY_CMDLINE_PREFIX, buf_size);
+++		strlcat(pbuf, DSI_PANEL_DT_PREFIX, buf_size);
+++		strlcat(pbuf, panel_name, buf_size);
+++		break;
+++	case HW_PLATFORM_MTP:
+++	default:
+++		return gcdb_display_cmdline_arg(panel_name, pbuf, buf_size);
+++	}
+++
+++	return true;
++ }
++ 
++ void target_display_init(const char *panel_name)
++-- 
++1.8.2.1
++
+diff --git a/0002-target-msm8916-Enable-boot-LED-indication.patch b/0002-target-msm8916-Enable-boot-LED-indication.patch
+new file mode 100644
+index 0000000..3a46a92
+--- /dev/null
++++ b/0002-target-msm8916-Enable-boot-LED-indication.patch
+@@ -0,0 +1,67 @@
++From 5a6b181a4acb5d6dcc2773a7a1e3808d1f7f8fdd Mon Sep 17 00:00:00 2001
++From: Shimrit Malichi <smalichi@codeaurora.org>
++Date: Sun, 1 Mar 2015 14:07:51 +0200
++Subject: [PATCH 2/2] target: msm8916: Enable boot LED indication
++
++By turning on a LED in apq8016 SBC devices we get a notification
++that the boot process has started. The LED will be turned-off when HLOS
++display takes over.
++
++Change-Id: Ia2d80f2e22c1498c7079ad5832e17524c87e67b1
++---
++ platform/msm8916/include/platform/iomap.h |  2 ++
++ target/msm8916/init.c                     | 18 ++++++++++++++++++
++ 2 files changed, 20 insertions(+)
++
++diff --git a/platform/msm8916/include/platform/iomap.h b/platform/msm8916/include/platform/iomap.h
++index a720d0f..73b462e 100644
++--- a/platform/msm8916/include/platform/iomap.h
+++++ b/platform/msm8916/include/platform/iomap.h
++@@ -252,6 +252,8 @@
++ #define VIDEO_MODE_CTRL             0x010
++ #define HS_TIMER_CTRL               0x0BC
++ 
+++#define GPIO4_BASE                  0xC300
+++
++ #define TCSR_TZ_WONCE               0x193D000
++ #define TCSR_BOOT_MISC_DETECT	    0x193D100
++ #endif
++diff --git a/target/msm8916/init.c b/target/msm8916/init.c
++index 766c4f6..f3f3854 100644
++--- a/target/msm8916/init.c
+++++ b/target/msm8916/init.c
++@@ -185,6 +185,20 @@ uint32_t is_user_force_reset(void)
++ }
++ #endif
++ 
+++int boot_led_ctrl()
+++{
+++	struct pm8x41_mpp mpp;
+++
+++	mpp.base = GPIO4_BASE;
+++	mpp.vin = MPP_VIN2;
+++	mpp.mode = MPP_HIGH;
+++
+++	pm8x41_config_output_mpp(&mpp);
+++	pm8x41_enable_mpp(&mpp, MPP_ENABLE);
+++
+++	return 0;
+++}
+++
++ void target_init(void)
++ {
++ 	uint32_t base_addr;
++@@ -214,6 +228,10 @@ void target_init(void)
++ 
++ 	if (target_use_signed_kernel())
++ 		target_crypto_init_params();
+++
+++	/* Turn-on LED for boot process indication */
+++	if (board_hardware_id() == HW_PLATFORM_SBC)
+++		boot_led_ctrl();
++ }
++ 
++ void target_serialno(unsigned char *buf)
++-- 
++1.8.2.1
++
+diff --git a/target/msm8916/include/target/display.h b/target/msm8916/include/target/display.h
+index 5b90130..8a0ccc5 100755
+--- a/target/msm8916/include/target/display.h
++++ b/target/msm8916/include/target/display.h
+@@ -118,7 +118,18 @@ static const uint32_t panel_physical_ctrl[] = {
+ /*---------------------------------------------------------------------------*/
+ /* Other Configuration                                                       */
+ /*---------------------------------------------------------------------------*/
+-#define DISPLAY_CMDLINE_PREFIX " mdss_mdp.panel="
++#define DISPLAY_CMDLINE_PREFIX	" mdss_mdp.panel="
++#define ADV7533_CMDLINE_PREFIX	" adv7533_dsi2hdmi.panel="
++#define HDMI_PANEL_NAME			"hdmi"
++#define HDMI_CONTROLLER_STRING	"hdmi:0"
++#define DSI_PANEL_DT_PREFIX				"1:dsi:0:qcom,mdss_dsi_"
++#define ADV7533_DSI_HDMI_STRING	"dsi:0:qcom,mdss_dsi_adv7533_1080p"
++#define ADV7533_DSI_HDMI_720p_STRING	"dsi:0:qcom,mdss_dsi_adv7533_720p"
++#define ADV7533_I2C_HDMI_STRING			"hdmi1080p"
++#define ADV7533_I2C_HDMI_720p_STRING	"hdmi720p"
++#define ADV7533_DSI_DSI_STRING	"dsi:0:qcom,mdss_dsi_jdi_1080p_video"
++#define ADV7533_I2C_DSI_STRING	"dsi"
++#define ADV7533_MAX_STRING_LEN	73
+ 
+ #define MIPI_FB_ADDR 0x83200000
+ 
+diff --git a/target/msm8916/init.c b/target/msm8916/init.c
+index 691ef6a..766c4f6 100644
+--- a/target/msm8916/init.c
++++ b/target/msm8916/init.c
+@@ -412,6 +412,7 @@ int target_cont_splash_screen()
+ 		case HW_PLATFORM_MTP:
+ 		case HW_PLATFORM_SURF:
+ 		case HW_PLATFORM_QRD:
++		case HW_PLATFORM_SBC:
+ 			splash_screen = 1;
+ 			break;
+ 		default:
+diff --git a/target/msm8916/target_display.c b/target/msm8916/target_display.c
+index d0687f7..ea79a59 100755
+--- a/target/msm8916/target_display.c
++++ b/target/msm8916/target_display.c
+@@ -367,7 +367,37 @@ int target_ldo_ctrl(uint8_t enable, struct msm_panel_info *pinfo)
+ 
+ bool target_display_panel_node(char *panel_name, char *pbuf, uint16_t buf_size)
+ {
+-	return gcdb_display_cmdline_arg(panel_name, pbuf, buf_size);
++	uint32_t hw_id = board_hardware_id();
++
++	dprintf(INFO, "%s:%d: hw_id=%d panel_name=\"%s\"\n", __func__, __LINE__, hw_id, panel_name);
++
++	switch (hw_id) {
++	case HW_PLATFORM_SBC:
++		while (panel_name[0] == ' ')
++			panel_name++;
++
++		if (0 == strlen(panel_name))
++			return gcdb_display_cmdline_arg(panel_name, pbuf, buf_size);
++
++		strlcpy(pbuf, ADV7533_CMDLINE_PREFIX, buf_size);
++
++		if (strstr(panel_name, "adv7533_1080p"))
++			strlcat(pbuf, ADV7533_I2C_HDMI_STRING, buf_size);
++		else if (strstr(panel_name, "adv7533_720p"))
++			strlcat(pbuf, ADV7533_I2C_HDMI_720p_STRING, buf_size);
++		else
++			strlcat(pbuf, ADV7533_I2C_DSI_STRING, buf_size);
++
++		strlcat(pbuf, DISPLAY_CMDLINE_PREFIX, buf_size);
++		strlcat(pbuf, DSI_PANEL_DT_PREFIX, buf_size);
++		strlcat(pbuf, panel_name, buf_size);
++		break;
++	case HW_PLATFORM_MTP:
++	default:
++		return gcdb_display_cmdline_arg(panel_name, pbuf, buf_size);
++	}
++
++	return true;
+ }
+ 
+ void target_display_init(const char *panel_name)
+-- 
+1.8.2.1
+

@@ -1,0 +1,33 @@
+From aabe94dada47d01c187c1bde9d0c58241a79b270 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Tue, 30 Sep 2014 10:49:13 -0700
+Subject: [PATCH] device-qcom-common-Trepn-Auto-Start-Daemon
+
+Change-Id: Ifbda9c6e6025fc74c2247e79b5f47b9cb8c64893
+---
+ rootdir/etc/init.qcom.sh | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/rootdir/etc/init.qcom.sh b/rootdir/etc/init.qcom.sh
+index 16d699c..92e34d5 100644
+--- a/rootdir/etc/init.qcom.sh
++++ b/rootdir/etc/init.qcom.sh
+@@ -215,6 +215,15 @@ case "$target" in
+         esac
+         start_charger_monitor
+         ;;
++    "apq8084")
++        platformvalue=`cat /sys/devices/soc0/hw_platform`
++        case "$platformvalue" in
++             "Fluid")
++                 start profiler_daemon;;
++             "Liquid")
++                 start profiler_daemon;;
++        esac
++        ;;
+     "msm8226")
+         start_charger_monitor
+         ;;
+-- 
+1.8.2.1
+

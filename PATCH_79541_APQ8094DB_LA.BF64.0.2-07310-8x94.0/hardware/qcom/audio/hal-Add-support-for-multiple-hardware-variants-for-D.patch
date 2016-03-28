@@ -1,0 +1,52 @@
+From 6b8186cb244b10be73b5b57b64baa57e6f066195 Mon Sep 17 00:00:00 2001
+From: Tanya Finkel <tfinkel@codeaurora.org>
+Date: Mon, 13 Oct 2014 13:20:41 +0300
+Subject: [PATCH] hal: Add support for multiple hardware variants for DB8094
+
+Add supports for multiple hardware variants such as front panel
+line out jack, back panel line out jack, front panel microphone jack.
+It require audio HAL to select corresponding entry in the mixer_paths.xml
+file based on HW information.
+
+Change-Id: Ice572a81032b4573bab4c01298eb89fc5a12b9ce
+---
+ hal/msm8974/hw_info.c | 16 ++++++++++++++++
+ 1 file changed, 16 insertions(+)
+
+diff --git a/hal/msm8974/hw_info.c b/hal/msm8974/hw_info.c
+index f7d19f4..4ddecec 100644
+--- a/hal/msm8974/hw_info.c
++++ b/hal/msm8974/hw_info.c
+@@ -119,6 +119,16 @@ static const snd_device_t taiko_DB_variant_devices[] = {
+     SND_DEVICE_IN_QUAD_MIC,
+ };
+ 
++static const snd_device_t tomtom_DB_variant_devices[] = {
++    SND_DEVICE_OUT_SPEAKER,
++    SND_DEVICE_OUT_SPEAKER_EXTERNAL_1,
++    SND_DEVICE_OUT_SPEAKER_EXTERNAL_2,
++    SND_DEVICE_OUT_SPEAKER_AND_HEADPHONES_EXTERNAL_1,
++    SND_DEVICE_OUT_SPEAKER_AND_HEADPHONES_EXTERNAL_2,
++    SND_DEVICE_IN_HANDSET_MIC,
++    SND_DEVICE_IN_HANDSET_MIC_EXTERNAL
++};
++
+ static const snd_device_t taiko_apq8084_sbc_variant_devices[] = {
+     SND_DEVICE_IN_HANDSET_MIC,
+     SND_DEVICE_IN_SPEAKER_MIC,
+@@ -226,6 +236,12 @@ static void  update_hardware_info_8994(struct hardware_info *hw_info, const char
+         hw_info->snd_devices = (snd_device_t *)tomtom_liquid_variant_devices;
+         hw_info->num_snd_devices = ARRAY_SIZE(tomtom_liquid_variant_devices);
+         strlcpy(hw_info->dev_extn, "-liquid", sizeof(hw_info->dev_extn));
++    } else if (!strcmp(snd_card_name, "msm8994-tomtom-db-snd-card")) {
++        strlcpy(hw_info->type, " dragon-board", sizeof(hw_info->type));
++        strlcpy(hw_info->name, "msm8994", sizeof(hw_info->name));
++        hw_info->snd_devices = (snd_device_t *)tomtom_DB_variant_devices;
++        hw_info->num_snd_devices = ARRAY_SIZE(tomtom_DB_variant_devices);
++        strlcpy(hw_info->dev_extn, "-db", sizeof(hw_info->dev_extn));
+     } else {
+         ALOGW("%s: Not an 8994 device", __func__);
+     }
+-- 
+1.8.2.1
+

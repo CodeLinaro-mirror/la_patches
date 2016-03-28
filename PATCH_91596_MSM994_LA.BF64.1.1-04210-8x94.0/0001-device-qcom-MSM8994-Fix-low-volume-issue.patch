@@ -1,0 +1,28 @@
+From 42b72172a2fc1f7edda0320026e6b2c019f06c7b Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Mon, 2 Feb 2015 13:30:24 -0800
+Subject: [PATCH] device-qcom-msm8994-Fix-low-volume-issue
+
+Change-Id: I4283d09bb071315041956d67ea0c9aa938dd1663
+---
+ mixer_paths.xml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/mixer_paths.xml b/mixer_paths.xml
+index 1f8f558..5711c31 100644
+--- a/mixer_paths.xml
++++ b/mixer_paths.xml
+@@ -1537,8 +1537,8 @@
+         <ctl name="SLIM_0_RX Channels" value="Two" />
+         <ctl name="RX3 MIX1 INP1" value="RX1" />
+         <ctl name="RX5 MIX1 INP1" value="RX2" />
+-        <ctl name="RX3 Digital Volume" value="68" />
+-        <ctl name="RX5 Digital Volume" value="68" />
++        <ctl name="RX3 Digital Volume" value="84" />
++        <ctl name="RX5 Digital Volume" value="84" />
+         <ctl name="LINEOUT1 Volume" value="84" />
+         <ctl name="LINEOUT2 Volume" value="84" />
+         <ctl name="COMP2 Switch" value="1" />
+-- 
+1.8.2.1
+

@@ -1,0 +1,224 @@
+From e9c8ae543c46ead20fb64d0674d1e0d4fe39b3f8 Mon Sep 17 00:00:00 2001
+From: Mike Mager <mikemager@codeaurora.org>
+Date: Tue, 14 Oct 2014 15:31:04 -0700
+Subject: [PATCH] Thor: clean up Thor device tree variants
+
+Change-Id: I32776ba65fe2547acfb6836fba502b72a515924f
+---
+ arch/arm/boot/dts/qcom/Makefile                    | 29 +++++++++++-----------
+ .../qcom/apq8084-display-sbc-thor-720p-100.dtsi    | 29 ----------------------
+ .../qcom/apq8084-display-sbc-thor-svga-100.dtsi    | 29 ----------------------
+ .../qcom/apq8084-v1.1-sbc-thor-dual-720p-100.dts   | 14 +++++++++--
+ .../dts/qcom/apq8084-v1.1-sbc-thor-dual-720p.dts   |  6 +----
+ .../qcom/apq8084-v1.1-sbc-thor-dual-svga-100.dts   | 16 ++++++++++--
+ .../dts/qcom/apq8084-v1.1-sbc-thor-dual-svga.dts   |  2 +-
+ 7 files changed, 43 insertions(+), 82 deletions(-)
+ delete mode 100644 arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-720p-100.dtsi
+ delete mode 100644 arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-svga-100.dtsi
+
+diff --git a/arch/arm/boot/dts/qcom/Makefile b/arch/arm/boot/dts/qcom/Makefile
+index 168c3d0..f0ca552 100644
+--- a/arch/arm/boot/dts/qcom/Makefile
++++ b/arch/arm/boot/dts/qcom/Makefile
+@@ -125,21 +125,22 @@ dtb-$(CONFIG_ARCH_APQ8084) += apq8084-v1.0-old-pwr-grid-liquid.dtb \
+ 	apq8084-v1.1-odgx7.dtb
+ 
+ ifdef CONFIG_CRD_THOR_DISPLAY
+-ifdef CONFIG_CRD_THOR_DISPLAY_SVGA
+-ifdef CONFIG_CRD_THOR_DISPLAY_SVGA_100
+-dtb-$(CONFIG_ARCH_APQ8084) += apq8084-v1.1-sbc-thor-dual-svga-100.dtb
++	ifdef CONFIG_CRD_THOR_DISPLAY_SVGA
++		ifdef CONFIG_CRD_THOR_DISPLAY_SVGA_100
++			THOR_DISPLAY_POSTFIX := dual-svga-100
++		else
++			THOR_DISPLAY_POSTFIX := dual-svga
++		endif
++	else
++		ifdef CONFIG_CRD_THOR_DISPLAY_100
++			THOR_DISPLAY_POSTFIX := dual-720p-100
++		else
++			THOR_DISPLAY_POSTFIX := dual-720p
++		endif
++	endif
++	dtb-$(CONFIG_ARCH_APQ8084) += apq8084-v1.1-sbc-thor-$(THOR_DISPLAY_POSTFIX).dtb
+ else
+-dtb-$(CONFIG_ARCH_APQ8084) += apq8084-v1.1-sbc-thor-dual-svga.dtb
+-endif
+-else
+-ifdef CONFIG_CRD_THOR_DISPLAY_100
+-dtb-$(CONFIG_ARCH_APQ8084) += apq8084-v1.1-sbc-thor-dual-720p-100.dtb
+-else
+-dtb-$(CONFIG_ARCH_APQ8084) += apq8084-v1.1-sbc-thor-dual-720p.dtb
+-endif
+-endif
+-else
+-dtb-$(CONFIG_ARCH_APQ8084) += apq8084-v1.1-sbc.dtb
++	dtb-$(CONFIG_ARCH_APQ8084) += apq8084-v1.1-sbc.dtb
+ endif
+ 
+ dtb-$(CONFIG_ARCH_MSM) += msmplutonium-sim.dtb
+diff --git a/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-720p-100.dtsi b/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-720p-100.dtsi
+deleted file mode 100644
+index be842b7..0000000
+--- a/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-720p-100.dtsi
++++ /dev/null
+@@ -1,29 +0,0 @@
+-/*
+- * Copyright (c) 2014, The Linux Foundation. All rights reserved.
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- */
+-
+-#include "dsi-panel-hx7816a-720p-100-dualmipi0-video.dtsi"
+-#include "dsi-panel-hx7816a-720p-100-dualmipi1-video.dtsi"
+-
+-&mdss_dsi0 {
+-	qcom,dsi-pref-prim-pan = <&dsi_dual_hx7816a_720p_100_video_0>;
+-	qcom,platform-reset-gpio = <&msmgpio 96 0>;
+-	qcom,platform-bklight-en-gpio = <&msmgpio 86 0>;
+-};
+-
+-&mdss_dsi1 {
+-	qcom,dsi-pref-prim-pan = <&dsi_dual_hx7816a_720p_100_video_1>;
+-};
+-
+-&mdss_mdp {
+-	qcom,mdss-pref-prim-intf = "dsi";
+-};
+diff --git a/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-svga-100.dtsi b/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-svga-100.dtsi
+deleted file mode 100644
+index f258a212..0000000
+--- a/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-svga-100.dtsi
++++ /dev/null
+@@ -1,29 +0,0 @@
+-/*
+- * Copyright (c) 2014, The Linux Foundation. All rights reserved.
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 and
+- * only version 2 as published by the Free Software Foundation.
+- *
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+- */
+-
+-#include "dsi-panel-hx7816a-svga-100-dualmipi0-video.dtsi"
+-#include "dsi-panel-hx7816a-svga-100-dualmipi1-video.dtsi"
+-
+-&mdss_dsi0 {
+-	qcom,dsi-pref-prim-pan = <&dsi_dual_hx7816a_svga_100_video_0>;
+-	qcom,platform-reset-gpio = <&msmgpio 96 0>;
+-	qcom,platform-bklight-en-gpio = <&msmgpio 86 0>;
+-};
+-
+-&mdss_dsi1 {
+-	qcom,dsi-pref-prim-pan = <&dsi_dual_hx7816a_svga_100_video_1>;
+-};
+-
+-&mdss_mdp {
+-	qcom,mdss-pref-prim-intf = "dsi";
+-};
+diff --git a/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-720p-100.dts b/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-720p-100.dts
+index 78264b6..672b932 100644
+--- a/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-720p-100.dts
++++ b/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-720p-100.dts
+@@ -15,10 +15,20 @@
+ #include "apq8084-v1.1.dtsi"
+ #include "apq8084-sbc.dtsi"
+ #include "apq8084-camera-sensor-sbc.dtsi"
+-#include "apq8084-display-sbc-thor-720p-100.dtsi"
++#include "apq8084-display-sbc-thor-720p.dtsi"
++
++&dsi_dual_hx7816a_720p_video_0 {
++	qcom,mdss-dsi-panel-framerate = <100>;
++	qcom,mdss-dsi-panel-timings = [a9 24 18 00 4e 52 1c 28 1f 03 04 00];
++};
++
++&dsi_dual_hx7816a_720p_video_1 {
++	qcom,mdss-dsi-panel-framerate = <100>;
++	qcom,mdss-dsi-panel-timings = [a9 24 18 00 4e 52 1c 28 1f 03 04 00];
++};
+ 
+ / {
+-	model = "QTI APQ 8084 v1.1 SBC (Thor Dual 720p 100fps)";
++	model = "QTI APQ 8084 v1.1 SBC (Thor Dual 720p 100 fps)";
+ 	compatible = "qcom,apq8084-sbc", "qcom,apq8084", "qcom,sbc";
+ 	qcom,board-id = <24 0>;
+ };
+diff --git a/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-720p.dts b/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-720p.dts
+index 9c94814..98cf013 100644
+--- a/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-720p.dts
++++ b/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-720p.dts
+@@ -12,17 +12,13 @@
+ 
+ /dts-v1/;
+ 
+-#ifdef CONFIG_CRD_THOR_DISPLAY
+-#error foo
+-#endif
+-
+ #include "apq8084-v1.1.dtsi"
+ #include "apq8084-sbc.dtsi"
+ #include "apq8084-camera-sensor-sbc.dtsi"
+ #include "apq8084-display-sbc-thor-720p.dtsi"
+ 
+ / {
+-	model = "QTI APQ 8084 v1.1 SBC (Thor Dual 720p)";
++	model = "QTI APQ 8084 v1.1 SBC (Thor Dual 720p 60 fps)";
+ 	compatible = "qcom,apq8084-sbc", "qcom,apq8084", "qcom,sbc";
+ 	qcom,board-id = <24 0>;
+ };
+diff --git a/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-svga-100.dts b/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-svga-100.dts
+index a57cb35..59c13c0 100644
+--- a/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-svga-100.dts
++++ b/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-svga-100.dts
+@@ -15,10 +15,22 @@
+ #include "apq8084-v1.1.dtsi"
+ #include "apq8084-sbc.dtsi"
+ #include "apq8084-camera-sensor-sbc.dtsi"
+-#include "apq8084-display-sbc-thor-svga-100.dtsi"
++#include "apq8084-display-sbc-thor-svga.dtsi"
++
++&dsi_dual_hx7816a_svga_video_0 {
++	qcom,mdss-dsi-panel-framerate = <100>;
++	qcom,mdss-dsi-v-pulse-width = <123>;
++	qcom,mdss-dsi-panel-timings = [7b 1a 10 00 3e 42 14 1c 15 03 04 00];
++};
++
++&dsi_dual_hx7816a_svga_video_1 {
++	qcom,mdss-dsi-panel-framerate = <100>;
++	qcom,mdss-dsi-v-pulse-width = <123>;
++	qcom,mdss-dsi-panel-timings = [7b 1a 10 00 3e 42 14 1c 15 03 04 00];
++};
+ 
+ / {
+-	model = "QTI APQ 8084 v1.1 SBC (Thor Dual SVGA 100fps)";
++	model = "QTI APQ 8084 v1.1 SBC (Thor Dual SVGA 100 fps)";
+ 	compatible = "qcom,apq8084-sbc", "qcom,apq8084", "qcom,sbc";
+ 	qcom,board-id = <24 0>;
+ };
+diff --git a/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-svga.dts b/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-svga.dts
+index c1aa150..c155af3 100644
+--- a/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-svga.dts
++++ b/arch/arm/boot/dts/qcom/apq8084-v1.1-sbc-thor-dual-svga.dts
+@@ -18,7 +18,7 @@
+ #include "apq8084-display-sbc-thor-svga.dtsi"
+ 
+ / {
+-	model = "QTI APQ 8084 v1.1 SBC (Thor Dual SVGA)";
++	model = "QTI APQ 8084 v1.1 SBC (Thor Dual SVGA 120 fps)";
+ 	compatible = "qcom,apq8084-sbc", "qcom,apq8084", "qcom,sbc";
+ 	qcom,board-id = <24 0>;
+ };
+-- 
+1.8.2.1
+

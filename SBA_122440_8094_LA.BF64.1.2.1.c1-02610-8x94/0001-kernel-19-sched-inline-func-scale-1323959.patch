@@ -1,0 +1,77 @@
+From ac7554bbe155f6617245bb9eaa59d95d9710e0af Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Thu, 10 Sep 2015 17:23:28 -0700
+Subject: [PATCH] sched: inline function scale_load_to_cpu()
+
+Inline relatively small and frequently used function scale_load_to_cpu().
+
+CRs-fixed: 849655
+Change-Id: Id5f60595c394959d78e6da4cc4c18c338fec285b
+Signed-off-by: Joonwoo Park <joonwoop@codeaurora.org>
+---
+ kernel/sched/fair.c  | 15 ---------------
+ kernel/sched/sched.h | 16 +++++++++++++++-
+ 2 files changed, 15 insertions(+), 16 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index c6b7116..1917859 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1484,21 +1484,6 @@ int sched_get_cpu_mostly_idle_nr_run(int cpu)
+ 	return rq->mostly_idle_nr_run;
+ }
+ 
+-/*
+- * 'load' is in reference to "best cpu" at its best frequency.
+- * Scale that in reference to a given cpu, accounting for how bad it is
+- * in reference to "best cpu".
+- */
+-u64 scale_load_to_cpu(u64 task_load, int cpu)
+-{
+-	struct rq *rq = cpu_rq(cpu);
+-
+-	task_load *= (u64)rq->load_scale_factor;
+-	task_load /= 1024;
+-
+-	return task_load;
+-}
+-
+ #ifdef CONFIG_CGROUP_SCHED
+ 
+ static inline int upmigrate_discouraged(struct task_struct *p)
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 3190ee4..ee7a70b 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -765,13 +765,27 @@ extern unsigned int sched_heavy_task;
+ 
+ extern void reset_cpu_hmp_stats(int cpu, int reset_cra);
+ extern void fixup_nr_big_small_task(int cpu, int reset_stats);
+-u64 scale_load_to_cpu(u64 load, int cpu);
+ unsigned int max_task_load(void);
+ extern void sched_account_irqtime(int cpu, struct task_struct *curr,
+ 				 u64 delta, u64 wallclock);
+ unsigned int cpu_temp(int cpu);
+ extern unsigned int nr_eligible_big_tasks(int cpu);
+ 
++/*
++ * 'load' is in reference to "best cpu" at its best frequency.
++ * Scale that in reference to a given cpu, accounting for how bad it is
++ * in reference to "best cpu".
++ */
++static inline u64 scale_load_to_cpu(u64 task_load, int cpu)
++{
++	struct rq *rq = cpu_rq(cpu);
++
++	task_load *= (u64)rq->load_scale_factor;
++	task_load /= 1024;
++
++	return task_load;
++}
++
+ static inline int capacity(struct rq *rq)
+ {
+ 	return rq->capacity;
+-- 
+1.9.1
+

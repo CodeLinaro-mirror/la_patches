@@ -1,0 +1,141 @@
+From 806af065031406a6610118b3b72e9769cb3406a2 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:33:10 -0700
+Subject: [PATCH 07/22] ARM: dts: msm: Fix regulators' configuration
+
+Fix the LDO17 configuration to 3.3V and other regulators specific
+to SBC8016 HW requirements.
+
+Change-Id: Ie3c048dbd2d448fdf030df82a322b4bc778cd761
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/apq8016-sbc.dtsi | 98 +++++++++++++++++----------------
+ 1 file changed, 51 insertions(+), 47 deletions(-)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi b/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi
+index 07599c0..f97356f 100644
+--- a/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi
++++ b/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi
+@@ -352,6 +352,30 @@
+ 	pinctrl-1 = <&mdss_dsi_suspend &mdss_te_suspend>;
+ 
+ 	qcom,platform-reset-gpio = <&msm_gpio 25 0>;
++
++	qcom,panel-supply-entries {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			qcom,panel-supply-entry@0 {
++				reg = <0>;
++				qcom,supply-name = "vdd";
++				qcom,supply-min-voltage = <3300000>;
++				qcom,supply-max-voltage = <3300000>;
++				qcom,supply-enable-load = <100000>;
++				qcom,supply-disable-load = <100>;
++			};
++
++			qcom,panel-supply-entry@1 {
++				reg = <1>;
++				qcom,supply-name = "vddio";
++				qcom,supply-min-voltage = <1800000>;
++				qcom,supply-max-voltage = <1800000>;
++				qcom,supply-enable-load = <100000>;
++				qcom,supply-disable-load = <100>;
++			};
++	};
++
+ };
+ 
+ &dsi_jdi_1080_vid {
+@@ -575,61 +599,41 @@
+ };
+ 
+ /* RPM controlled regulators */
+-&rpm_bus {
+-	rpm-regulator-ldoa4 {
+-		status = "disabled";
+-		pm8916_l4 {
+-			status = "disabled";
+-		};
+-	};
++&pm8916_l4 {
++	status = "disabled";
++};
+ 
+-	rpm-regulator-ldoa10 {
+-		status = "disabled";
+-		pm8916_l10 {
+-			status = "disabled";
+-		};
+-	};
+ 
+-	rpm-regulator-ldoa14 {
+-		status = "disabled";
+-		pm8916_l14 {
+-			status = "disabled";
+-		};
+-	};
++&pm8916_l10 {
++	status = "disabled";
++};
+ 
+-	rpm-regulator-ldoa15 {
+-		pm8916_l15 {
+-			regulator-always-on;
+-		};
+-	};
+ 
+-	rpm-regulator-ldoa16 {
+-		pm8916_l16{
+-			regulator-always-on;
+-		};
+-	};
++&pm8916_l14 {
++	status = "disabled";
++};
+ 
+-	rpm-regulator-ldoa17 {
+-		pm8916_l17 {
+-			regulator-min-microvolt = <3300000>;
+-			regulator-max-microvolt = <3300000>;
+-			qcom,init-voltage = <3300000>;
+-		};
+-	};
+ 
+-	rpm-regulator-ldoa18 {
+-		status = "disabled";
+-		pm8916_l18 {
+-			status = "disabled";
+-		};
+-	};
++&pm8916_l15 {
++	regulator-always-on;
++};
+ 
+-	rpm-regulator-smpa3 {
+-		pm8916_s3{
+-			qcom,init-voltage = <1300000>;
+-		};
+-	};
++&pm8916_l16{
++	regulator-always-on;
++};
++
++&pm8916_l17 {
++	regulator-min-microvolt = <3300000>;
++	regulator-max-microvolt = <3300000>;
++	qcom,init-voltage = <3300000>;
++};
++
++&pm8916_l18 {
++	status = "disabled";
++};
+ 
++&pm8916_s3{
++	qcom,init-voltage = <1300000>;
+ };
+ 
+ &spmi_bus {
+-- 
+1.8.2.1
+

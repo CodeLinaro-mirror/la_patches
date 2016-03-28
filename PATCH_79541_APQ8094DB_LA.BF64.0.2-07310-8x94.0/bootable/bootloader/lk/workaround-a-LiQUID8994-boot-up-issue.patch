@@ -1,0 +1,40 @@
+From 9f41648471fb985b3311af28f679bf8ed23dfd28 Mon Sep 17 00:00:00 2001
+From: Ilia Lin <ilialin@codeaurora.org>
+Date: Mon, 20 Oct 2014 10:33:22 +0300
+Subject: [PATCH] HACK: workaround a LiQUID8994 boot-up issue
+
+Change-Id: I70478bb79b0af64eb7b0b0ee20cf5823f53ff1dc
+---
+ target/msm8994/init.c      | 2 ++
+ target/msm8994/oem_panel.c | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/target/msm8994/init.c b/target/msm8994/init.c
+index 961b5a4..409aaef 100644
+--- a/target/msm8994/init.c
++++ b/target/msm8994/init.c
+@@ -361,6 +361,8 @@ int target_cont_splash_screen()
+ 			case HW_PLATFORM_SURF:
+ 			case HW_PLATFORM_MTP:
+ 			case HW_PLATFORM_FLUID:
++			case HW_PLATFORM_LIQUID:
++			case HW_PLATFORM_DRAGON:
+ 				dprintf(SPEW, "Target_cont_splash=1\n");
+ 				splash_screen = 1;
+ 				break;
+diff --git a/target/msm8994/oem_panel.c b/target/msm8994/oem_panel.c
+index 2d95439..1b31a9d 100644
+--- a/target/msm8994/oem_panel.c
++++ b/target/msm8994/oem_panel.c
+@@ -205,6 +205,8 @@ bool oem_panel_select(const char *panel_name, struct panel_struct *panelstruct,
+ 	case HW_PLATFORM_MTP:
+ 	case HW_PLATFORM_FLUID:
+ 	case HW_PLATFORM_SURF:
++	case HW_PLATFORM_LIQUID:
++	case HW_PLATFORM_DRAGON:
+ 		panel_id = SHARP_WQXGA_DUALDSI_VIDEO_PANEL;
+ 		break;
+ 	default:
+-- 
+1.8.2.1
+

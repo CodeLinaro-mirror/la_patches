@@ -1,0 +1,47 @@
+From f3a704ab2794e1d3b8d2a6440a7decdbb28697e4 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 26 Aug 2015 11:35:31 -0700
+Subject: [PATCH] 
+ packages-apps-Settings-set-Ciphers-when-connect-to-network-1054869
+
+Change-Id: I0b59c72370df3ebc0f2fa90db2aea8ddd547b8aa
+---
+ src/com/android/settings/wifi/WifiConfigController.java | 14 ++++++++++++++
+ 1 file changed, 14 insertions(+)
+
+diff --git a/src/com/android/settings/wifi/WifiConfigController.java b/src/com/android/settings/wifi/WifiConfigController.java
+index db3dbbc..91d7814 100644
+--- a/src/com/android/settings/wifi/WifiConfigController.java
++++ b/src/com/android/settings/wifi/WifiConfigController.java
+@@ -33,7 +33,9 @@ import android.net.StaticIpConfiguration;
+ import android.net.Uri;
+ import android.net.wifi.WifiConfiguration;
+ import android.net.wifi.WifiConfiguration.AuthAlgorithm;
++import android.net.wifi.WifiConfiguration.GroupCipher;
+ import android.net.wifi.WifiConfiguration.KeyMgmt;
++import android.net.wifi.WifiConfiguration.PairwiseCipher;
+ import android.net.wifi.WifiEnterpriseConfig;
+ import android.net.wifi.WifiEnterpriseConfig.Eap;
+ import android.net.wifi.WifiEnterpriseConfig.Phase2;
+@@ -394,6 +396,18 @@ public class WifiConfigController implements TextWatcher,
+             config.networkId = mAccessPoint.networkId;
+         }
+ 
++        for (int i = 0; i< GroupCipher.strings.length;i++){
++            if(mAccessPoint.mScanResult.capabilities.contains(GroupCipher.strings[i])){
++                Log.d(TAG,"Found cipher added to group ciphers: " + GroupCipher.strings[i]);
++                config.allowedGroupCiphers.set(i);
++            }
++        }
++        for (int i = 0; i< PairwiseCipher.strings.length;i++){
++            if(mAccessPoint.mScanResult.capabilities.contains(PairwiseCipher.strings[i])){
++                Log.d(TAG,"Found cipher added to Pairwise ciphers: " + PairwiseCipher.strings[i]);
++                config.allowedPairwiseCiphers.set(i);
++            }
++        }
+         switch (mAccessPointSecurity) {
+             case AccessPoint.SECURITY_NONE:
+                 config.allowedKeyManagement.set(KeyMgmt.NONE);
+-- 
+1.8.2.1
+

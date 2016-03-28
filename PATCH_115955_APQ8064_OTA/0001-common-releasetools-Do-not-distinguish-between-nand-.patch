@@ -1,0 +1,59 @@
+From 905d0db9a16f8d3d7dbdaca35527395df80569af Mon Sep 17 00:00:00 2001
+From: Ameya Thakur <ameyat@codeaurora.org>
+Date: Tue, 1 Jul 2014 12:05:45 -0700
+Subject: [PATCH] common: releasetools: Do not distinguish between nand and
+ emmc devices.
+
+Code cleanup. We no longer support nand based devices on mainline.
+
+Change-Id: Ie2291f82fc6b0fc1972fccd825ce9b1686d1d3cb
+---
+ releasetools.py | 17 ++++-------------
+ 1 file changed, 4 insertions(+), 13 deletions(-)
+
+diff --git a/releasetools.py b/releasetools.py
+index 8127d8b..fb8b73d 100755
+--- a/releasetools.py
++++ b/releasetools.py
+@@ -224,9 +224,8 @@ def IncrementalOTA_Assertions(info):
+ 
+ 
+ def IncrementalOTA_VerifyEnd(info):
+-  if info.type == 'MMC':
+-    OTA_VerifyEnd(info, info.target_version, info.target_zip, info.source_zip)
+-  return
++ OTA_VerifyEnd(info, info.target_version, info.target_zip, info.source_zip)
++ return
+ 
+ 
+ # This function handles only non-HLOS whole partition images
+@@ -344,13 +343,9 @@ def FullOTA_InstallEnd_MTD(info):
+ 
+ 
+ def FullOTA_InstallEnd(info):
+-  if info.type == 'MMC':
+-    FullOTA_InstallEnd_MMC(info)
+-  elif info.type == 'MTD':
+-    FullOTA_InstallEnd_MTD(info)
++  FullOTA_InstallEnd_MMC(info)
+   return
+ 
+-
+ def IncrementalOTA_InstallEnd_MMC(info):
+   OTA_InstallEnd(info)
+   return
+@@ -360,10 +355,6 @@ def IncrementalOTA_InstallEnd_MTD(info):
+   print "warning radio-update: radio update for NAND devices not supported"
+   return
+ 
+-
+ def IncrementalOTA_InstallEnd(info):
+-  if info.type == 'MMC':
+-    IncrementalOTA_InstallEnd_MMC(info)
+-  elif info.type == 'MTD':
+-    IncrementalOTA_InstallEnd_MTD(info)
++  IncrementalOTA_InstallEnd_MMC(info)
+   return
+-- 
+1.9.1
+

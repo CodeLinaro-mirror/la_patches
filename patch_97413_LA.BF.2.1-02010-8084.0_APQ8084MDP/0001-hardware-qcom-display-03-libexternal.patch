@@ -1,0 +1,24 @@
+From 1fcb3aebfbff29aa418f8298489fb2ecbc916c2d Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Thu, 9 Apr 2015 11:16:11 -0700
+Subject: [PATCH] libexternal
+
+Change-Id: I7fac868d14650e35b72c01620c2bf8d5a2a3ce9f
+---
+ Android.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Android.mk b/Android.mk
+index 6984d40..4ebfb29 100644
+--- a/Android.mk
++++ b/Android.mk
+@@ -1,5 +1,5 @@
+ display-hals := libgralloc libgenlock libcopybit liblight libvirtual
+-display-hals += libhwcomposer liboverlay libqdutils libhdmi libqservice
++display-hals += libhwcomposer liboverlay libqdutils libhdmi libexternal libqservice
+ display-hals += libmemtrack hdmi_cec
+ ifeq ($(call is-vendor-board-platform,QCOM),true)
+     include $(call all-named-subdir-makefiles,$(display-hals))
+-- 
+1.8.2.1
+

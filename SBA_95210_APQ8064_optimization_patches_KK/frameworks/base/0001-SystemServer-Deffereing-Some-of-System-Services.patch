@@ -1,0 +1,601 @@
+From 32e9672ab1387b5f44c648cf09fb42247df068d6 Mon Sep 17 00:00:00 2001
+From: Prabhakara Rao Pediredla <prpedi@codeaurora.org>
+Date: Fri, 21 Nov 2014 12:43:29 +0000
+Subject: [PATCH] SystemServer: Deffereing Some of System Services
+
+Modified SystemServer to start Some of its services
+after boot completion , to achieve optimized boot.
+
+Change-Id: If9c733b5187d353ba2ef5ff8ce33608abe053c22
+---
+ services/java/com/android/server/SystemServer.java | 335 +++++++++++----------
+ 1 file changed, 179 insertions(+), 156 deletions(-)
+
+diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
+index 28af2c0..02f5c4038 100644
+--- a/services/java/com/android/server/SystemServer.java
++++ b/services/java/com/android/server/SystemServer.java
+@@ -24,6 +24,7 @@ import android.content.ComponentName;
+ import android.content.ContentResolver;
+ import android.content.Context;
+ import android.content.Intent;
++import android.content.IntentFilter;
+ import android.content.pm.IPackageManager;
+ import android.content.pm.PackageManager;
+ import android.content.res.Configuration;
+@@ -49,6 +50,7 @@ import android.util.EventLog;
+ import android.util.Log;
+ import android.util.Slog;
+ import android.view.WindowManager;
++import android.content.BroadcastReceiver;
+ 
+ import com.android.internal.R;
+ import com.android.internal.os.BinderInternal;
+@@ -141,7 +143,7 @@ class ServerThread {
+         PowerManagerService power = null;
+         DisplayManagerService display = null;
+         BatteryService battery = null;
+-        VibratorService vibrator = null;
++        //VibratorService vibrator = null;
+         AlarmManagerService alarm = null;
+         MountService mountService = null;
+         NetworkManagementService networkManagement = null;
+@@ -156,18 +158,18 @@ class ServerThread {
+         Context context = null;
+         WindowManagerService wm = null;
+         BluetoothManagerService bluetooth = null;
+-        DockObserver dock = null;
++        //DockObserver dock = null;
+         UsbService usb = null;
+         SerialService serial = null;
+         TwilightService twilight = null;
+         UiModeManagerService uiMode = null;
+-        RecognitionManagerService recognition = null;
+-        NetworkTimeUpdateService networkTimeUpdater = null;
+-        CommonTimeManagementService commonTimeMgmtService = null;
++        //RecognitionManagerService recognition = null;
++        //NetworkTimeUpdateService networkTimeUpdater = null;
++        //CommonTimeManagementService commonTimeMgmtService = null;
+         InputManagerService inputManager = null;
+         TelephonyRegistry telephonyRegistry = null;
+         MSimTelephonyRegistry msimTelephonyRegistry = null;
+-        ConsumerIrService consumerIr = null;
++        //ConsumerIrService consumerIr = null;
+ 
+         // Create a handler thread just for the window manager to enjoy.
+         HandlerThread wmHandlerThread = new HandlerThread("WindowManager");
+@@ -299,15 +301,6 @@ class ServerThread {
+             Slog.i(TAG, "Battery Service");
+             battery = new BatteryService(context, lights);
+             ServiceManager.addService("battery", battery);
+-
+-            Slog.i(TAG, "Vibrator Service");
+-            vibrator = new VibratorService(context);
+-            ServiceManager.addService("vibrator", vibrator);
+-
+-            Slog.i(TAG, "Consumer IR Service");
+-            consumerIr = new ConsumerIrService(context);
+-            ServiceManager.addService(Context.CONSUMER_IR_SERVICE, consumerIr);
+-
+             // only initialize the power service after we have started the
+             // lights service, content providers and the battery service.
+             power.init(context, lights, ActivityManagerService.self(), battery,
+@@ -368,14 +361,14 @@ class ServerThread {
+         InputMethodManagerService imm = null;
+         AppWidgetService appWidget = null;
+         NotificationManagerService notification = null;
+-        WallpaperManagerService wallpaper = null;
++        //WallpaperManagerService wallpaper = null;
+         LocationManagerService location = null;
+-        CountryDetectorService countryDetector = null;
++        //CountryDetectorService countryDetector = null;
+         TextServicesManagerService tsms = null;
+         LockSettingsService lockSettings = null;
+         DreamManagerService dreamy = null;
+-        AssetAtlasService atlas = null;
+-        PrintManagerService printManager = null;
++        //AssetAtlasService atlas = null;
++        //PrintManagerService printManager = null;
+         MediaRouterService mediaRouter = null;
+ 
+         // Bring up services needed for UI.
+@@ -464,15 +457,6 @@ class ServerThread {
+                 }
+             }
+ 
+-            if (!disableNonCoreServices) {
+-                try {
+-                    Slog.i(TAG, "Clipboard Service");
+-                    ServiceManager.addService(Context.CLIPBOARD_SERVICE,
+-                            new ClipboardService(context));
+-                } catch (Throwable e) {
+-                    reportWtf("starting Clipboard Service", e);
+-                }
+-            }
+ 
+             if (!disableNetwork) {
+                 try {
+@@ -618,14 +602,6 @@ class ServerThread {
+                 reportWtf("starting Notification Manager", e);
+             }
+ 
+-            try {
+-                Slog.i(TAG, "Device Storage Monitor");
+-                ServiceManager.addService(DeviceStorageMonitorService.SERVICE,
+-                        new DeviceStorageMonitorService(context));
+-            } catch (Throwable e) {
+-                reportWtf("starting DeviceStorageMonitor service", e);
+-            }
+-
+             if (!disableLocation) {
+                 try {
+                     Slog.i(TAG, "Location Manager");
+@@ -635,46 +611,7 @@ class ServerThread {
+                     reportWtf("starting Location Manager", e);
+                 }
+ 
+-                try {
+-                    Slog.i(TAG, "Country Detector");
+-                    countryDetector = new CountryDetectorService(context);
+-                    ServiceManager.addService(Context.COUNTRY_DETECTOR, countryDetector);
+-                } catch (Throwable e) {
+-                    reportWtf("starting Country Detector", e);
+-                }
+             }
+-
+-            if (!disableNonCoreServices) {
+-                try {
+-                    Slog.i(TAG, "Search Service");
+-                    ServiceManager.addService(Context.SEARCH_SERVICE,
+-                            new SearchManagerService(context));
+-                } catch (Throwable e) {
+-                    reportWtf("starting Search Service", e);
+-                }
+-            }
+-
+-            try {
+-                Slog.i(TAG, "DropBox Service");
+-                ServiceManager.addService(Context.DROPBOX_SERVICE,
+-                        new DropBoxManagerService(context, new File("/data/system/dropbox")));
+-            } catch (Throwable e) {
+-                reportWtf("starting DropBoxManagerService", e);
+-            }
+-
+-            if (!disableNonCoreServices && context.getResources().getBoolean(
+-                        R.bool.config_enableWallpaperService)) {
+-                try {
+-                    Slog.i(TAG, "Wallpaper Service");
+-                    if (!headless) {
+-                        wallpaper = new WallpaperManagerService(context);
+-                        ServiceManager.addService(Context.WALLPAPER_SERVICE, wallpaper);
+-                    }
+-                } catch (Throwable e) {
+-                    reportWtf("starting Wallpaper Service", e);
+-                }
+-            }
+-
+             if (!disableMedia && !"0".equals(SystemProperties.get("system_init.startaudioservice"))) {
+                 try {
+                     Slog.i(TAG, "Audio Service");
+@@ -683,17 +620,6 @@ class ServerThread {
+                     reportWtf("starting Audio Service", e);
+                 }
+             }
+-
+-            if (!disableNonCoreServices) {
+-                try {
+-                    Slog.i(TAG, "Dock Observer");
+-                    // Listen for dock station changes
+-                    dock = new DockObserver(context);
+-                } catch (Throwable e) {
+-                    reportWtf("starting DockObserver", e);
+-                }
+-            }
+-
+             if (!disableMedia) {
+                 try {
+                     Slog.i(TAG, "Wired Accessory Manager");
+@@ -741,13 +667,6 @@ class ServerThread {
+             }
+ 
+             if (!disableNonCoreServices) {
+-                try {
+-                    Slog.i(TAG, "Backup Service");
+-                    ServiceManager.addService(Context.BACKUP_SERVICE,
+-                            new BackupManagerService(context));
+-                } catch (Throwable e) {
+-                    Slog.e(TAG, "Failure starting Backup Service", e);
+-                }
+ 
+                 try {
+                     Slog.i(TAG, "AppWidget Service");
+@@ -756,20 +675,6 @@ class ServerThread {
+                 } catch (Throwable e) {
+                     reportWtf("starting AppWidget Service", e);
+                 }
+-
+-                try {
+-                    Slog.i(TAG, "Recognition Service");
+-                    recognition = new RecognitionManagerService(context);
+-                } catch (Throwable e) {
+-                    reportWtf("starting Recognition Service", e);
+-                }
+-            }
+-
+-            try {
+-                Slog.i(TAG, "DiskStats Service");
+-                ServiceManager.addService("diskstats", new DiskStatsService(context));
+-            } catch (Throwable e) {
+-                reportWtf("starting DiskStats Service", e);
+             }
+ 
+             try {
+@@ -784,24 +689,7 @@ class ServerThread {
+                 reportWtf("starting SamplingProfiler Service", e);
+             }
+ 
+-            if (!disableNetwork) {
+-                try {
+-                    Slog.i(TAG, "NetworkTimeUpdateService");
+-                    networkTimeUpdater = new NetworkTimeUpdateService(context);
+-                } catch (Throwable e) {
+-                    reportWtf("starting NetworkTimeUpdate service", e);
+-                }
+-            }
+ 
+-            if (!disableMedia) {
+-                try {
+-                    Slog.i(TAG, "CommonTimeManagementService");
+-                    commonTimeMgmtService = new CommonTimeManagementService(context);
+-                    ServiceManager.addService("commontime_management", commonTimeMgmtService);
+-                } catch (Throwable e) {
+-                    reportWtf("starting CommonTimeManagementService service", e);
+-                }
+-            }
+ 
+             if (!disableNetwork) {
+                 try {
+@@ -823,17 +711,6 @@ class ServerThread {
+                     reportWtf("starting DreamManagerService", e);
+                 }
+             }
+-
+-            if (!disableNonCoreServices && !disableAtlas) {
+-                try {
+-                    Slog.i(TAG, "Assets Atlas Service");
+-                    atlas = new AssetAtlasService(context);
+-                    ServiceManager.addService(AssetAtlasService.ASSET_ATLAS_SERVICE, atlas);
+-                } catch (Throwable e) {
+-                    reportWtf("starting AssetAtlasService", e);
+-                }
+-            }
+-
+             try {
+                 Slog.i(TAG, "IdleMaintenanceService");
+                 new IdleMaintenanceService(context, battery);
+@@ -841,14 +718,6 @@ class ServerThread {
+                 reportWtf("starting IdleMaintenanceService", e);
+             }
+ 
+-            try {
+-                Slog.i(TAG, "Print Service");
+-                printManager = new PrintManagerService(context);
+-                ServiceManager.addService(Context.PRINT_SERVICE, printManager);
+-            } catch (Throwable e) {
+-                reportWtf("starting Print Service", e);
+-            }
+-
+             if (!disableNonCoreServices) {
+                 try {
+                     Slog.i(TAG, "Media Router Service");
+@@ -876,6 +745,7 @@ class ServerThread {
+ 
+         // It is now time to start up the app processes...
+ 
++/*
+         try {
+             vibrator.systemReady();
+         } catch (Throwable e) {
+@@ -889,6 +759,7 @@ class ServerThread {
+                 reportWtf("making Lock Settings Service ready", e);
+             }
+         }
++*/
+ 
+         if (devicePolicy != null) {
+             try {
+@@ -951,28 +822,164 @@ class ServerThread {
+         final NetworkStatsService networkStatsF = networkStats;
+         final NetworkPolicyManagerService networkPolicyF = networkPolicy;
+         final ConnectivityService connectivityF = connectivity;
+-        final DockObserver dockF = dock;
++        //final DockObserver dockF = dock;
+         final UsbService usbF = usb;
+         final TwilightService twilightF = twilight;
+         final UiModeManagerService uiModeF = uiMode;
+         final AppWidgetService appWidgetF = appWidget;
+-        final WallpaperManagerService wallpaperF = wallpaper;
++        //final WallpaperManagerService wallpaperF = wallpaper;
+         final InputMethodManagerService immF = imm;
+-        final RecognitionManagerService recognitionF = recognition;
++        //final RecognitionManagerService recognitionF = recognition;
+         final LocationManagerService locationF = location;
+-        final CountryDetectorService countryDetectorF = countryDetector;
+-        final NetworkTimeUpdateService networkTimeUpdaterF = networkTimeUpdater;
+-        final CommonTimeManagementService commonTimeMgmtServiceF = commonTimeMgmtService;
++        //final CountryDetectorService countryDetectorF = countryDetector;
++        //final NetworkTimeUpdateService networkTimeUpdaterF = networkTimeUpdater;
++        //final CommonTimeManagementService commonTimeMgmtServiceF = commonTimeMgmtService;
+         final TextServicesManagerService textServiceManagerServiceF = tsms;
+         final StatusBarManagerService statusBarF = statusBar;
+-        final DreamManagerService dreamyF = dreamy;
+-        final AssetAtlasService atlasF = atlas;
++        //final DreamManagerService dreamyF = dreamy;
++        //final AssetAtlasService atlasF = atlas;
+         final InputManagerService inputManagerF = inputManager;
+         final TelephonyRegistry telephonyRegistryF = telephonyRegistry;
+         final MSimTelephonyRegistry msimTelephonyRegistryF = msimTelephonyRegistry;
+-        final PrintManagerService printManagerF = printManager;
++        //final PrintManagerService printManagerF = printManager;
+         final MediaRouterService mediaRouterF = mediaRouter;
+-
++        BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
++            public void onReceive(final Context context, Intent intent) {
++            String action = intent.getAction();
++            if (Intent.ACTION_BOOT_COMPLETED.equals(action)) {
++               ActivityManagerService.self().systemReady(new Runnable() {
++            public void run() {
++                Slog.i(TAG, "Making services ready");
++              try {
++                    Slog.i(TAG, "Adding Clipboard Service");
++                    ServiceManager.addService(Context.CLIPBOARD_SERVICE,
++                            new ClipboardService(context));
++                   } catch (Throwable e) {
++                    reportWtf("Starting Clipboard Service", e);
++                  }
++              try {
++                    Slog.i(TAG, "Adding Device Storage Monitor");
++                      ServiceManager.addService(DeviceStorageMonitorService.SERVICE,
++                          new DeviceStorageMonitorService(context));
++                  } catch (Throwable e) {
++                    reportWtf("starting DeviceStorageMonitor service", e);
++                  }
++                try {
++                    Slog.i(TAG, "Adding Search Service");
++                    ServiceManager.addService(Context.SEARCH_SERVICE,
++                            new SearchManagerService(context));
++                } catch (Throwable e) {
++                    reportWtf("starting Search Service", e);
++                }
++                try {
++                     Slog.i(TAG, "Adding DropBox Service");
++                     ServiceManager.addService(Context.DROPBOX_SERVICE,
++                        new DropBoxManagerService(context, new File("/data/system/dropbox")));
++                   } catch (Throwable e) {
++                    reportWtf("starting DropBoxManagerService", e);
++                 }
++                 try {
++                     Slog.i(TAG, "Adding Dock Observer");
++                     DockObserver dock = new DockObserver(context);
++                     dock.systemReady();
++                     } catch (Throwable e) {
++                     reportWtf("starting DropBoxManagerService", e);
++                 }
++                 try {
++                    Slog.i(TAG, "Adding Wallpaper Service");
++                    if (!headless) {
++                      WallpaperManagerService   wallpaper = new WallpaperManagerService(context);
++                      ServiceManager.addService(Context.WALLPAPER_SERVICE, wallpaper);
++                      wallpaper.systemRunning();
++                    }
++                } catch (Throwable e) {
++                    reportWtf("starting Wallpaper Service", e);
++                }
++                try {
++                      CountryDetectorService countryDetector = new CountryDetectorService(context);
++                      if (countryDetector != null)  {
++                        ServiceManager.addService(Context.COUNTRY_DETECTOR, countryDetector);
++                        countryDetector.systemRunning();
++                     }
++                    } catch (Throwable e) {
++                         reportWtf("Notifying CountryDetectorService running", e);
++                   }
++                try {
++                     Slog.i(TAG, "Print Service");
++                     PrintManagerService printManager = new PrintManagerService(context);
++                     ServiceManager.addService(Context.PRINT_SERVICE, printManager);
++                     if(null != printManager) printManager.systemRuning();
++                } catch (Throwable e) {
++                reportWtf("starting Print Service", e);
++            }
++                try {
++                    Slog.i(TAG, "Recognition Service");
++                    RecognitionManagerService recognition = new RecognitionManagerService(context);
++                    if (recognition != null) recognition.systemReady();
++                } catch (Throwable e) {
++                    reportWtf("starting Recognition Service", e);
++                }
++              try {
++                    Slog.i(TAG, "Assets Atlas Service");
++                    AssetAtlasService  atlas = new AssetAtlasService(context);
++                    ServiceManager.addService(AssetAtlasService.ASSET_ATLAS_SERVICE, atlas);
++                    if (atlas != null) atlas.systemRunning();
++                } catch (Throwable e) {
++                    reportWtf("starting AssetAtlasService", e);
++                }
++              try {
++                    Slog.i(TAG, "Adding CommonTimeManagementService");
++                    CommonTimeManagementService commonTimeMgmtService = new CommonTimeManagementService(context);
++                    ServiceManager.addService("commontime_management", commonTimeMgmtService);
++                    commonTimeMgmtService.systemRunning();
++                } catch (Throwable e) {
++                    reportWtf("starting CommonTimeManagementService service", e);
++                }
++              try {
++              Slog.i(TAG, "Adding Consumer IR Service");
++              ConsumerIrService consumerIr = new ConsumerIrService(context);
++              ServiceManager.addService(Context.CONSUMER_IR_SERVICE, consumerIr);
++                  } catch (Throwable e) {
++                    reportWtf("starting  service", e);
++                }
++              try {
++              Slog.i(TAG, "Adding Vibrator Service");
++              VibratorService vibrator = new VibratorService(context);
++              ServiceManager.addService("vibrator", vibrator);
++                 if (null != vibrator ) vibrator.systemReady();
++                 } catch (Throwable e) {
++                    reportWtf("starting Vibrator service", e);
++                }
++               try {
++                   Slog.i(TAG, "Adding NetworkTimeUpdateService");
++                   NetworkTimeUpdateService networkTimeUpdater = new NetworkTimeUpdateService(context);
++                   if (networkTimeUpdater != null) networkTimeUpdater.systemRunning();
++                } catch (Throwable e) {
++                    reportWtf("starting NetworkTimeUpdate service", e);
++                }
++              try {
++                Slog.i(TAG, "DiskStats Service");
++                ServiceManager.addService("diskstats", new DiskStatsService(context));
++            } catch (Throwable e) {
++                reportWtf("starting DiskStats Service", e);
++            }
++             try {
++                    Slog.i(TAG, "Backup Service");
++                    ServiceManager.addService(Context.BACKUP_SERVICE,
++                            new BackupManagerService(context));
++                } catch (Throwable e) {
++                    Slog.e(TAG, "Failure starting Backup Service", e);
++                }
++            }
++        });
++       }
++       }
++    };
++      if (null != context)
++      {
++               context.registerReceiver(mBroadcastReceiver,
++                new IntentFilter(Intent.ACTION_BOOT_COMPLETED));
++      }
+         // We now tell the activity manager it is okay to run third party
+         // code.  It will call back into us once it has gotten to the state
+         // where third party code can really run (but before it has actually
+@@ -987,14 +994,17 @@ class ServerThread {
+                 } catch (Throwable e) {
+                     reportWtf("observing native crashes", e);
+                 }
++/*
+                 if (!headless) {
+                     startSystemUi(contextF);
+                 }
++*/
+                 try {
+                     if (mountServiceF != null) mountServiceF.systemReady();
+                 } catch (Throwable e) {
+                     reportWtf("making Mount Service ready", e);
+                 }
++/*
+                 try {
+                     if (batteryF != null) batteryF.systemReady();
+                 } catch (Throwable e) {
+@@ -1025,31 +1035,37 @@ class ServerThread {
+                 } catch (Throwable e) {
+                     reportWtf("making Dock Service ready", e);
+                 }
++*/
+                 try {
+                     if (usbF != null) usbF.systemReady();
+                 } catch (Throwable e) {
+                     reportWtf("making USB Service ready", e);
+                 }
++/*
+                 try {
+                     if (twilightF != null) twilightF.systemReady();
+                 } catch (Throwable e) {
+                     reportWtf("makin Twilight Service ready", e);
+                 }
++*/
+                 try {
+                     if (uiModeF != null) uiModeF.systemReady();
+                 } catch (Throwable e) {
+                     reportWtf("making UI Mode Service ready", e);
+                 }
++/*
+                 try {
+                     if (recognitionF != null) recognitionF.systemReady();
+                 } catch (Throwable e) {
+                     reportWtf("making Recognition Service ready", e);
+                 }
++*/
+                 Watchdog.getInstance().start();
+ 
+                 // It is now okay to let the various system services start their
+                 // third party code...
+ 
++/*
+                 try {
+                     if (appWidgetF != null) appWidgetF.systemRunning(safeMode);
+                 } catch (Throwable e) {
+@@ -1060,6 +1076,7 @@ class ServerThread {
+                 } catch (Throwable e) {
+                     reportWtf("Notifying WallpaperService running", e);
+                 }
++*/
+                 try {
+                     if (immF != null) immF.systemRunning(statusBarF);
+                 } catch (Throwable e) {
+@@ -1070,6 +1087,7 @@ class ServerThread {
+                 } catch (Throwable e) {
+                     reportWtf("Notifying Location Service running", e);
+                 }
++/*
+                 try {
+                     if (countryDetectorF != null) countryDetectorF.systemRunning();
+                 } catch (Throwable e) {
+@@ -1085,22 +1103,25 @@ class ServerThread {
+                 } catch (Throwable e) {
+                     reportWtf("Notifying CommonTimeManagementService running", e);
+                 }
++*/
+                 try {
+                     if (textServiceManagerServiceF != null)
+                         textServiceManagerServiceF.systemRunning();
+                 } catch (Throwable e) {
+                     reportWtf("Notifying TextServicesManagerService running", e);
+                 }
++/*
+                 try {
+                     if (dreamyF != null) dreamyF.systemRunning();
+                 } catch (Throwable e) {
+                     reportWtf("Notifying DreamManagerService running", e);
+                 }
+-                try {
+-                    if (atlasF != null) atlasF.systemRunning();
++*/
++                /*try {
++                    if (atlas != null) atlasF.systemRunning();
+                 } catch (Throwable e) {
+                     reportWtf("Notifying AssetAtlasService running", e);
+-                }
++                }*/
+                 try {
+                     // TODO(BT) Pass parameter to input manager
+                     if (inputManagerF != null) inputManagerF.systemRunning();
+@@ -1108,6 +1129,7 @@ class ServerThread {
+                     reportWtf("Notifying InputManagerService running", e);
+                 }
+ 
++/*
+                 try {
+                     if (telephonyRegistryF != null) telephonyRegistryF.systemRunning();
+                 } catch (Throwable e) {
+@@ -1125,6 +1147,7 @@ class ServerThread {
+                 } catch (Throwable e) {
+                     reportWtf("Notifying PrintManagerService running", e);
+                 }
++*/
+ 
+                 try {
+                     if (mediaRouterF != null) mediaRouterF.systemRunning();
+-- 
+1.8.2.1
+

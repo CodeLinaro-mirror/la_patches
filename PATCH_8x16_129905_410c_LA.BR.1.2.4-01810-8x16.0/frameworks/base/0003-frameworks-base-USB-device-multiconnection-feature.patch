@@ -1,0 +1,28 @@
+From beba834b0ca7bc123a27fc98e9b54ff3db8cda58 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Wed, 25 Nov 2015 12:55:22 -0800
+Subject: [PATCH 3/3] frameworks/base:USB device multiconnection feature
+
+frameworks/base:USB device multiconnection feature by using USB controll API
+
+Change-Id: I83df68de21d95be29b578ec9388f8ffd926b0e00
+---
+ services/usb/java/com/android/server/usb/UsbHostManager.java | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/services/usb/java/com/android/server/usb/UsbHostManager.java b/services/usb/java/com/android/server/usb/UsbHostManager.java
+index e769bda..115c0a7 100644
+--- a/services/usb/java/com/android/server/usb/UsbHostManager.java
++++ b/services/usb/java/com/android/server/usb/UsbHostManager.java
+@@ -230,6 +230,8 @@ public class UsbHostManager {
+             mNewConfigurations = null;
+             mNewInterfaces = null;
+             mNewEndpoints = null;
++	    mNewConfiguration = null;
++	    mNewInterface = null;
+         }
+     }
+ 
+-- 
+1.8.2.1
+

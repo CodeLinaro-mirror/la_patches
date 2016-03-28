@@ -1,0 +1,210 @@
+From 7470bff12f1f1acfa5767ecb8dc30ade75205071 Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Thu, 10 Sep 2015 17:02:16 -0700
+Subject: [PATCH] sched: Optimize the select_best_cpu() "for" loop
+
+select_best_cpu() is agnostic of the hardware topology. This means that
+certain functions such as task_will_fit() and skip_cpu() are run
+unnecessarily for every CPU in a cluster whereas they need to run only
+once per cluster. Reduce the execution time of select_best_cpu() by
+ensuring these functions run only once per cluster. The frequency domain
+mask is used to identify CPUs that fall in the same cluster.
+
+CRs-fixed: 849655
+Change-Id: Id24208710a0fc6321e24d9a773f00be9312b75de
+Signed-off-by: Syed Rameez Mustafa <rameezmustafa@codeaurora.org>
+[joonwoop@codeaurora.org: added continue after clearing search_cpus.
+ fixed indentations with space.  fixed skip_cpu() to return true when rq ==
+ task_rq.]
+Signed-off-by: Joonwoo Park <joonwoop@codeaurora.org>
+---
+ kernel/sched/fair.c | 100 +++++++++++++++++++++++++++++++++++-----------------
+ 1 file changed, 68 insertions(+), 32 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 12e7863..8037111 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1901,39 +1901,58 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
+ #define EA_MIGRATION		3
+ #define IRQLOAD_MIGRATION	4
+ 
+-static int skip_cpu(struct task_struct *p, u64 task_load, int cpu, int reason)
++static int skip_freq_domain(struct rq *task_rq, struct rq *rq, int reason)
+ {
+-	struct rq *rq = cpu_rq(cpu);
+-	struct rq *task_rq = task_rq(p);
+ 	int skip;
+ 
+ 	if (!reason)
+ 		return 0;
+ 
+-	if (is_reserved(cpu))
+-		return 1;
+-
+ 	switch (reason) {
+ 	case UP_MIGRATION:
+-		skip = (rq->capacity <= task_rq->capacity);
++		skip = rq->capacity <= task_rq->capacity;
+ 		break;
+ 
+ 	case DOWN_MIGRATION:
+-		skip = (rq->capacity >= task_rq->capacity);
++		skip = rq->capacity >= task_rq->capacity;
+ 		break;
+ 
+ 	case EA_MIGRATION:
+-		skip = rq->capacity < task_rq->capacity  ||
+-			power_cost(task_load, cpu) >
+-				power_cost(task_load, task_cpu(p));
++		skip = rq->capacity != task_rq->capacity;
+ 		break;
+ 
+ 	case IRQLOAD_MIGRATION:
+ 		/* Purposely fall through */
+ 
+ 	default:
+-		skip = (rq == task_rq);
++		return 0;
++	}
++
++	return skip;
++}
++
++static int skip_cpu(struct rq *task_rq, struct rq *rq, int cpu,
++		    u64 task_load, int reason)
++{
++	int skip;
++
++	if (!reason)
++		return 0;
++
++	if (is_reserved(cpu))
++		return 1;
++
++	switch (reason) {
++	case EA_MIGRATION:
++		skip = power_cost(task_load, cpu) >
++		       power_cost(task_load, cpu_of(task_rq));
+ 		break;
++
++	case IRQLOAD_MIGRATION:
++		/* Purposely fall through */
++
++	default:
++		skip = (rq == task_rq);
+ 	}
+ 
+ 	return skip;
+@@ -1993,8 +2012,8 @@ static inline int wake_to_idle(struct task_struct *p)
+ static int select_best_cpu(struct task_struct *p, int target, int reason,
+ 			   int sync)
+ {
+-	int i, best_cpu = -1, fallback_idle_cpu = -1, min_cstate_cpu = -1;
+-	int prev_cpu;
++	int i, j, prev_cpu, best_cpu = -1;
++	int fallback_idle_cpu = -1, min_cstate_cpu = -1;
+ 	int cpu_cost, min_cost = INT_MAX;
+ 	int min_idle_cost = INT_MAX, min_busy_cost = INT_MAX;
+ 	u64 tload, cpu_load;
+@@ -2003,8 +2022,9 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
+ 	int boost = sched_boost();
+ 	int cstate, min_cstate = INT_MAX;
+ 	int prefer_idle = -1;
+-	int curr_cpu = smp_processor_id();
+ 	int prefer_idle_override = 0;
++	cpumask_t search_cpus;
++	struct rq *trq;
+ 
+ 	if (reason) {
+ 		prefer_idle = 1;
+@@ -2028,21 +2048,30 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
+ 		goto done;
+ 	}
+ 
+-	/* Todo : Optimize this loop */
+-	for_each_cpu_and(i, tsk_cpus_allowed(p), cpu_online_mask) {
+-
+-		tload =  scale_load_to_cpu(task_load(p), i);
+-		cpu_load = cpu_load_sync(i, sync);
+-		prev_cpu = (i == task_cpu(p));
++	trq = task_rq(p);
++	cpumask_and(&search_cpus, tsk_cpus_allowed(p), cpu_online_mask);
++	for_each_cpu(i, &search_cpus) {
++		struct rq *rq = cpu_rq(i);
+ 
+ 		trace_sched_cpu_load(cpu_rq(i), idle_cpu(i),
+ 				     mostly_idle_cpu_sync(i,
+ 						  cpu_load_sync(i, sync), sync),
+-				     sched_irqload(i), power_cost(tload, i),
++				     sched_irqload(i),
++				     power_cost(scale_load_to_cpu(task_load(p),
++						i), i),
+ 				     cpu_temp(i));
+ 
+-		if (skip_cpu(p, tload, i, reason))
++		if (skip_freq_domain(trq, rq, reason)) {
++			cpumask_andnot(&search_cpus, &search_cpus,
++						&rq->freq_domain_cpumask);
+ 			continue;
++		}
++
++		tload =  scale_load_to_cpu(task_load(p), i);
++		if (skip_cpu(trq, rq, i, tload, reason))
++			continue;
++
++		prev_cpu = (i == task_cpu(p));
+ 
+ 		/*
+ 		 * The least-loaded mostly-idle CPU where the task
+@@ -2050,15 +2079,21 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
+ 		 * where the task will fit.
+ 		 */
+ 		if (!task_load_will_fit(p, tload, i)) {
+-			if (mostly_idle_cpu_sync(i, cpu_load, sync) &&
+-			    !sched_cpu_high_irqload(i)) {
+-				if (cpu_load < min_fallback_load ||
+-				    (cpu_load == min_fallback_load &&
+-				     prev_cpu)) {
+-					min_fallback_load = cpu_load;
+-					fallback_idle_cpu = i;
++			for_each_cpu_and(j, &search_cpus,
++						&rq->freq_domain_cpumask) {
++				cpu_load = cpu_load_sync(j, sync);
++				if (mostly_idle_cpu_sync(j, cpu_load, sync) &&
++						!sched_cpu_high_irqload(j)) {
++					if (cpu_load < min_fallback_load ||
++					    (cpu_load == min_fallback_load &&
++							 j == task_cpu(p))) {
++						min_fallback_load = cpu_load;
++						fallback_idle_cpu = j;
++					}
+ 				}
+ 			}
++			cpumask_andnot(&search_cpus, &search_cpus,
++						&rq->freq_domain_cpumask);
+ 			continue;
+ 		}
+ 
+@@ -2066,6 +2101,7 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
+ 		if (prefer_idle == -1)
+ 			prefer_idle = cpu_rq(i)->prefer_idle;
+ 
++		cpu_load = cpu_load_sync(i, sync);
+ 		if (!eligible_cpu(tload, cpu_load, i, sync))
+ 			continue;
+ 
+@@ -2103,8 +2139,8 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
+ 		 * prefer_idle is set. Otherwise if prefer_idle is unset sync
+ 		 * wakeups will get biased away from the waker CPU.
+ 		 */
+-		if (idle_cpu(i) || (sync && i == curr_cpu && prefer_idle &&
+-				    cpu_rq(i)->nr_running == 1)) {
++		if (idle_cpu(i) || (sync && i == smp_processor_id()
++			&& prefer_idle && cpu_rq(i)->nr_running == 1)) {
+ 			cstate = cpu_rq(i)->cstate;
+ 
+ 			if (cstate > min_cstate)
+-- 
+1.9.1
+

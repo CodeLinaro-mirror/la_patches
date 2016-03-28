@@ -1,0 +1,100 @@
+From 57d13d3c20c568f57164adf29e26803f115063b3 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:42:26 -0700
+Subject: [PATCH 18/22] msm: mdss: Add support for boot LED indication
+
+By turning on the blue LED we get a notification that the boot-
+process has started. The blue LED will be turned-on in
+bootloader and be turned off when HLOS display takes over.
+
+Change-Id: I30bf202571f27dcede8b4cbb43f46bfa4d5e9ebb
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ Documentation/devicetree/bindings/fb/mdss-mdp.txt |  3 +++
+ drivers/video/msm/mdss/mdss_fb.c                  | 15 ++++++++++++++-
+ drivers/video/msm/mdss/mdss_fb.h                  |  4 +++-
+ 3 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/fb/mdss-mdp.txt b/Documentation/devicetree/bindings/fb/mdss-mdp.txt
+index 2960998..c90eb51 100644
+--- a/Documentation/devicetree/bindings/fb/mdss-mdp.txt
++++ b/Documentation/devicetree/bindings/fb/mdss-mdp.txt
+@@ -476,6 +476,9 @@ Subnode properties:
+ - qcom,mdss-idle-power-collapse-enabled: Boolean property that enables support
+ 					for mdss power collapse in idle
+ 					screen use cases with smart panels.
++- qcom,boot-indication-enabled: Boolean property that enables turning on the blue
++				LED for notifying that the device is in boot
++				process.
+ 
+ Example:
+ 	mdss_mdp: qcom,mdss_mdp@fd900000 {
+diff --git a/drivers/video/msm/mdss/mdss_fb.c b/drivers/video/msm/mdss/mdss_fb.c
+index bc1abe4..84e535a 100644
+--- a/drivers/video/msm/mdss/mdss_fb.c
++++ b/drivers/video/msm/mdss/mdss_fb.c
+@@ -27,7 +27,6 @@
+ #include <linux/init.h>
+ #include <linux/ioport.h>
+ #include <linux/kernel.h>
+-#include <linux/leds.h>
+ #include <linux/memory.h>
+ #include <linux/mm.h>
+ #include <linux/module.h>
+@@ -234,6 +233,11 @@ static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
+ 	struct msm_fb_data_type *mfd = dev_get_drvdata(led_cdev->dev->parent);
+ 	int bl_lvl;
+ 
++	if (mfd->boot_notification_led) {
++		led_trigger_event(mfd->boot_notification_led, 0);
++		mfd->boot_notification_led = NULL;
++	}
++
+ 	if (value > mfd->panel_info->brightness_max)
+ 		value = mfd->panel_info->brightness_max;
+ 
+@@ -757,6 +761,15 @@ static int mdss_fb_probe(struct platform_device *pdev)
+ 	if (pdata->next)
+ 		mfd->split_mode = MDP_SPLIT_MODE_LM;
+ 	mfd->mdp = *mdp_instance;
++
++	rc = of_property_read_bool(pdev->dev.of_node,
++		"qcom,boot-indication-enabled");
++
++	if (rc) {
++		led_trigger_register_simple("boot-indication",
++			&(mfd->boot_notification_led));
++	}
++
+ 	INIT_LIST_HEAD(&mfd->proc_list);
+ 
+ 	mutex_init(&mfd->bl_lock);
+diff --git a/drivers/video/msm/mdss/mdss_fb.h b/drivers/video/msm/mdss/mdss_fb.h
+index 00ad37b..e460092 100644
+--- a/drivers/video/msm/mdss/mdss_fb.h
++++ b/drivers/video/msm/mdss/mdss_fb.h
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
++/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 and
+@@ -19,6 +19,7 @@
+ #include <linux/msm_mdp.h>
+ #include <linux/types.h>
+ #include <linux/notifier.h>
++#include <linux/leds.h>
+ 
+ #include "mdss_panel.h"
+ #include "mdss_mdp_splash_logo.h"
+@@ -289,6 +290,7 @@ struct msm_fb_data_type {
+ 	int doze_mode;
+ 
+ 	int fb_mmap_type;
++	struct led_trigger *boot_notification_led;
+ };
+ 
+ static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)
+-- 
+1.8.2.1
+

@@ -1,0 +1,71 @@
+From 29e4179349c2b561071aa280239a306a4bb73c07 Mon Sep 17 00:00:00 2001
+From: Mike Mager <mikemager@codeaurora.org>
+Date: Wed, 20 Aug 2014 16:47:16 -0700
+Subject: [PATCH] Thor: enable dual 720p MIPI DSI displays
+
+Change-Id: I59a33b69fd3474cf53e36748597978f5bd508429
+---
+ target/apq8084/oem_panel.c      | 5 +++++
+ target/apq8084/rules.mk         | 1 +
+ target/apq8084/target_display.c | 8 ++++++++
+ 3 files changed, 14 insertions(+)
+
+diff --git a/target/apq8084/oem_panel.c b/target/apq8084/oem_panel.c
+index 9a97961..2798e8e 100644
+--- a/target/apq8084/oem_panel.c
++++ b/target/apq8084/oem_panel.c
+@@ -209,6 +209,11 @@ int oem_panel_select(const char *panel_name, struct panel_struct *panelstruct,
+ 	case HW_PLATFORM_LIQUID:
+ 		panel_id = JDI_QHD_DUALDSI_CMD_PANEL;
+ 		break;
++#ifdef DISPLAY_TYPE_THOR
++	case HW_PLATFORM_SBC:
++		panel_id = JDI_QHD_DUALDSI_VIDEO_PANEL;
++		break;
++#endif
+ 	default:
+ 		dprintf(CRITICAL, "Display not enabled for %d HW type\n"
+ 					, hw_id);
+diff --git a/target/apq8084/rules.mk b/target/apq8084/rules.mk
+index a3da4d3..227e30d 100644
+--- a/target/apq8084/rules.mk
++++ b/target/apq8084/rules.mk
+@@ -15,6 +15,7 @@ SCRATCH_ADDR := 0x10000000
+ DEFINES += DISPLAY_SPLASH_SCREEN=1
+ DEFINES += DISPLAY_TYPE_MIPI=1
+ DEFINES += DISPLAY_TYPE_DSI6G=1
++DEFINES += DISPLAY_TYPE_THOR
+ 
+ MODULES += \
+ 	dev/keys \
+diff --git a/target/apq8084/target_display.c b/target/apq8084/target_display.c
+index 262b938..02eaf81 100755
+--- a/target/apq8084/target_display.c
++++ b/target/apq8084/target_display.c
+@@ -214,7 +214,11 @@ int target_panel_reset(uint8_t enable, struct panel_reset_sequence *resetseq,
+ 			bkl_gpio.pin_strength, bkl_gpio.pin_state);
+ 
+ 		gpio_set(enable_gpio.pin_id, 2);
++#ifdef DISPLAY_TYPE_THOR
++		gpio_set(bkl_gpio.pin_id, 0);
++#else
+ 		gpio_set(bkl_gpio.pin_id, 2);
++#endif
+ 		/* reset */
+ 		for (i = 0; i < RESET_GPIO_SEQ_LEN; i++) {
+ 			if (resetseq->pin_state[i] == GPIO_STATE_LOW)
+@@ -226,7 +230,11 @@ int target_panel_reset(uint8_t enable, struct panel_reset_sequence *resetseq,
+ 	} else {
+ 		gpio_set(reset_gpio.pin_id, 0);
+ 		gpio_set(enable_gpio.pin_id, 0);
++#ifdef DISPLAY_TYPE_THOR
++		gpio_set(bkl_gpio.pin_id, 2);
++#else
+ 		gpio_set(bkl_gpio.pin_id, 0);
++#endif
+ 	}
+ 
+ 	return NO_ERROR;
+-- 
+1.8.2.1
+

@@ -1,0 +1,169 @@
+From 58d569fbc7c4db537f85ddde08684741047e9174 Mon Sep 17 00:00:00 2001
+From: Rahul Sharma <sharah@codeaurora.org>
+Date: Fri, 9 Jan 2015 12:01:44 +0000
+Subject: [PATCH 01/10] defconfig: msm: defer the initialization of high memory
+
+This change defers the initialization of highmemory during mem_init.
+this will help in reducing the boot time.
+CONFIG_HIGHMEM_DEFER = y saves ~750ms to boot completed
+
+Change-Id: I96c6baa81421cf3327e2efe8accdbe9c07dc72b7
+Signed-off-by: Rahul Sharma <sharah@codeaurora.org>
+---
+ arch/arm/Kconfig                        | 11 ++++++++
+ arch/arm/configs/msm8960-perf_defconfig |  1 +
+ arch/arm/mm/init.c                      |  6 +++++
+ include/linux/highmem.h                 |  3 +++
+ init/main.c                             | 48 +++++++++++++++++++++++++++++++++
+ 5 files changed, 69 insertions(+)
+
+diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+index d7e92c6..651a92f 100644
+--- a/arch/arm/Kconfig
++++ b/arch/arm/Kconfig
+@@ -1863,6 +1863,17 @@ config HIGHMEM
+ 
+ 	  If unsure, say n.
+ 
++config HIGHMEM_DEFER
++	bool "Defer High Memory initialization"
++	depends on HIGHMEM
++	default n
++	help
++	  The initialization of ZONE_HIGHMEM takes long during memory
++	  Initialization in terms of freeing the highmemory pages and
++	  mark them available to the buddy allocator for further allocation.
++	  To optimize the time taken during HIGHMEM init this config defers
++	  highmemory initialization.
++
+ config HIGHPTE
+ 	bool "Allocate 2nd-level pagetables from highmem"
+ 	depends on HIGHMEM
+diff --git a/arch/arm/configs/msm8960-perf_defconfig b/arch/arm/configs/msm8960-perf_defconfig
+index edcfeb2..e0c6626 100644
+--- a/arch/arm/configs/msm8960-perf_defconfig
++++ b/arch/arm/configs/msm8960-perf_defconfig
+@@ -118,6 +118,7 @@ CONFIG_SCHED_MC=y
+ CONFIG_PREEMPT=y
+ CONFIG_AEABI=y
+ CONFIG_HIGHMEM=y
++CONFIG_HIGHMEM_DEFER=y
+ CONFIG_VMALLOC_RESERVE=0x19000000
+ CONFIG_CC_STACKPROTECTOR=y
+ CONFIG_CP_ACCESS=y
+diff --git a/arch/arm/mm/init.c b/arch/arm/mm/init.c
+index 86a551c..912e61f5 100644
+--- a/arch/arm/mm/init.c
++++ b/arch/arm/mm/init.c
+@@ -624,7 +624,11 @@ static void __init free_unused_memmap(struct meminfo *mi)
+ #endif
+ }
+ 
++#ifdef CONFIG_HIGHMEM_DEFER
++void free_highpages(void)
++#else
+ static void __init free_highpages(void)
++#endif
+ {
+ #ifdef CONFIG_HIGHMEM
+ 	unsigned long max_low = max_low_pfn + PHYS_PFN_OFFSET;
+@@ -703,7 +707,9 @@ void __init mem_init(void)
+ 				    __phys_to_pfn(__pa(swapper_pg_dir)), NULL);
+ #endif
+ 
++#ifndef CONFIG_HIGHMEM_DEFER
+ 	free_highpages();
++#endif
+ 
+ 	reserved_pages = free_pages = 0;
+ 
+diff --git a/include/linux/highmem.h b/include/linux/highmem.h
+index c737eb7..122e78f 100644
+--- a/include/linux/highmem.h
++++ b/include/linux/highmem.h
+@@ -36,6 +36,9 @@ static inline void invalidate_kernel_vmap_range(void *vaddr, int size)
+ /* declarations for linux/mm/highmem.c */
+ unsigned int nr_free_highpages(void);
+ extern unsigned long totalhigh_pages;
++#ifdef CONFIG_HIGHMEM_DEFER
++void free_highpages(void);
++#endif
+ 
+ void kmap_flush_unused(void);
+ 
+diff --git a/init/main.c b/init/main.c
+index b2fc496..e273bae 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -79,6 +79,9 @@
+ #include <asm/smp.h>
+ #endif
+ 
++#ifdef CONFIG_HIGHMEM_DEFER
++#include <linux/highmem.h>
++#endif
+ static int kernel_init(void *);
+ 
+ extern void init_IRQ(void);
+@@ -464,6 +467,48 @@ static void __init mm_init(void)
+ 	vmalloc_init();
+ }
+ 
++#ifdef CONFIG_HIGHMEM_DEFER
++static ssize_t defer_show(struct kobject *kobj, struct kobj_attribute *attr,
++				char *buf)
++{
++	free_highpages();
++	return 0;
++}
++
++static struct kobj_attribute defer_attr = {
++	.attr = { .name = "defer", .mode = 0444 },
++	.show = defer_show,
++};
++
++static struct attribute *defer_attrs[] = {
++	&defer_attr.attr,
++	NULL,
++};
++
++static struct attribute_group defer_attr_group = {
++	.attrs = defer_attrs,
++	.name = "highmem",
++};
++
++static void create_sysfs_defer_highmem(void)
++{
++	int err = 0;
++	struct kobject *defer_freehighpages;
++
++	defer_freehighpages = kobject_create_and_add("memory", NULL);
++
++	if (!defer_freehighpages)
++		pr_debug("%s : failed to create kobject\n", __func__);
++
++	err = sysfs_create_group(defer_freehighpages, &defer_attr_group);
++
++	if (err)
++		pr_debug("%s : register sysfs failed\n", __func__);
++	else
++		pr_debug("%s : register sysfs SUCCES\n", __func__);
++}
++#endif
++
+ asmlinkage void __init start_kernel(void)
+ {
+ 	char * command_line;
+@@ -636,6 +681,9 @@ asmlinkage void __init start_kernel(void)
+ 
+ 	ftrace_init();
+ 
++#ifdef CONFIG_HIGHMEM_DEFER
++	create_sysfs_defer_highmem();
++#endif
+ 	/* Do the rest non-__init'ed, we're now alive */
+ 	rest_init();
+ }
+-- 
+1.8.2.1
+

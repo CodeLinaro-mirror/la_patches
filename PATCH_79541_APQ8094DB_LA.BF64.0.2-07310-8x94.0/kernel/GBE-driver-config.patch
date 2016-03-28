@@ -1,0 +1,38 @@
+From 6a0ceb294f0e46ed5ebe0a49dd432949faff3f30 Mon Sep 17 00:00:00 2001
+From: Ilia Lin <ilialin@codeaurora.org>
+Date: Wed, 29 Oct 2014 14:31:40 +0200
+Subject: [PATCH] GBE driver config
+
+Change-Id: I5bb336a7a4698526cbdf7d51bb7b0b51054d4bdb
+---
+ arch/arm64/configs/msm8994-perf_defconfig | 1 +
+ arch/arm64/configs/msm8994_defconfig      | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/arch/arm64/configs/msm8994-perf_defconfig b/arch/arm64/configs/msm8994-perf_defconfig
+index a33f209..c2d77a3 100644
+--- a/arch/arm64/configs/msm8994-perf_defconfig
++++ b/arch/arm64/configs/msm8994-perf_defconfig
+@@ -243,6 +243,7 @@ CONFIG_CNSS_MAC_BUG=y
+ CONFIG_CLD_LL_CORE=y
+ CONFIG_ATH_CARDS=y
+ CONFIG_WIL6210=m
++CONFIG_ATL1C=y
+ CONFIG_INPUT_EVDEV=y
+ CONFIG_INPUT_EVBUG=m
+ CONFIG_KEYBOARD_GPIO=y
+diff --git a/arch/arm64/configs/msm8994_defconfig b/arch/arm64/configs/msm8994_defconfig
+index 19d6a09..641e18f 100644
+--- a/arch/arm64/configs/msm8994_defconfig
++++ b/arch/arm64/configs/msm8994_defconfig
+@@ -250,6 +250,7 @@ CONFIG_ATH_CARDS=y
+ CONFIG_WIL6210=m
+ CONFIG_NET_VENDOR_REALTEK=y
+ CONFIG_R8169=y
++CONFIG_ATL1C=y
+ CONFIG_INPUT_EVDEV=y
+ CONFIG_INPUT_EVBUG=m
+ CONFIG_KEYBOARD_GPIO=y
+-- 
+1.8.2.1
+

@@ -1,0 +1,41 @@
+From a8e25d3c32eae5df235aa85a1ca5234662ca6a3b Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:41:07 -0700
+Subject: [PATCH 16/22] ARM: dts: msm: Enable wlan indication LED
+
+The WLAN indication LED will be turned on/off when
+WLAN will be enabled/disabled respectively.
+
+Change-Id: Ica279c4fcbe59c850776abb420094a0b3bdf4f72
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/apq8016-sbc.dtsi | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi b/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi
+index 6f37e14..fa43c3e 100644
+--- a/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi
++++ b/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi
+@@ -280,6 +280,10 @@
+ 			debounce-interval = <15>;
+ 		};
+ 	};
++
++	qcom,wcnss-wlan@0a000000 {
++		qcom,wlan-indication-enabled;
++	};
+ };
+ 
+ &usb_otg {
+@@ -847,7 +851,7 @@
+ 				qcom,mode-ctrl = <0x60>;
+ 				qcom,mode = "manual";
+ 				linux,default-trigger =
+-					"none";
++					"wlan-indication-led";
+ 			};
+ 		};
+ 	};
+-- 
+1.8.2.1
+

@@ -1,0 +1,44 @@
+From 19c7a7854cd480acc291862d1e31947a45393232 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Mon, 2 Feb 2015 13:47:53 -0800
+Subject: [PATCH] kernel-06-USB-null-pointer-dereference
+
+Change-Id: Iaaebf0fac12f45206ef98962e5db768703ebfdc6
+---
+ drivers/usb/core/hub.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/drivers/usb/core/hub.c b/drivers/usb/core/hub.c
+index 9ef2d2c..52044d0 100644
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -4135,11 +4135,13 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
+ 	else
+ 		speed = usb_speed_string(udev->speed);
+ 
++	#if 0
+ 	if (udev->speed != USB_SPEED_SUPER)
+ 		dev_info(&udev->dev,
+ 				"%s %s USB device number %d using %s\n",
+ 				(udev->config) ? "reset" : "new", speed,
+ 				devnum, udev->bus->controller->driver->name);
++	#endif
+ 
+ 	/* Set up TT records, if needed  */
+ 	if (hdev->tt) {
+@@ -4263,10 +4265,12 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
+ 			}
+ 			if (udev->speed == USB_SPEED_SUPER) {
+ 				devnum = udev->devnum;
++				#if 0
+ 				dev_info(&udev->dev,
+ 						"%s SuperSpeed USB device number %d using %s\n",
+ 						(udev->config) ? "reset" : "new",
+ 						devnum, udev->bus->controller->driver->name);
++				#endif
+ 			}
+ 
+ 			/* cope with hardware quirkiness:
+-- 
+1.8.2.1
+

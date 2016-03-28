@@ -1,0 +1,38 @@
+From cf986fcb82e0a332719ee7f5e66fe63077e89fda Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 26 Aug 2015 11:30:29 -0700
+Subject: [PATCH] kernel-06-Add-GPIO-check-before-free-1168271
+
+Change-Id: I31ec91c996715f20f4938f58adfbefa0d31128c4
+---
+ sound/soc/msm/msm8994.c | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/sound/soc/msm/msm8994.c b/sound/soc/msm/msm8994.c
+index 9dd8620..1a30842 100644
+--- a/sound/soc/msm/msm8994.c
++++ b/sound/soc/msm/msm8994.c
+@@ -376,7 +376,7 @@ static int msm8994_liquid_dock_notify_handler(struct notifier_block *this,
+ 		if (ret < 0) {
+ 			pr_err("%s: Request Irq Failed err = %d\n",
+ 				__func__, ret);
+-			goto fail_dock_gpio;
++			goto fail_gpio_irq;
+ 		}
+ 
+ 		switch_set_state(&msm8994_liquid_dock_dev->audio_sdev,
+@@ -394,9 +394,10 @@ static int msm8994_liquid_dock_notify_handler(struct notifier_block *this,
+ 	}
+ 	return NOTIFY_OK;
+ 
+-fail_dock_gpio:
++fail_gpio_irq:
+ 	gpio_free(msm8994_liquid_dock_dev->plug_gpio);
+ 
++fail_dock_gpio:
+ 	return NOTIFY_DONE;
+ }
+ 
+-- 
+1.8.2.1
+

@@ -1,0 +1,28 @@
+From 714f107303cd3a36591a53d584276772e9fc2606 Mon Sep 17 00:00:00 2001
+From: Siddalingesh Koosalapur <skoosa@codeaurora.org>
+Date: Thu, 29 Jan 2015 07:28:26 +0000
+Subject: [PATCH 2/5] Prioritize "block" sys entry creation to initiate block
+ events early.
+
+Change-Id: I684f7ecc92676c1b92f3370f5255382b84467625
+---
+ init/devices.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/init/devices.c b/init/devices.c
+index 420690e..7675674 100644
+--- a/init/devices.c
++++ b/init/devices.c
+@@ -971,8 +971,8 @@ void device_init(void)
+ 
+     if (stat(coldboot_done, &info) < 0) {
+         t0 = get_usecs();
+-        coldboot("/sys/class");
+         coldboot("/sys/block");
++        coldboot("/sys/class");
+         coldboot("/sys/devices");
+         t1 = get_usecs();
+         fd = open(coldboot_done, O_WRONLY|O_CREAT, 0000);
+-- 
+1.8.2.1
+

@@ -1,0 +1,44 @@
+From e7ff4ac4c1ae508ee99201825b590e4f4c93a2d8 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Thu, 4 Dec 2014 15:09:19 -0800
+Subject: [PATCH] ARM: dts: msm: Fix the appropriate USB phy for DB8094
+
+On DB8094 the QUSB PHY is connected to the primary port.
+
+Change-Id: I0557856b59952d317726a0ff064c1786d8e1b4b8
+Signed-off-by: Tanya Finkel <tfinkel@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+index e723904..3fb035d 100644
+--- a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
++++ b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+@@ -239,9 +239,13 @@
+ 	status = "ok";
+ 	reg = <0xf9a55000 0x400>,
+ 		<0xf9b39000 0x17f>;
++	reg-names = "core", "phy_csr";
+ 	qcom,hsusb-otg-otg-control = <2>; /* PMIC control */
+ 	qcom,hsusb-otg-mode = <1>;   /* USB_PERIPHERAL */
+-	qcom,hsusb-otg-phy-type = <3>; /* QUSB_ULPI_PHY */
++	qcom,hsusb-otg-phy-type = <4>; /* QUSB_ULPI_PHY */
++	qcom,hsusb-otg-phy-init-seq =
++		<0x80 0xA0 0x84 0xA5 0x88 0x81 0x8c 0x85 0xffffffff>;
++
+ 	vbus_otg-supply = <&vph_pwr_vreg>;
+ 	qcom,dp-manual-pullup;
+ 
+@@ -253,7 +257,7 @@
+ 		 <&clock_gcc clk_gcc_usb_phy_cfg_ahb2phy_clk>,
+ 		 <&clock_gcc clk_gcc_qusb2_phy_reset>;
+ 	clock-names = "core_clk", "iface_clk", "sleep_clk", "xo",
+-			"phy_ref_clk", "ahb2phy_clk", "phy_reset";
++			"phy_ref_clk", "phy_csr_clk", "phy_reset_clk";
+ };
+ 
+ &usb3 {
+-- 
+1.8.2.1
+

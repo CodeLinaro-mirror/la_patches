@@ -1,0 +1,182 @@
+From 609678e9a807e6817f78a74aca45dbed48a55882 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 26 Aug 2015 11:09:17 -0700
+Subject: [PATCH] frameworks-base-02-Basic-Support-RSSI-for-60GHz-band-1084157
+
+Change-Id: Ie0b2192aedacd7f7124c92ec03d924ab5dd5d270
+---
+ wifi/java/android/net/wifi/ScanResult.java        | 15 ++++++
+ wifi/java/android/net/wifi/WifiConfiguration.java | 57 +++++++++++++++++++++++
+ 2 files changed, 72 insertions(+)
+
+diff --git a/wifi/java/android/net/wifi/ScanResult.java b/wifi/java/android/net/wifi/ScanResult.java
+index 9729c91..e09d79c 100644
+--- a/wifi/java/android/net/wifi/ScanResult.java
++++ b/wifi/java/android/net/wifi/ScanResult.java
+@@ -196,12 +196,27 @@ public class ScanResult implements Parcelable {
+ 
+     /**
+      * @hide
++     * */
++    public boolean is60GHz() {
++       return ScanResult.is60GHz(frequency);
++    }
++
++    /**
++     * @hide
+      * TODO: makes real freq boundaries
+      */
+     public static boolean is5GHz(int freq) {
+         return freq > 4900 && freq < 5900;
+     }
+ 
++    /**
++     * @hide
++     * A bit wider than regulatory [57240, 63720]
++     */
++    public static boolean is60GHz(int freq) {
++        return freq > 57000 && freq < 64000;
++    }
++
+     /** information element from beacon
+      * @hide
+      */
+diff --git a/wifi/java/android/net/wifi/WifiConfiguration.java b/wifi/java/android/net/wifi/WifiConfiguration.java
+index 28669ad..eb93fa6 100644
+--- a/wifi/java/android/net/wifi/WifiConfiguration.java
++++ b/wifi/java/android/net/wifi/WifiConfiguration.java
+@@ -444,6 +444,17 @@ public class WifiConfiguration implements Parcelable {
+     /** @hide **/
+     public static int BAD_RSSI_5 = -82;
+ 
++    /** @hide
++     * Based on scale RSSI= -101 + [0,20,40,60,80,100]
++     * **/
++    public static int GOOD_RSSI_60 = -40;
++
++    /** @hide **/
++    public static int LOW_RSSI_60 = -60;
++
++    /** @hide **/
++    public static int BAD_RSSI_60 = -80;
++
+     /** @hide **/
+     public static int UNWANTED_BLACKLIST_SOFT_BUMP = 4;
+ 
+@@ -463,11 +474,20 @@ public class WifiConfiguration implements Parcelable {
+     public static int UNBLACKLIST_THRESHOLD_5_HARD = -56;
+ 
+     /** @hide **/
++    public static final int UNBLACKLIST_THRESHOLD_60_SOFT = -60;
++
++    /** @hide **/
++    public static final int UNBLACKLIST_THRESHOLD_60_HARD = -82;
++
++    /** @hide **/
+     public static int INITIAL_AUTO_JOIN_ATTEMPT_MIN_24 = -80;
+ 
+     /** @hide **/
+     public static int INITIAL_AUTO_JOIN_ATTEMPT_MIN_5 = -70;
+ 
++    /** @hide **/
++    public static int INITIAL_AUTO_JOIN_ATTEMPT_MIN_60 = -82;
++
+     /** @hide
+      * 5GHz band is prefered low over 2.4 if the 5GHz RSSI is higher than this threshold */
+     public static int A_BAND_PREFERENCE_RSSI_THRESHOLD = -65;
+@@ -477,6 +497,12 @@ public class WifiConfiguration implements Parcelable {
+     public static int G_BAND_PREFERENCE_RSSI_THRESHOLD = -75;
+ 
+     /** @hide
++     * 60GHz band is penalized if the 60GHz RSSI is lower than this threshold
++     * Irrelevant as for end of 2014
++     * **/
++    public static int AD_BAND_PREFERENCE_RSSI_THRESHOLD = -81;
++
++    /** @hide
+      * Boost given to RSSI on a home network for the purpose of calculating the score
+      * This adds stickiness to home networks, as defined by:
+      * - less than 4 known BSSIDs
+@@ -499,27 +525,36 @@ public class WifiConfiguration implements Parcelable {
+     public final class Visibility {
+         public int rssi5;   // strongest 5GHz RSSI
+         public int rssi24;  // strongest 2.4GHz RSSI
++        public int rssi60;  // Strongest 60GHz RSSI
+         public int num5;    // number of BSSIDs on 5GHz
+         public int num24;   // number of BSSIDs on 2.4GHz
++        public int num60;   // number of BSSIDs on 60GHz
+         public long age5;   // timestamp of the strongest 5GHz BSSID (last time it was seen)
+         public long age24;  // timestamp of the strongest 2.4GHz BSSID (last time it was seen)
++        public long age60;  // timestamp of the strongest 60GHz BSSID (last time it was seen)
+         public String BSSID24;
+         public String BSSID5;
++        public String BSSID60;
+ 
+         public Visibility() {
+             rssi5 = INVALID_RSSI;
+             rssi24 = INVALID_RSSI;
++            rssi60 = INVALID_RSSI;
+         }
+ 
+         public Visibility(Visibility source) {
+             rssi5 = source.rssi5;
+             rssi24 = source.rssi24;
++            rssi60 = source.rssi60;
+             age24 = source.age24;
+             age5 = source.age5;
++            age60 = source.age60;
+             num24 = source.num24;
+             num5 = source.num5;
++            num60 = source.num60;
+             BSSID5 = source.BSSID5;
+             BSSID24 = source.BSSID24;
++            BSSID60 = source.BSSID60;
+         }
+ 
+         @Override
+@@ -540,6 +575,17 @@ public class WifiConfiguration implements Parcelable {
+                 sbuf.append(",");
+                 sbuf.append(Integer.toString(num5));
+                 if (BSSID5 != null) sbuf.append(",").append(BSSID5);
++            } else {
++                sbuf.append("*");
++            }
++            sbuf.append(" - ");
++            if (rssi60 > INVALID_RSSI) {
++                sbuf.append(Integer.toString(rssi60));
++                sbuf.append(",");
++                sbuf.append(Integer.toString(num60));
++                if (BSSID60 != null) sbuf.append(",").append(BSSID60);
++            } else {
++                sbuf.append("*");
+             }
+             sbuf.append("]");
+             return sbuf.toString();
+@@ -581,6 +627,11 @@ public class WifiConfiguration implements Parcelable {
+                 //strictly speaking: [2412, 2482]
+                 //number of known BSSID on 2.4Ghz band
+                 status.num24 = status.num24 + 1;
++            } else if (result.is60GHz()) {
++                //strictly speaking: [57240, 63720] according regulatory DB,
++                //but the code in ScanResult is not regulatory compliant as well
++                //number of known BSSID on 60Ghz band
++                status.num60 = status.num60 + 1;
+             }
+ 
+             if ((now_ms - result.seen) > age) continue;
+@@ -597,6 +648,12 @@ public class WifiConfiguration implements Parcelable {
+                     status.age24 = result.seen;
+                     status.BSSID24 = result.BSSID;
+                 }
++            } else if (result.is60GHz()) {
++                if (result.level > status.rssi60) {
++                    status.rssi60 = result.level;
++                    status.age60 = result.seen;
++                    status.BSSID60 = result.BSSID;
++                }
+             }
+         }
+         visibility = status;
+-- 
+1.8.2.1
+

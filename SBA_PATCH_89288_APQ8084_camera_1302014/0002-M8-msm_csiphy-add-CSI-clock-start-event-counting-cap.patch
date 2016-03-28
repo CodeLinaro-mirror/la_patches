@@ -1,0 +1,233 @@
+From f00048cd574f443c40387f17189882f7c6e3020f Mon Sep 17 00:00:00 2001
+From: Mike Mager <mikemager@codeaurora.org>
+Date: Thu, 29 Jan 2015 18:20:22 -0800
+Subject: [PATCH] M8: msm_csiphy: add CSI clock start event counting capability
+
+Add ioctls to allow apps to detect whether the CSI clock start
+event is detected by the CSI PHY.
+
+Also changed the ISR to only clear interrupt registers that
+have been set.
+
+Change-Id: I4d416b97c64899a2dfdacd79decaa3c411ac5369
+---
+ .../msm/camera_v2/sensor/csiphy/msm_csiphy.c       | 109 ++++++++++++++++++---
+ .../msm/camera_v2/sensor/csiphy/msm_csiphy.h       |   5 +-
+ include/media/msm_cam_sensor.h                     |   6 ++
+ 3 files changed, 104 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/media/platform/msm/camera_v2/sensor/csiphy/msm_csiphy.c b/drivers/media/platform/msm/camera_v2/sensor/csiphy/msm_csiphy.c
+index d7e940e..c767651 100644
+--- a/drivers/media/platform/msm/camera_v2/sensor/csiphy/msm_csiphy.c
++++ b/drivers/media/platform/msm/camera_v2/sensor/csiphy/msm_csiphy.c
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2011-2014, The Linux Foundation. All rights reserved.
++/* Copyright (c) 2011-2015, The Linux Foundation. All rights reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 and
+@@ -26,8 +26,12 @@
+ #define CSIPHY_VERSION_V22                        0x01
+ #define CSIPHY_VERSION_V20                        0x00
+ #define CSIPHY_VERSION_V30                        0x10
++#define CSIPHY_VERSION_V31                        0x31
+ #define MSM_CSIPHY_DRV_NAME                      "msm_csiphy"
+ 
++#define MIPI_CSIPHY_INTERRUPT_MASK6_ADDR         (MIPI_CSIPHY_INTERRUPT_MASK_ADDR + 0x4*6)
++#define LN1_CLK_START                            0x1
++
+ #undef CDBG
+ #ifdef CONFIG_MSMB_CAMERA_DEBUG
+ #define CDBG(fmt, args...) pr_err(fmt, ##args)
+@@ -137,18 +141,22 @@ static irqreturn_t msm_csiphy_irq(int irq_num, void *data)
+ 		irq = msm_camera_io_r(
+ 			csiphy_dev->base +
+ 			MIPI_CSIPHY_INTERRUPT_STATUS0_ADDR + 0x4*i);
+-		msm_camera_io_w(irq,
+-			csiphy_dev->base +
+-			MIPI_CSIPHY_INTERRUPT_CLEAR0_ADDR + 0x4*i);
+-		pr_err("%s MIPI_CSIPHY%d_INTERRUPT_STATUS%d = 0x%x\n",
+-			 __func__, csiphy_dev->pdev->id, i, irq);
+-		msm_camera_io_w(0x1, csiphy_dev->base +
+-			MIPI_CSIPHY_GLBL_IRQ_CMD_ADDR);
+-		msm_camera_io_w(0x0, csiphy_dev->base +
+-			MIPI_CSIPHY_GLBL_IRQ_CMD_ADDR);
+-		msm_camera_io_w(0x0,
+-			csiphy_dev->base +
+-			MIPI_CSIPHY_INTERRUPT_CLEAR0_ADDR + 0x4*i);
++		if (irq != 0) {
++			if (i == 6 && ((irq & LN1_CLK_START) == LN1_CLK_START))
++				csiphy_dev->clk_start_cnt++;
++			msm_camera_io_w(irq,
++				csiphy_dev->base +
++				MIPI_CSIPHY_INTERRUPT_CLEAR0_ADDR + 0x4*i);
++			pr_err("%s MIPI_CSIPHY%d_INTERRUPT_STATUS%d = 0x%x\n",
++				 __func__, csiphy_dev->pdev->id, i, irq);
++			msm_camera_io_w(0x1, csiphy_dev->base +
++				MIPI_CSIPHY_GLBL_IRQ_CMD_ADDR);
++			msm_camera_io_w(0x0, csiphy_dev->base +
++				MIPI_CSIPHY_GLBL_IRQ_CMD_ADDR);
++			msm_camera_io_w(0x0,
++				csiphy_dev->base +
++				MIPI_CSIPHY_INTERRUPT_CLEAR0_ADDR + 0x4*i);
++		}
+ 	}
+ 	return IRQ_HANDLED;
+ }
+@@ -169,6 +177,24 @@ static int msm_csiphy_subdev_g_chip_ident(struct v4l2_subdev *sd,
+ 	return 0;
+ }
+ 
++static void msm_csiphy_enable_irq(struct csiphy_device *csiphy_dev)
++{
++	pr_debug("%s %p %d\n", __func__, csiphy_dev, csiphy_dev->irq_enable_ref_count);
++	if (csiphy_dev->irq_enable_ref_count++)
++		return;
++	enable_irq(csiphy_dev->irq->start);
++}
++
++static void msm_csiphy_disable_irq(struct csiphy_device *csiphy_dev)
++{
++	pr_debug("%s %p %d\n", __func__, csiphy_dev, csiphy_dev->irq_enable_ref_count);
++	if (!csiphy_dev->irq_enable_ref_count)
++		return;
++	if (--csiphy_dev->irq_enable_ref_count)
++		return;
++	disable_irq(csiphy_dev->irq->start);
++}
++
+ #if DBG_CSIPHY
+ static int msm_csiphy_init(struct csiphy_device *csiphy_dev)
+ {
+@@ -251,7 +277,10 @@ static int msm_csiphy_init(struct csiphy_device *csiphy_dev)
+ 	}
+ 	CDBG("%s:%d called\n", __func__, __LINE__);
+ 
+-	enable_irq(csiphy_dev->irq->start);
++	csiphy_dev->irq_enable_ref_count = 0;
++	csiphy_dev->clk_start_cnt = 0;
++
++	msm_csiphy_enable_irq(csiphy_dev);
+ 
+ 	msm_csiphy_reset(csiphy_dev);
+ 
+@@ -349,6 +378,9 @@ static int msm_csiphy_init(struct csiphy_device *csiphy_dev)
+ 	}
+ 	CDBG("%s:%d called\n", __func__, __LINE__);
+ 
++	csiphy_dev->irq_enable_ref_count = 0;
++	csiphy_dev->clk_start_cnt = 0;
++
+ 	msm_csiphy_reset(csiphy_dev);
+ 
+ 	CDBG("%s:%d called\n", __func__, __LINE__);
+@@ -429,7 +461,7 @@ static int msm_csiphy_release(struct csiphy_device *csiphy_dev, void *arg)
+ 	msm_camera_io_w(0x0, csiphy_dev->base + MIPI_CSIPHY_LNCK_CFG2_ADDR);
+ 	msm_camera_io_w(0x0, csiphy_dev->base + MIPI_CSIPHY_GLBL_PWR_CFG_ADDR);
+ 
+-	disable_irq(csiphy_dev->irq->start);
++	msm_csiphy_disable_irq(csiphy_dev);
+ 
+ 	if (CSIPHY_VERSION == CSIPHY_VERSION_V22) {
+ 		msm_cam_clk_enable(&csiphy_dev->pdev->dev,
+@@ -590,6 +622,47 @@ static int32_t msm_csiphy_get_subdev_id(struct csiphy_device *csiphy_dev,
+ 	return 0;
+ }
+ 
++static int msm_csiphy_get_clk_start_count(struct csiphy_device *csiphy_dev, void *arg)
++{
++	uint32_t *clk_start_cnt = (uint32_t *)arg;
++	if (!clk_start_cnt) {
++		pr_err("%s:%d failed\n", __func__, __LINE__);
++		return -EINVAL;
++	}
++	*clk_start_cnt = csiphy_dev->clk_start_cnt;
++	pr_err("%s:%d clk_start_cnt %d\n", __func__, __LINE__, *clk_start_cnt);
++	return 0;
++}
++
++static int msm_csiphy_enable_clk_start_count(struct csiphy_device *csiphy_dev, void *arg)
++{
++	void __iomem *csiphybase = csiphy_dev->base;
++	uint32_t enable = *(uint32_t*)arg;
++	uint32_t val;
++
++	pr_debug("%s\n", __func__);
++
++	if (!csiphybase) {
++		pr_err("%s: csiphybase NULL\n", __func__);
++		return -EINVAL;
++	}
++
++	if (CSIPHY_VERSION != CSIPHY_VERSION_V31) {
++		pr_err("%s: invalid PHY version\n", __func__);
++		return -EINVAL;
++	}
++
++	val = msm_camera_io_r(csiphybase + MIPI_CSIPHY_INTERRUPT_MASK6_ADDR);
++	val = enable ? (val | LN1_CLK_START) : (val & ~LN1_CLK_START);
++	msm_camera_io_w(val, csiphybase + MIPI_CSIPHY_INTERRUPT_MASK6_ADDR);
++	if (enable)
++		msm_csiphy_enable_irq(csiphy_dev);
++	else
++		msm_csiphy_disable_irq(csiphy_dev);
++
++	return 0;
++}
++
+ static long msm_csiphy_subdev_ioctl(struct v4l2_subdev *sd,
+ 			unsigned int cmd, void *arg)
+ {
+@@ -604,6 +677,12 @@ static long msm_csiphy_subdev_ioctl(struct v4l2_subdev *sd,
+ 	case VIDIOC_MSM_CSIPHY_IO_CFG:
+ 		rc = msm_csiphy_cmd(csiphy_dev, arg);
+ 		break;
++	case VIDIOC_MSM_CSIPHY_ENABLE_CLK_START_COUNT:
++		rc = msm_csiphy_enable_clk_start_count(csiphy_dev, arg);
++		break;
++	case VIDIOC_MSM_CSIPHY_GET_CLK_START_COUNT:
++		rc = msm_csiphy_get_clk_start_count(csiphy_dev, arg);
++		break;
+ 	case VIDIOC_MSM_CSIPHY_RELEASE:
+ 	case MSM_SD_SHUTDOWN:
+ 		rc = msm_csiphy_release(csiphy_dev, arg);
+diff --git a/drivers/media/platform/msm/camera_v2/sensor/csiphy/msm_csiphy.h b/drivers/media/platform/msm/camera_v2/sensor/csiphy/msm_csiphy.h
+index ff97ab7..ea1c971 100644
+--- a/drivers/media/platform/msm/camera_v2/sensor/csiphy/msm_csiphy.h
++++ b/drivers/media/platform/msm/camera_v2/sensor/csiphy/msm_csiphy.h
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
++/* Copyright (c) 2011-2013,2015, The Linux Foundation. All rights reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 and
+@@ -47,6 +47,9 @@ struct csiphy_device {
+ 
+ 	int32_t ref_count;
+ 	uint16_t lane_mask[MAX_CSIPHY];
++
++	uint32_t irq_enable_ref_count;
++	uint32_t clk_start_cnt;
+ };
+ 
+ #define VIDIOC_MSM_CSIPHY_RELEASE \
+diff --git a/include/media/msm_cam_sensor.h b/include/media/msm_cam_sensor.h
+index 7a74b1c..baab60d 100644
+--- a/include/media/msm_cam_sensor.h
++++ b/include/media/msm_cam_sensor.h
+@@ -708,6 +708,12 @@ struct sensor_init_cfg_data {
+ #define VIDIOC_MSM_SENSOR_INIT_CFG \
+ 	_IOWR('V', BASE_VIDIOC_PRIVATE + 10, struct sensor_init_cfg_data)
+ 
++#define VIDIOC_MSM_CSIPHY_ENABLE_CLK_START_COUNT \
++	_IOW('V', BASE_VIDIOC_PRIVATE + 11, uint32_t)
++
++#define VIDIOC_MSM_CSIPHY_GET_CLK_START_COUNT \
++	_IOR('V', BASE_VIDIOC_PRIVATE + 12, uint32_t)
++
+ #define MSM_V4L2_PIX_FMT_META v4l2_fourcc('M', 'E', 'T', 'A') /* META */
+ 
+ #endif /* __LINUX_MSM_CAM_SENSOR_H */
+-- 
+1.8.2.1
+

@@ -1,0 +1,101 @@
+From dd1017d0be3b38da7c63aed87bc79f1c33a9c6cb Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 20:13:00 -0700
+Subject: [PATCH] Audio:hal: Add support of sound card for SBC8016 platform
+
+SBC8016 is a single board computer based on msm8x16 chip-set.
+
+Change-Id: I70a37a48d6b588255302ad4f0d822ff4b4e1f9f1
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ ...dd-support-of-sound-card-for-SBC8016-plat.patch | 46 ++++++++++++++++++++++
+ hal/msm8916/hw_info.c                              | 13 ++++++
+ 2 files changed, 59 insertions(+)
+ create mode 100644 0001-Audio-hal-Add-support-of-sound-card-for-SBC8016-plat.patch
+
+diff --git a/0001-Audio-hal-Add-support-of-sound-card-for-SBC8016-plat.patch b/0001-Audio-hal-Add-support-of-sound-card-for-SBC8016-plat.patch
+new file mode 100644
+index 0000000..bc96279
+--- /dev/null
++++ b/0001-Audio-hal-Add-support-of-sound-card-for-SBC8016-plat.patch
+@@ -0,0 +1,46 @@
++From 0e724e9c1aa1568298274e98221cae7390055fb7 Mon Sep 17 00:00:00 2001
++From: Tanya Finkel <tfinkel@codeaurora.org>
++Date: Mon, 30 Mar 2015 09:19:29 -0700
++Subject: [PATCH] Audio:hal: Add support of sound card for SBC8016 platform
++
++SBC8016 is a single board computer based on msm8x16 chip-set.
++
++Change-Id: I1dcc3591ab2c1dc917da782f1cb30a1fd95e1a83
++---
++ hal/msm8916/hw_info.c | 13 +++++++++++++
++ 1 file changed, 13 insertions(+)
++
++diff --git a/hal/msm8916/hw_info.c b/hal/msm8916/hw_info.c
++index 624850b..a7e5a2e 100644
++--- a/hal/msm8916/hw_info.c
+++++ b/hal/msm8916/hw_info.c
++@@ -92,6 +92,13 @@ static const snd_device_t taiko_DB_variant_devices[] = {
++     SND_DEVICE_IN_QUAD_MIC,
++ };
++ 
+++static const snd_device_t apq8016_sbc_variant_devices[] = {
+++    SND_DEVICE_OUT_SPEAKER,
+++    SND_DEVICE_OUT_SPEAKER_AND_HEADPHONES,
+++    SND_DEVICE_OUT_SPEAKER_AND_ANC_HEADSET,
+++};
+++
+++
++ static const snd_device_t tapan_lite_variant_devices[] = {
++     SND_DEVICE_OUT_SPEAKER,
++     SND_DEVICE_OUT_HEADPHONES,
++@@ -137,6 +144,12 @@ static void update_hardware_info_8x16(struct hardware_info *hw_info, const char
++         hw_info->snd_devices = NULL;
++         hw_info->num_snd_devices = 0;
++         strlcpy(hw_info->dev_extn, "", sizeof(hw_info->dev_extn));
+++    } else if (!strcmp(snd_card_name, "msm8x16-snd-card-sbc")) {
+++        strlcpy(hw_info->type, " sbc", sizeof(hw_info->type));
+++        strlcpy(hw_info->name, "msm8x16", sizeof(hw_info->name));
+++        hw_info->snd_devices = (snd_device_t *)apq8016_sbc_variant_devices;
+++        hw_info->num_snd_devices = ARRAY_SIZE(apq8016_sbc_variant_devices);
+++        strlcpy(hw_info->dev_extn, "-sbc", sizeof(hw_info->dev_extn));
++     } else if (!strcmp(snd_card_name, "msm8x16-skuh-snd-card")) {
++         strlcpy(hw_info->type, "skuh", sizeof(hw_info->type));
++         strlcpy(hw_info->name, "msm8x16", sizeof(hw_info->name));
++-- 
++1.8.2.1
++
+diff --git a/hal/msm8916/hw_info.c b/hal/msm8916/hw_info.c
+index 624850b..a7e5a2e 100644
+--- a/hal/msm8916/hw_info.c
++++ b/hal/msm8916/hw_info.c
+@@ -92,6 +92,13 @@ static const snd_device_t taiko_DB_variant_devices[] = {
+     SND_DEVICE_IN_QUAD_MIC,
+ };
+ 
++static const snd_device_t apq8016_sbc_variant_devices[] = {
++    SND_DEVICE_OUT_SPEAKER,
++    SND_DEVICE_OUT_SPEAKER_AND_HEADPHONES,
++    SND_DEVICE_OUT_SPEAKER_AND_ANC_HEADSET,
++};
++
++
+ static const snd_device_t tapan_lite_variant_devices[] = {
+     SND_DEVICE_OUT_SPEAKER,
+     SND_DEVICE_OUT_HEADPHONES,
+@@ -137,6 +144,12 @@ static void update_hardware_info_8x16(struct hardware_info *hw_info, const char
+         hw_info->snd_devices = NULL;
+         hw_info->num_snd_devices = 0;
+         strlcpy(hw_info->dev_extn, "", sizeof(hw_info->dev_extn));
++    } else if (!strcmp(snd_card_name, "msm8x16-snd-card-sbc")) {
++        strlcpy(hw_info->type, " sbc", sizeof(hw_info->type));
++        strlcpy(hw_info->name, "msm8x16", sizeof(hw_info->name));
++        hw_info->snd_devices = (snd_device_t *)apq8016_sbc_variant_devices;
++        hw_info->num_snd_devices = ARRAY_SIZE(apq8016_sbc_variant_devices);
++        strlcpy(hw_info->dev_extn, "-sbc", sizeof(hw_info->dev_extn));
+     } else if (!strcmp(snd_card_name, "msm8x16-skuh-snd-card")) {
+         strlcpy(hw_info->type, "skuh", sizeof(hw_info->type));
+         strlcpy(hw_info->name, "msm8x16", sizeof(hw_info->name));
+-- 
+1.8.2.1
+

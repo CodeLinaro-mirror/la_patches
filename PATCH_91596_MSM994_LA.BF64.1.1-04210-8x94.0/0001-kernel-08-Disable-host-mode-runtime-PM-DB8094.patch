@@ -1,0 +1,39 @@
+From e2ab281ba2dd6919a02860a391602789e9e1bcbc Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Thu, 5 Feb 2015 12:02:33 -0800
+Subject: [PATCH] kernel-08-Disable-host-mode-runtime-PM
+
+Change-Id: I80301e42ba7ab60ef6d98f842624717ac751c5be
+---
+ drivers/usb/dwc3/host.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/usb/dwc3/host.c b/drivers/usb/dwc3/host.c
+index 88c3b8d..d87edea 100644
+--- a/drivers/usb/dwc3/host.c
++++ b/drivers/usb/dwc3/host.c
+@@ -1,7 +1,7 @@
+ /**
+  * host.c - DesignWare USB3 DRD Controller Host Glue
+  *
+- * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com
++ * Copyright (C) 2011-2015 Texas Instruments Incorporated - http://www.ti.com
+  *
+  * Authors: Felipe Balbi <balbi@ti.com>,
+  *
+@@ -87,6 +87,12 @@ int dwc3_host_init(struct dwc3 *dwc)
+ 		}
+ 	}
+ 
++	/*
++	 * WORKAROUND: currently host mode suspend isn't working well.
++	 * Disable xHCI's runtime PM for now.
++	 */
++	pm_runtime_disable(&dwc->xhci->dev);
++
+ 	return 0;
+ 
+ err1:
+-- 
+1.8.2.1
+

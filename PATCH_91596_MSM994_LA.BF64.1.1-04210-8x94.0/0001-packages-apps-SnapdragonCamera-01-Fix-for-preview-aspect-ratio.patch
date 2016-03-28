@@ -1,0 +1,281 @@
+From f124e4b6cbba292cd022c91e620baeb74edf632c Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Mon, 2 Feb 2015 13:59:23 -0800
+Subject: [PATCH] packages-apps-Snapdragon-01-Fix-for-preview-aspect-ratio
+
+Change-Id: I80926e19ccd50442073f53c956440f715ad1abcb
+---
+ src/com/android/camera/PhotoModule.java | 50 +++++++++++++++++++++++----------
+ src/com/android/camera/PhotoUI.java     | 41 +++++++++++++++++++++------
+ src/com/android/camera/VideoModule.java | 21 +-------------
+ 3 files changed, 69 insertions(+), 43 deletions(-)
+
+diff --git a/src/com/android/camera/PhotoModule.java b/src/com/android/camera/PhotoModule.java
+index 753e533..db52292 100644
+--- a/src/com/android/camera/PhotoModule.java
++++ b/src/com/android/camera/PhotoModule.java
+@@ -636,7 +636,7 @@ public class PhotoModule
+         }
+         Log.v(TAG, "onCameraOpened");
+         openCameraCommon();
+-        resizeForPreviewAspectRatio();
++        setPreviewSize();
+         updateFocusManager(mUI);
+     }
+ 
+@@ -677,7 +677,7 @@ public class PhotoModule
+ 
+         // reset zoom value index
+         mZoomValue = 0;
+-        resizeForPreviewAspectRatio();
++        setPreviewSize();
+         openCameraCommon();
+ 
+         // Start switch camera animation. Post a message because
+@@ -766,16 +766,7 @@ public class PhotoModule
+     }
+ 
+     @Override
+-    public void resizeForPreviewAspectRatio() {
+-        if ( mCameraDevice == null || mParameters == null) {
+-            Log.e(TAG, "Camera not yet initialized");
+-            return;
+-        }
+-        setPreviewFrameLayoutCameraOrientation();
+-        Size size = mParameters.getPreviewSize();
+-        Log.e(TAG,"Width = "+ size.width+ "Height = "+size.height);
+-        mUI.setAspectRatio((float) size.width / size.height);
+-    }
++    public void resizeForPreviewAspectRatio() {}
+ 
+     @Override
+     public void onSwitchSavePath() {
+@@ -2367,7 +2358,7 @@ public class PhotoModule
+     public void onConfigurationChanged(Configuration newConfig) {
+         Log.v(TAG, "onConfigurationChanged");
+         setDisplayOrientation();
+-        resizeForPreviewAspectRatio();
++        setPreviewSize();
+     }
+ 
+     @Override
+@@ -3267,6 +3258,34 @@ public class PhotoModule
+         }
+     }
+ 
++    private void setPreviewSize() {
++        // Set a preview size that is closest to the viewfinder height and has
++        // the right aspect ratio.
++        Size size = mParameters.getPictureSize();
++        List<Size> sizes = mParameters.getSupportedPreviewSizes();
++        Size optimalSize = CameraUtil.getOptimalPreviewSize(mActivity, sizes,
++                (double) size.width / size.height);
++        Size original = mParameters.getPreviewSize();
++        if (!original.equals(optimalSize)) {
++            mUI.setAspectRatio(optimalSize.width, optimalSize.height);
++            mParameters.setPreviewSize(optimalSize.width, optimalSize.height);
++
++            // Zoom related settings will be changed for different preview
++            // sizes, so set and read the parameters to get latest values
++            if (mHandler.getLooper() == Looper.myLooper()) {
++                // On UI thread only, not when camera starts up
++                setupPreview();
++            } else {
++                mCameraDevice.setParameters(mParameters);
++            }
++            mParameters = mCameraDevice.getParameters();
++            Log.v(TAG, "Preview Size changed. Restart Preview");
++            mRestartPreview = true;
++        }
++
++        Log.v(TAG, "Preview size is " + optimalSize.width + "x" + optimalSize.height);
++    }
++
+     /** This can run on a background thread, so don't do UI updates here.*/
+     private boolean updateCameraParametersPreference() {
+         setAutoExposureLockIfSupported();
+@@ -3379,6 +3398,7 @@ public class PhotoModule
+ 
+         Log.v(TAG, "Thumbnail size is " + optimalSize.width + "x" + optimalSize.height);
+ 
++        setPreviewSize();
+         // Since changing scene mode may change supported values, set scene mode
+         // first. HDR is a scene mode. To promote it in UI, it is stored in a
+         // separate preference.
+@@ -3556,7 +3576,7 @@ public class PhotoModule
+              if(mRestartPreview && mCameraState != PREVIEW_STOPPED) {
+                 Log.v(TAG, "Restarting Preview...");
+                 stopPreview();
+-                resizeForPreviewAspectRatio();
++                setPreviewSize();
+                 startPreview();
+                 setCameraState(IDLE);
+             }
+@@ -4091,7 +4111,7 @@ public class PhotoModule
+         } else {
+             mHandler.sendEmptyMessage(SET_PHOTO_UI_PARAMS);
+         }
+-        resizeForPreviewAspectRatio();
++        setPreviewSize();
+         if (mSeekBarInitialized == true){
+             Log.v(TAG, "onSharedPreferenceChanged Skin tone bar: change");
+             // skin tone is enabled only for party and portrait BSM
+diff --git a/src/com/android/camera/PhotoUI.java b/src/com/android/camera/PhotoUI.java
+index eb077c3..db15dfc 100644
+--- a/src/com/android/camera/PhotoUI.java
++++ b/src/com/android/camera/PhotoUI.java
+@@ -29,6 +29,8 @@ import android.graphics.drawable.ColorDrawable;
+ import android.hardware.Camera;
+ import android.hardware.Camera.Face;
+ import android.os.AsyncTask;
++import android.os.Handler;
++import android.os.Message;
+ import android.util.Log;
+ import android.view.Gravity;
+ import android.view.TextureView;
+@@ -73,6 +75,7 @@ public class PhotoUI implements PieListener,
+     private CameraActivity mActivity;
+     private PhotoController mController;
+     private PreviewGestures mGestures;
++    private static final int UPDATE_TRANSFORM_MATRIX = 1;
+ 
+     private View mRootView;
+     private SurfaceTexture mSurfaceTexture;
+@@ -125,6 +128,19 @@ public class PhotoUI implements PieListener,
+     private View mPreviewCover;
+     private final Object mSurfaceTextureLock = new Object();
+ 
++    private final Handler mHandler = new Handler() {
++        @Override
++        public void handleMessage(Message msg) {
++            switch (msg.what) {
++            case UPDATE_TRANSFORM_MATRIX:
++                setTransformMatrix(mPreviewWidth, mPreviewHeight);
++                break;
++            default:
++                break;
++            }
++        }
++    };
++
+     public interface SurfaceTextureSizeChangedListener {
+         public void onSurfaceTextureSizeChanged(int uncroppedWidth, int uncroppedHeight);
+     }
+@@ -243,9 +259,17 @@ public class PhotoUI implements PieListener,
+         mOrientationResize = orientation;
+      }
+ 
+-    public void setAspectRatio(float ratio) {
+-        if (ratio <= 0.0) throw new IllegalArgumentException();
+-
++    public void setAspectRatio(int width, int height) {
++        if (width == 0 || height == 0) {
++            Log.w(TAG, "Preview size should not be 0.");
++            return;
++        }
++        float ratio;
++        if (width > height) {
++            ratio = (float) width / height;
++        } else {
++            ratio = (float) height / width;
++        }
+         if (mOrientationResize &&
+                 mActivity.getResources().getConfiguration().orientation
+                 != Configuration.ORIENTATION_PORTRAIT) {
+@@ -258,6 +282,7 @@ public class PhotoUI implements PieListener,
+             mAspectRatioResize = true;
+             mTextureView.requestLayout();
+         }
++        mHandler.sendEmptyMessage(UPDATE_TRANSFORM_MATRIX);
+     }
+ 
+     public void setSurfaceTextureSizeChangedListener(SurfaceTextureSizeChangedListener listener) {
+@@ -269,12 +294,12 @@ public class PhotoUI implements PieListener,
+         float scaleX = 1f, scaleY = 1f;
+         float scaledTextureWidth, scaledTextureHeight;
+         if (mOrientationResize){
+-            scaledTextureWidth = height * mAspectRatio;
+-            if(scaledTextureWidth > width){
+-                scaledTextureWidth = width;
+-                scaledTextureHeight = scaledTextureWidth / mAspectRatio;
+-            } else {
++            if (width / mAspectRatio > height){
+                 scaledTextureHeight = height;
++                scaledTextureWidth = (int)(height * mAspectRatio + 0.5f);
++            } else {
++                scaledTextureWidth = width;
++                scaledTextureHeight = (int)(width / mAspectRatio + 0.5f);
+             }
+         } else {
+             if (width > height) {
+diff --git a/src/com/android/camera/VideoModule.java b/src/com/android/camera/VideoModule.java
+index 65f5556..6f35040 100644
+--- a/src/com/android/camera/VideoModule.java
++++ b/src/com/android/camera/VideoModule.java
+@@ -466,7 +466,6 @@ public class VideoModule implements CameraModule,
+ 
+         mUI.showTimeLapseUI(mCaptureTimeLapse);
+         initializeVideoSnapshot();
+-        resizeForPreviewAspectRatio();
+ 
+         initializeVideoControl();
+         mPendingSwitchCameraId = -1;
+@@ -932,22 +931,8 @@ public class VideoModule implements CameraModule,
+                 ". mDesiredPreviewHeight=" + mDesiredPreviewHeight);
+     }
+ 
+-    void setPreviewFrameLayoutCameraOrientation(){
+-        CameraInfo info = CameraHolder.instance().getCameraInfo()[mCameraId];
+-
+-        //if camera mount angle is 0 or 180, we want to resize preview
+-        if (info.orientation % 180 == 0)
+-            mUI.cameraOrientationPreviewResize(true);
+-        else
+-            mUI.cameraOrientationPreviewResize(false);
+-    }
+-
+     @Override
+-    public void resizeForPreviewAspectRatio() {
+-        setPreviewFrameLayoutCameraOrientation();
+-        mUI.setAspectRatio(
+-                (double) mProfile.videoFrameWidth / mProfile.videoFrameHeight);
+-    }
++    public void resizeForPreviewAspectRatio() {}
+ 
+     @Override
+     public void onSwitchSavePath() {
+@@ -985,7 +970,6 @@ public class VideoModule implements CameraModule,
+                 return;
+             }
+             readVideoPreferences();
+-            resizeForPreviewAspectRatio();
+             startPreview();
+         } else {
+             // preview already started
+@@ -2383,7 +2367,6 @@ public class VideoModule implements CameraModule,
+     public void onConfigurationChanged(Configuration newConfig) {
+         Log.v(TAG, "onConfigurationChanged");
+         setDisplayOrientation();
+-        resizeForPreviewAspectRatio();
+     }
+ 
+     @Override
+@@ -2423,7 +2406,6 @@ public class VideoModule implements CameraModule,
+                     || size.height != mDesiredPreviewHeight || mRestartPreview) {
+ 
+                 stopPreview();
+-                resizeForPreviewAspectRatio();
+                 startPreview(); // Parameters will be set in startPreview().
+             } else {
+                 setCameraParameters();
+@@ -2460,7 +2442,6 @@ public class VideoModule implements CameraModule,
+         readVideoPreferences();
+         startPreview();
+         initializeVideoSnapshot();
+-        resizeForPreviewAspectRatio();
+         initializeVideoControl();
+ 
+         // From onResume
+-- 
+1.8.2.1
+

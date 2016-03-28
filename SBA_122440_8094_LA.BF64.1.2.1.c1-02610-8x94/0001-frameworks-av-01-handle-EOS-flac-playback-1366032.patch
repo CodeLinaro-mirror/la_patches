@@ -1,0 +1,42 @@
+From 9bed74a353922ea13eb77a47f3ddf9fccf4b221b Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Mon, 31 Aug 2015 18:29:58 -0700
+Subject: [PATCH] audio: handle EOS during flac playback
+
+-When playing specific flac files, native crash is observed
+ because extractor is reached end of stream, but still decoder is
+ expecting more data to decode.
+-When parser is reached end of the stream and now if the decoder
+ expects more data to decode, END_OF_STREAM should get signalled to
+ avoid further read on extractor.
+
+Change-Id: I701ecea410da08eed115e45896303b4918edb546
+---
+ media/libstagefright/FLACDecoder.cpp | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/media/libstagefright/FLACDecoder.cpp b/media/libstagefright/FLACDecoder.cpp
+index 638f0b0..6643479 100644
+--- a/media/libstagefright/FLACDecoder.cpp
++++ b/media/libstagefright/FLACDecoder.cpp
+@@ -310,7 +310,7 @@ sp<MetaData> FLACDecoder::getFormat() {
+ status_t FLACDecoder::read(MediaBuffer **out, const ReadOptions* options) {
+     int err, status = 0;
+     *out = NULL;
+-    uint32 blockSize, usedBitstream, availLength = 0;
++    uint32 blockSize = 0, usedBitstream = 0, availLength = 0;
+     uint32 flacOutputBufSize = FLAC_OUTPUT_BUFFER_SIZE;
+     int32_t decode_successful = 0;
+ 
+@@ -403,7 +403,7 @@ status_t FLACDecoder::read(MediaBuffer **out, const ReadOptions* options) {
+         if (ob.i32BufferInitialized) {
+             if (!updatePointers(&ob, usedBitstream, status)) {
+                 if (ob.eos) {
+-                    break;
++                    return ERROR_END_OF_STREAM;
+                 } else {
+                     continue;
+                 }//Some error or insufficient data - read again from parser.
+-- 
+1.9.1
+

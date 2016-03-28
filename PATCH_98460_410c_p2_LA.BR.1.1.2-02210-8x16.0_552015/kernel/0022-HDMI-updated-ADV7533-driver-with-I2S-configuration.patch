@@ -1,0 +1,54 @@
+From 15799303c3c15a231e7e9bb25a46eafb6e7ebb42 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:45:19 -0700
+Subject: [PATCH 22/22] HDMI: updated ADV7533 driver with I2S configuration
+
+Enabled basic audio
+
+Change-Id: I4134529b074707ff1f09111d4a73793e47f9909d
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ drivers/video/msm/mdss/adv7533_dsi2hdmi.c | 20 +++++++++++++-------
+ 1 file changed, 13 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/video/msm/mdss/adv7533_dsi2hdmi.c b/drivers/video/msm/mdss/adv7533_dsi2hdmi.c
+index d04e19a..9be1e2f 100644
+--- a/drivers/video/msm/mdss/adv7533_dsi2hdmi.c
++++ b/drivers/video/msm/mdss/adv7533_dsi2hdmi.c
+@@ -293,6 +293,14 @@ static struct adv7533_reg_cfg tg_cfg_pattern_720p[] = {
+ 	{ADV7533_CEC_DSI, 0x03, 0x89},/* HDMI enabled */
+ };
+ 
++static struct adv7533_reg_cfg I2S_cfg[] = {
++    {ADV7533_MAIN, 0x0D, 0x18},  /* Bit width = 16Bits*/
++    {ADV7533_MAIN, 0x15, 0x20},  /* Sampling Frequency = 48kHz*/
++    {ADV7533_MAIN, 0x02, 0x18},  /* N value 6144 --> 0x1800*/
++    {ADV7533_MAIN, 0x14, 0x02},  /* Word Length = 16Bits*/
++    {ADV7533_MAIN, 0x73, 0x01},  /* Channel Count = 2 channels */
++};
++
+ static struct adv7533_reg_cfg irq_config[] = {
+ 	{ADV7533_CEC_DSI, 0x38, 0xCE},
+ 	{ADV7533_CEC_DSI, 0x38, 0xC0},
+@@ -758,13 +766,11 @@ static int adv7533_probe(struct i2c_client *client_,
+ 		goto p_err_regs;
+ 	}
+ 
+-	switch (pdata->audio) {
+-	case ADV7533_AUDIO_ON:
+-		/* TBD - config audio */
+-		break;
+-	case ADV7533_AUDIO_OFF:
+-	default:
+-		break;
++
++	ret = adv7533_write_regs(pdata, I2S_cfg, ARRAY_SIZE(I2S_cfg));
++	if (ret != 0) {
++		pr_err("%s: I2S configuration fail = %d!\n", __func__, ret);
++		goto p_err_regs;
+ 	}
+ 
+ 	pm_runtime_enable(&client->dev);
+-- 
+1.8.2.1
+

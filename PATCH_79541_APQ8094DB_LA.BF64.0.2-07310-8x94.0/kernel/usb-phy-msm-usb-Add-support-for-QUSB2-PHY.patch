@@ -1,0 +1,141 @@
+From e33aad1f9b76f15805afc0fb0c85bcba0c421b55 Mon Sep 17 00:00:00 2001
+From: Tanya Finkel <tfinkel@codeaurora.org>
+Date: Tue, 21 Oct 2014 17:08:35 +0300
+Subject: [PATCH 06/11] usb: phy-msm-usb: Add support for QUSB2 PHY
+
+The msm_otg controller can be paired with the QUSB2 PHY. Add
+support for it by adding a new phy_type value in addition to
+the necessary sequences used to initialize it. The rest of
+communication between controller and PHY is over ULPI.
+
+Change-Id: I7523c8e85c0a8d4c874456b0314be365a302b7e5
+Signed-off-by: Jack Pham <jackp@codeaurora.org>
+Signed-off-by: Tanya Finkel <tfinkel@codeaurora.org>
+---
+ drivers/usb/phy/phy-msm-usb.c | 54 +++++++++++++++++++++++++++++++++++++++++++
+ include/linux/usb/msm_hsusb.h |  2 ++
+ 2 files changed, 56 insertions(+)
+
+diff --git a/drivers/usb/phy/phy-msm-usb.c b/drivers/usb/phy/phy-msm-usb.c
+index 11e7771..58ffab9 100644
+--- a/drivers/usb/phy/phy-msm-usb.c
++++ b/drivers/usb/phy/phy-msm-usb.c
+@@ -344,6 +344,12 @@ static int ulpi_read(struct usb_phy *phy, u32 reg)
+ 	struct msm_otg *motg = container_of(phy, struct msm_otg, phy);
+ 	int cnt = 0;
+ 
++	if (motg->pdata->phy_type == QUSB_ULPI_PHY && reg > 0x3F) {
++		pr_info("%s: ULPI vendor-specific reg 0x%02x not supported\n",
++			__func__, reg);
++		return 0;
++	}
++
+ 	/* initiate read operation */
+ 	writel(ULPI_RUN | ULPI_READ | ULPI_ADDR(reg),
+ 	       USB_ULPI_VIEWPORT);
+@@ -371,6 +377,12 @@ static int ulpi_write(struct usb_phy *phy, u32 val, u32 reg)
+ 	struct msm_otg *motg = container_of(phy, struct msm_otg, phy);
+ 	int cnt = 0;
+ 
++	if (motg->pdata->phy_type == QUSB_ULPI_PHY && reg > 0x3F) {
++		pr_info("%s: ULPI vendor-specific reg 0x%02x not supported\n",
++			__func__, reg);
++		return 0;
++	}
++
+ 	/* initiate write operation */
+ 	writel(ULPI_RUN | ULPI_WRITE |
+ 	       ULPI_ADDR(reg) | ULPI_DATA(val),
+@@ -565,6 +577,13 @@ static int msm_otg_link_reset(struct msm_otg *motg)
+ 	return 0;
+ }
+ 
++#define QUSB2PHY_PORT_POWERDOWN		0xB4
++#define QUSB2PHY_PORT_UTMI_CTRL2	0xC4
++#define QUSB2PHY_PORT_TUNE1		0x80
++#define QUSB2PHY_PORT_TUNE2		0x84
++#define QUSB2PHY_PORT_TUNE3		0x88
++#define QUSB2PHY_PORT_TUNE4		0x8C
++
+ static void msm_usb_phy_reset(struct msm_otg *motg)
+ {
+ 	u32 val;
+@@ -589,6 +608,24 @@ static void msm_usb_phy_reset(struct msm_otg *motg)
+ 		val |= PHY_POR_DEASSERT;
+ 		writel_relaxed(val, motg->usb_phy_ctrl_reg);
+ 		break;
++	case QUSB_ULPI_PHY:
++		clk_reset(motg->phy_reset_clk, CLK_RESET_ASSERT);
++		usleep(10);
++		clk_reset(motg->phy_reset_clk, CLK_RESET_DEASSERT);
++
++		writel_relaxed(0x23,
++				motg->phy_csr_regs + QUSB2PHY_PORT_POWERDOWN);
++		writel_relaxed(0x0,
++				motg->phy_csr_regs + QUSB2PHY_PORT_UTMI_CTRL2);
++		writel_relaxed(0xA0, motg->phy_csr_regs + QUSB2PHY_PORT_TUNE1);
++		writel_relaxed(0xA5, motg->phy_csr_regs + QUSB2PHY_PORT_TUNE2);
++		writel_relaxed(0x81, motg->phy_csr_regs + QUSB2PHY_PORT_TUNE3);
++		writel_relaxed(0x85, motg->phy_csr_regs + QUSB2PHY_PORT_TUNE4);
++		/* ensure above writes are completed before re-enabling PHY */
++		wmb();
++		writel_relaxed(0x22,
++				motg->phy_csr_regs + QUSB2PHY_PORT_POWERDOWN);
++		break;
+ 	case SNPS_FEMTO_PHY:
+ 		if (!motg->phy_por_clk) {
+ 			pr_err("phy_por_clk missing\n");
+@@ -4964,6 +5001,14 @@ static int msm_otg_probe(struct platform_device *pdev)
+ 		pdata = pdev->dev.platform_data;
+ 	}
+ 
++	if (pdata->phy_type == QUSB_ULPI_PHY) {
++		motg->phy_ref_clk = devm_clk_get(&pdev->dev, "phy_ref_clk");
++		clk_prepare_enable(motg->phy_ref_clk);
++		motg->phy_csr_clk = devm_clk_get(&pdev->dev, "ahb2phy_clk");
++		clk_prepare_enable(motg->phy_csr_clk);
++		motg->phy_reset_clk = devm_clk_get(&pdev->dev, "phy_reset");
++	}
++
+ 	motg->phy.otg = devm_kzalloc(&pdev->dev, sizeof(struct usb_otg),
+ 							GFP_KERNEL);
+ 	if (!motg->phy.otg) {
+@@ -5062,6 +5107,15 @@ static int msm_otg_probe(struct platform_device *pdev)
+ 	 * The link does not have any PHY specific registers.
+ 	 * Hence set motg->usb_phy_ctrl_reg to.
+ 	 */
++	if (pdata->phy_type == QUSB_ULPI_PHY) {
++		res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
++		motg->phy_csr_regs = devm_ioremap_resource(&pdev->dev, res);
++		if (IS_ERR(motg->phy_csr_regs)) {
++			dev_err(&pdev->dev, "could not map qusb base address\n");
++			ret = PTR_ERR(motg->phy_csr_regs);
++			goto free_regs;
++		}
++	}
+ 	if (motg->pdata->phy_type == SNPS_FEMTO_PHY) {
+ 		res = platform_get_resource_byname(pdev,
+ 				IORESOURCE_MEM, "phy_csr");
+diff --git a/include/linux/usb/msm_hsusb.h b/include/linux/usb/msm_hsusb.h
+index d3a3401..e7786cd 100644
+--- a/include/linux/usb/msm_hsusb.h
++++ b/include/linux/usb/msm_hsusb.h
+@@ -102,6 +102,7 @@ enum msm_usb_phy_type {
+ 	CI_PHY,			/* not supported */
+ 	SNPS_PICO_PHY,
+ 	SNPS_FEMTO_PHY,
++	QUSB_ULPI_PHY,
+ };
+ 
+ #define IDEV_CHG_MAX	1500
+@@ -419,6 +420,7 @@ struct msm_otg {
+ 	struct clk *phy_por_clk;
+ 	struct clk *phy_csr_clk;
+ 	struct clk *bus_clks[USB_NUM_BUS_CLOCKS];
++	struct clk *phy_ref_clk;
+ 	long core_clk_rate;
+ 	struct resource *io_res;
+ 	void __iomem *regs;
+-- 
+1.8.2.1
+

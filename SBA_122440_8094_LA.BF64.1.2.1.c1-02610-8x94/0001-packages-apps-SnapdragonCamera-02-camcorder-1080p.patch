@@ -1,0 +1,26 @@
+From 40569850a5999a3b497d6c7440822579a3b88464 Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Fri, 11 Sep 2015 11:45:48 -0700
+Subject: [PATCH] packages-apps-SnapdragonCamera-02-camcorder-1080p
+
+Change-Id: I4d6e1c3a06ca2f7aad0e8b61577adc081865fad1
+---
+ res/values/strings.xml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index 4fb9354..88e8288 100644
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -239,7 +239,7 @@
+     <!-- The Video quality settings in preference [CHAR LIMIT=21] -->
+     <string name="pref_video_quality_title">Video quality</string>
+     <!-- The default quality value is (CIF) -->
+-    <string name="pref_video_quality_default" translatable="false">352x288</string>
++    <string name="pref_video_quality_default" translatable="false">1920x1080</string>
+     <!-- Video quality setting entry.
+     Videos will be recorded in 4k DCI quality. [CHAR LIMIT=24] -->
+     <string name="pref_video_quality_entry_4kdci" translatable="false">
+-- 
+1.9.1
+

@@ -1,0 +1,26 @@
+From 951a508dbe0137a89358d013b3c92494836e39cc Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Fri, 6 Feb 2015 14:36:38 -0800
+Subject: [PATCH] kernel-10-enable-MHL-fluid
+
+Change-Id: I30f59f0ddfd77afe45a2afa59812f3528780bc51
+---
+ arch/arm/boot/dts/qcom/msm8994-fluid.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/qcom/msm8994-fluid.dtsi b/arch/arm/boot/dts/qcom/msm8994-fluid.dtsi
+index d1d3833..aefe255 100644
+--- a/arch/arm/boot/dts/qcom/msm8994-fluid.dtsi
++++ b/arch/arm/boot/dts/qcom/msm8994-fluid.dtsi
+@@ -375,7 +375,7 @@
+ 		status = "ok";
+ 
+ 		sil,sii-8620@72 {
+-			status = "disabled";
++			status = "ok";
+ 			compatible = "sil,sii-8620";
+ 			reg = <0x72>;
+ 			ldo25-supply = <&pm8994_l25>;
+-- 
+1.8.2.1
+

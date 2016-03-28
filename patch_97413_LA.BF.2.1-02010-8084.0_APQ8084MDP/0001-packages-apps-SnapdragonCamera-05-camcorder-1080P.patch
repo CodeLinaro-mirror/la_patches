@@ -1,0 +1,42 @@
+From dc624e9c47279269417fcae6a2024cb9fb76b781 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Mon, 30 Mar 2015 17:16:20 -0700
+Subject: [PATCH] packages-apps-SnapdragonCamera-05-camcorder-1080P
+
+Change-Id: I376351f882baa07f055041a9262b015f7cce4e5e
+---
+ res/values/arrays.xml  | 2 +-
+ res/values/strings.xml | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/res/values/arrays.xml b/res/values/arrays.xml
+index 78c291c..769bd0b 100644
+--- a/res/values/arrays.xml
++++ b/res/values/arrays.xml
+@@ -52,7 +52,7 @@
+         <!-- The integer value of CamcorderProfile.QUALITY_WQVGA -->
+         <item>11</item>
+         <!-- The integer value of CamcorderProfile.QUALITY_CIF -->
+-        <item>@string/pref_video_quality_default</item>
++        <item>3</item>
+         <!-- The integer value of CamcorderProfile.QUALITY_QVGA -->
+         <item>7</item>
+         <!-- The integer value of CamcorderProfile.QUALITY_QCIF -->
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index e091605..74e9dcc 100644
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -238,8 +238,8 @@
+ 
+     <!-- The Video quality settings in preference [CHAR LIMIT=21] -->
+     <string name="pref_video_quality_title">Video quality</string>
+-    <!-- The default quality value is 3 (CIF) -->
+-    <string name="pref_video_quality_default" translatable="false">3</string>
++    <!-- The default quality value is 6 (1080P) -->
++    <string name="pref_video_quality_default" translatable="false">6</string>
+     <!-- Video quality setting entry.
+     Videos will be recorded in 4k DCI quality. [CHAR LIMIT=24] -->
+     <string name="pref_video_quality_entry_4kdci" translatable="false">
+-- 
+1.8.2.1
+

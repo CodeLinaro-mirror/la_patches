@@ -1,0 +1,61 @@
+From 4f3187d778d26111f5cdd292531e5b82c9e17a4a Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Fri, 4 Sep 2015 11:08:44 -0700
+Subject: [PATCH] msm: mdss: dsi: fix NULL pointer access while changing
+ resolution
+
+During "adb shell stop/start", CTL structure gets destroyed.
+Add check for CTL pointer before trying to change resolution. Remove
+additional frame rate and clock rate parsing since it already done
+while parsing the timing settings. Initialize timing structure
+entries to zero before updating the structure.
+
+Change-Id: Iebb2168eef0e002b98afa46b510b028f8ea183b1
+Signed-off-by: Chandan Uddaraju <chandanu@codeaurora.org>
+---
+ drivers/video/msm/mdss/mdss_dsi_panel.c   | 5 +----
+ drivers/video/msm/mdss/mdss_mdp_overlay.c | 5 +++++
+ 2 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/video/msm/mdss/mdss_dsi_panel.c b/drivers/video/msm/mdss/mdss_dsi_panel.c
+index a7af387..47dbf53 100644
+--- a/drivers/video/msm/mdss/mdss_dsi_panel.c
++++ b/drivers/video/msm/mdss/mdss_dsi_panel.c
+@@ -1615,6 +1615,7 @@ static int mdss_dsi_panel_parse_display_timings(struct device_node *np,
+ 	timings_np = of_get_child_by_name(np, "qcom,mdss-dsi-display-timings");
+ 	if (!timings_np) {
+ 		struct dsi_panel_timing pt;
++		memset(&pt, 0, sizeof(struct dsi_panel_timing));
+ 
+ 		/*
+ 		 * display timings node is not available, fallback to reading
+@@ -1908,10 +1909,6 @@ static int mdss_panel_parse_dt(struct device_node *np,
+ 		pinfo->mode_gpio_state = MODE_GPIO_NOT_VALID;
+ 	}
+ 
+-	rc = of_property_read_u32(np, "qcom,mdss-dsi-panel-framerate", &tmp);
+-	pinfo->mipi.frame_rate = (!rc ? tmp : 60);
+-	rc = of_property_read_u32(np, "qcom,mdss-dsi-panel-clockrate", &tmp);
+-	pinfo->clk_rate = (!rc ? tmp : 0);
+ 	rc = of_property_read_u32(np, "qcom,mdss-mdp-transfer-time-us", &tmp);
+ 	pinfo->mdp_transfer_time_us = (!rc ? tmp : DEFAULT_MDP_TRANSFER_TIME);
+ 
+diff --git a/drivers/video/msm/mdss/mdss_mdp_overlay.c b/drivers/video/msm/mdss/mdss_mdp_overlay.c
+index 60ef117..dbfc0fd 100644
+--- a/drivers/video/msm/mdss/mdss_mdp_overlay.c
++++ b/drivers/video/msm/mdss/mdss_mdp_overlay.c
+@@ -4900,6 +4900,11 @@ static int mdss_mdp_update_panel_info(struct msm_fb_data_type *mfd,
+ 	struct mdss_panel_data *pdata;
+ 	struct mdss_mdp_ctl *sctl;
+ 
++	if (ctl == NULL) {
++		pr_debug("ctl not initialized\n");
++		return 0;
++	}
++
+ 	ret = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_DSI_UPDATE_PANEL_DATA,
+ 						(void *)(unsigned long)mode);
+ 	if (ret)
+-- 
+1.9.1
+

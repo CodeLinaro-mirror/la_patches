@@ -1,0 +1,46 @@
+From 9880666ea91e2c176bea2b7b63b81c80fa172664 Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Thu, 10 Sep 2015 17:21:00 -0700
+Subject: [PATCH] ARM: dts: add sched_same_power_cost_cpus kernel parameter
+
+The power efficient cluster CPUs of MSM8992 and MSM8994 share the same
+power cost information table.  Add kernel parameter so the HMP scheduler
+can take advantage of it.
+
+CRs-fixed: 849655
+Change-Id: Ic5d44ba5e728402cbb291d6de5877f4d37823e1e
+Signed-off-by: Joonwoo Park <joonwoop@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/msm8992.dtsi | 2 +-
+ arch/arm/boot/dts/qcom/msm8994.dtsi | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/boot/dts/qcom/msm8992.dtsi b/arch/arm/boot/dts/qcom/msm8992.dtsi
+index a668524..bf39cc4 100644
+--- a/arch/arm/boot/dts/qcom/msm8992.dtsi
++++ b/arch/arm/boot/dts/qcom/msm8992.dtsi
+@@ -23,7 +23,7 @@
+ 	interrupt-parent = <&intc>;
+ 
+ 	chosen {
+-		bootargs = "sched_enable_hmp=1 sched_enable_power_aware=1";
++		bootargs = "sched_enable_hmp=1 sched_enable_power_aware=1 sched_same_power_cost_cpus=0-3";
+ 	};
+ 
+ 	aliases {
+diff --git a/arch/arm/boot/dts/qcom/msm8994.dtsi b/arch/arm/boot/dts/qcom/msm8994.dtsi
+index 27d530a2..ed121a4 100644
+--- a/arch/arm/boot/dts/qcom/msm8994.dtsi
++++ b/arch/arm/boot/dts/qcom/msm8994.dtsi
+@@ -24,7 +24,7 @@
+ 	interrupt-parent = <&intc>;
+ 
+ 	chosen {
+-		bootargs = "sched_enable_hmp=1 sched_enable_power_aware=1";
++		bootargs = "sched_enable_hmp=1 sched_enable_power_aware=1 sched_same_power_cost_cpus=0-3";
+ 	};
+ 
+ 	aliases {
+-- 
+1.9.1
+

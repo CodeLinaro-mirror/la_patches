@@ -1,0 +1,86 @@
+From 6fd8b598f11a5cafe686ddac9506d2a5b3da914f Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:37:18 -0700
+Subject: [PATCH 12/22] msm: mdss: Add support for DSI always on
+
+Some DSI to HDMI bridges require the DSI signal to be always on.
+This change allows to keep the DSI bus in steady on.
+
+Change-Id: I472115cfc938c3646f4fb56ca796eab5f310fdc7
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt | 8 ++++++++
+ drivers/video/msm/mdss/mdss_dsi.c                       | 3 ++-
+ drivers/video/msm/mdss/mdss_dsi_panel.c                 | 3 +++
+ drivers/video/msm/mdss/mdss_panel.h                     | 2 ++
+ 4 files changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt b/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt
+index eb0346b..050870f 100644
+--- a/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt
++++ b/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt
+@@ -371,6 +371,9 @@ Optional properties:
+ - qcom,panel-ack-disabled: A boolean property to indicate, whether we need to wait for any ACK from the panel
+ 			   for any commands that we send.
+ - qcom,mdss-dsi-force-clock-lane-hs:	Boolean to force dsi clock lanes to HS mode always.
++- qcom,mdss-dsi-post-init-delay:	Specifies required number of frames to wait so that panel can be functional
++					to show proper display.
++- qcom,mdss-dsi-always-on:		Never turn off DSI bus. May be required by some DSI to HDMI bridges.
+ 
+ Note, if a given optional qcom,* binding is not present, then the driver will configure
+ the default values specified.
+@@ -502,5 +505,10 @@ Example:
+ 						<128 240 64>;
+ 		qcom,mdss-dsi-panel-orientation = "180"
+ 		qcom,mdss-dsi-force-clock-lane-hs;
++<<<<<<< HEAD
++=======
++		qcom,mdss-dsi-post-init-delay = <1>;
++		qcom,mdss-dsi-always-on;
++>>>>>>> 1e14815... msm: mdss: Add support for DSI always on
+ 	};
+ };
+diff --git a/drivers/video/msm/mdss/mdss_dsi.c b/drivers/video/msm/mdss/mdss_dsi.c
+index 9afe31a..777812e 100644
+--- a/drivers/video/msm/mdss/mdss_dsi.c
++++ b/drivers/video/msm/mdss/mdss_dsi.c
+@@ -1232,7 +1232,8 @@ static int mdss_dsi_event_handler(struct mdss_panel_data *pdata,
+ 		ctrl_pdata->ctrl_state &= ~CTRL_STATE_MDP_ACTIVE;
+ 		if (ctrl_pdata->off_cmds.link_state == DSI_LP_MODE)
+ 			rc = mdss_dsi_blank(pdata, power_state);
+-		rc = mdss_dsi_off(pdata, power_state);
++		if (!(pdata->panel_info.mipi.always_on))
++			rc = mdss_dsi_off(pdata, power_state);
+ 		break;
+ 	case MDSS_EVENT_CONT_SPLASH_FINISH:
+ 		if (ctrl_pdata->off_cmds.link_state == DSI_LP_MODE)
+diff --git a/drivers/video/msm/mdss/mdss_dsi_panel.c b/drivers/video/msm/mdss/mdss_dsi_panel.c
+index c5e83fe..6f71d35 100644
+--- a/drivers/video/msm/mdss/mdss_dsi_panel.c
++++ b/drivers/video/msm/mdss/mdss_dsi_panel.c
+@@ -1642,6 +1642,9 @@ static int mdss_panel_parse_dt(struct device_node *np,
+ 	pinfo->mipi.force_clk_lane_hs = of_property_read_bool(np,
+ 		"qcom,mdss-dsi-force-clock-lane-hs");
+ 
++	pinfo->mipi.always_on = of_property_read_bool(np,
++		"qcom,mdss-dsi-always-on");
++
+ 	rc = mdss_dsi_parse_panel_features(np, ctrl_pdata);
+ 	if (rc) {
+ 		pr_err("%s: failed to parse panel features\n", __func__);
+diff --git a/drivers/video/msm/mdss/mdss_panel.h b/drivers/video/msm/mdss/mdss_panel.h
+index aa8a5f7..39fcc7a 100644
+--- a/drivers/video/msm/mdss/mdss_panel.h
++++ b/drivers/video/msm/mdss/mdss_panel.h
+@@ -283,6 +283,8 @@ struct mipi_panel_info {
+ 	/* Clock required during LP commands */
+ 	bool force_clk_lane_hs;
+ 
++	bool always_on;
++
+ 	char vsync_enable;
+ 	char hw_vsync_mode;
+ 
+-- 
+1.8.2.1
+

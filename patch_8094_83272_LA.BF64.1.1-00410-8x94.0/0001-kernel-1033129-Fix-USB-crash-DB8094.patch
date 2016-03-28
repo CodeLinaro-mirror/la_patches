@@ -1,0 +1,38 @@
+From e332c299b7ce35aaa97c56269b992876eb0d58ff Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Thu, 4 Dec 2014 15:18:29 -0800
+Subject: [PATCH] ARM: dts: msm: Fix USB crash on boot on DB8094
+
+On DB8094 charging is not needed and USB VBUS power
+supply is external boost that always on.
+
+Change-Id: I19408f8e0a8cbbe272b9b88a6a03acf519d88d35
+Signed-off-by: Tanya Finkel <tfinkel@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+index c57aaa3..12496ff 100644
+--- a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
++++ b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+@@ -270,6 +270,7 @@
+ 			 0x0 1 &intc 0 180 0>;
+ 	interrupt-names = "hs_phy_irq", "pwr_event_irq";
+ 	qcom,charging-disabled;
++	vbus_dwc3-supply = <&vph_pwr_vreg>;
+ 	/delete-property/ qcom,otg-capability;
+ 	qcom,ext-hub-reset-gpio =  <&pm8994_gpios 1 0>;
+ 	dwc3@f9200000 {
+@@ -578,7 +579,7 @@
+ };
+ 
+ &pmi8994_charger {
+-	qcom,charging-disabled;
++	status = "disabled";
+ };
+ 
+ &rpm_bus {
+-- 
+1.8.2.1
+

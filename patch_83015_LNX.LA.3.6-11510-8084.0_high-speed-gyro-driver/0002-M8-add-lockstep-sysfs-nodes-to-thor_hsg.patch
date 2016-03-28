@@ -1,0 +1,185 @@
+From eb7bf78195c22c55f4f37bf4126e307af971bab4 Mon Sep 17 00:00:00 2001
+From: Mike Mager <mikemager@codeaurora.org>
+Date: Thu, 4 Dec 2014 15:21:48 -0800
+Subject: [PATCH] M8: add lockstep sysfs nodes to thor_hsg
+
+Change-Id: Ibbfd833fb8ec0ade24527baee8260b5a21173ff3
+---
+ drivers/char/thor_hsg.c | 133 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 133 insertions(+)
+
+diff --git a/drivers/char/thor_hsg.c b/drivers/char/thor_hsg.c
+index 4fc869a..d8c7fa4 100644
+--- a/drivers/char/thor_hsg.c
++++ b/drivers/char/thor_hsg.c
+@@ -33,6 +33,17 @@
+ 
+ #define THOR_HSG_SHARED_MEM_SIZE	4096
+ 
++#define LOCKSTEP_CTL_OFFSET			(3*1024)
++struct lockstep_ctl_t {
++	unsigned int enabled;
++	unsigned int fps;
++	unsigned int disp_vsync_cnt;
++	unsigned int phase_target;
++	unsigned int pll_freq_seed;
++	unsigned int locked;
++	unsigned int reserved;
++};
++
+ struct thor_hsg_data {
+ 	struct device *device;
+ 	bool   device_initialized;
+@@ -40,6 +51,7 @@ struct thor_hsg_data {
+ 	void   *smem_addr;
+ 	size_t smem_size;
+ 	struct mutex lock;
++	volatile struct lockstep_ctl_t* lockstep_ctl;
+ };
+ 
+ struct thor_hsg_device {
+@@ -61,6 +73,118 @@ static struct thor_hsg_device g_thor_hsg_instance = {
+ 	NULL
+ };
+ 
++/*
++ * Functions for reading/writing the members of the shared memory struct.
++ */
++#define THOR_HSG_LOCKSTEP_FNC_GET(m)                                      \
++    int thor_hsg_lockstep_get_##m(unsigned int *m)                        \
++    {                                                                     \
++        struct thor_hsg_device *thor_hsgdevice = &g_thor_hsg_instance;    \
++        struct thor_hsg_data *thor_hsg_data = NULL;                       \
++        int err = 0;                                                      \
++        if (!thor_hsgdevice->thor_hsg_data || !m) {                       \
++            pr_err("Memory not allocated yet");                           \
++            err = -ENODEV;                                                \
++            goto bail;                                                    \
++        }                                                                 \
++        thor_hsg_data = &thor_hsgdevice->thor_hsg_data[0];                \
++        *m = thor_hsg_data->lockstep_ctl->m;                              \
++    bail:                                                                 \
++        return err;                                                       \
++    }                                                                     \
++
++#define THOR_HSG_LOCKSTEP_FNC_SET(m)                                      \
++    int thor_hsg_lockstep_set_##m(unsigned int m)                         \
++    {                                                                     \
++        struct thor_hsg_device *thor_hsgdevice = &g_thor_hsg_instance;    \
++        struct thor_hsg_data *thor_hsg_data = NULL;                       \
++        int err = 0;                                                      \
++        if (!thor_hsgdevice->thor_hsg_data) {                             \
++            pr_err("Memory not allocated yet");                           \
++            err = -ENODEV;                                                \
++            goto bail;                                                    \
++        }                                                                 \
++        thor_hsg_data = &thor_hsgdevice->thor_hsg_data[0];                \
++        thor_hsg_data->lockstep_ctl->m = m;                               \
++    bail:                                                                 \
++        return err;                                                       \
++    }                                                                     \
++
++#define THOR_HSG_LOCKSTEP_FNCS_RO(m)                                      \
++    THOR_HSG_LOCKSTEP_FNC_GET(m)                                          \
++
++#define THOR_HSG_LOCKSTEP_FNCS_RW(m)                                      \
++    THOR_HSG_LOCKSTEP_FNC_GET(m)                                          \
++    THOR_HSG_LOCKSTEP_FNC_SET(m)                                          \
++
++THOR_HSG_LOCKSTEP_FNCS_RW(enabled);
++THOR_HSG_LOCKSTEP_FNCS_RW(fps);
++THOR_HSG_LOCKSTEP_FNCS_RW(disp_vsync_cnt);
++THOR_HSG_LOCKSTEP_FNCS_RW(phase_target);
++THOR_HSG_LOCKSTEP_FNCS_RW(pll_freq_seed);
++THOR_HSG_LOCKSTEP_FNCS_RO(locked);
++THOR_HSG_LOCKSTEP_FNCS_RW(reserved);
++
++/*
++ * sysfs nodes
++ */
++#define THOR_HSG_LOCKSTEP_ATTR_FNC_SHOW(m,h)                              \
++    static ssize_t thor_hsg_show_lockstep_##m(struct device *dev,         \
++            struct device_attribute *attr, char *buf)                     \
++    {                                                                     \
++        unsigned int val;                                                 \
++        if (thor_hsg_lockstep_get_##m(&val) != 0) {                       \
++            return sprintf(buf, "not ready\n");                           \
++        }                                                                 \
++        return sprintf(buf, h ? "%08x\n" : "%d\n", val);                  \
++    }                                                                     \
++
++#define THOR_HSG_LOCKSTEP_ATTR_FNC_SET(m,h)                               \
++    static ssize_t thor_hsg_set_lockstep_##m(struct device *dev,          \
++                     struct device_attribute *attr,                       \
++                     const char *buf, size_t count)                       \
++    {                                                                     \
++        unsigned long val;                                                \
++        if (strict_strtoul(buf, h ? 16 : 10, &val) == 0) {                \
++            thor_hsg_lockstep_set_##m(val);                               \
++        }                                                                 \
++        return strlen(buf);                                               \
++    }                                                                     \
++
++#define THOR_HSG_LOCKSTEP_DEVICE_ATTR_RO(m,h)                             \
++    THOR_HSG_LOCKSTEP_ATTR_FNC_SHOW(m,h)                                  \
++    static DEVICE_ATTR(lockstep_##m, S_IRUGO,                             \
++        thor_hsg_show_lockstep_##m, NULL)                                 \
++
++#define THOR_HSG_LOCKSTEP_DEVICE_ATTR_RW(m,h)                             \
++    THOR_HSG_LOCKSTEP_ATTR_FNC_SHOW(m,h)                                  \
++    THOR_HSG_LOCKSTEP_ATTR_FNC_SET(m,h)                                   \
++    static DEVICE_ATTR(lockstep_##m, S_IRUGO | S_IWUGO,                   \
++        thor_hsg_show_lockstep_##m, thor_hsg_set_lockstep_##m)            \
++
++THOR_HSG_LOCKSTEP_DEVICE_ATTR_RW(enabled,0);
++THOR_HSG_LOCKSTEP_DEVICE_ATTR_RW(fps,0);
++THOR_HSG_LOCKSTEP_DEVICE_ATTR_RW(disp_vsync_cnt,0);
++THOR_HSG_LOCKSTEP_DEVICE_ATTR_RW(phase_target,0);
++THOR_HSG_LOCKSTEP_DEVICE_ATTR_RW(pll_freq_seed,0);
++THOR_HSG_LOCKSTEP_DEVICE_ATTR_RO(locked,0);
++THOR_HSG_LOCKSTEP_DEVICE_ATTR_RW(reserved,1);
++
++static struct attribute *thor_hsg_fs_attrs[] = {
++	&dev_attr_lockstep_enabled.attr,
++	&dev_attr_lockstep_fps.attr,
++	&dev_attr_lockstep_disp_vsync_cnt.attr,
++	&dev_attr_lockstep_phase_target.attr,
++	&dev_attr_lockstep_pll_freq_seed.attr,
++	&dev_attr_lockstep_locked.attr,
++	&dev_attr_lockstep_reserved.attr,
++	NULL
++};
++
++static struct attribute_group thor_hsg_fs_attr_group = {
++	.attrs = thor_hsg_fs_attrs
++};
++
+ static int check_hsg_available(void *base_addr)
+ {
+ 	unsigned int *adsp_data = (unsigned int*) base_addr;
+@@ -101,6 +225,9 @@ static int thor_hsg_init_shared_mem(struct thor_hsg_data *thor_hsg_data)
+ 		goto bail;
+ 	}
+ 
++	thor_hsg_data->lockstep_ctl =
++		(struct lockstep_ctl_t*) (((int) thor_hsg_data->smem_addr) + LOCKSTEP_CTL_OFFSET);
++
+ bail:
+ 	return err;
+ }
+@@ -281,6 +408,12 @@ static int __init thor_hsg_init(void)
+ 		"%s: created /dev/%s c %d %d'", __func__,
+ 		"thor_hsg_adsp", major, 0);
+ 
++	err = sysfs_create_group(&thor_hsgdevice->thor_hsg_data[0].device->kobj, &thor_hsg_fs_attr_group);
++	if (err) {
++		pr_err("Error in sysfs_create_group");
++		goto device_bail;
++	}
++
+ 	goto bail;
+ 
+ device_bail:
+-- 
+1.8.2.1
+

@@ -1,0 +1,304 @@
+From 6dfdc3ba80efe17eab300c37026ba9fa69446e94 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Fri, 6 Mar 2015 16:26:40 -0800
+Subject: [PATCH 10/10] msm: disable few modules for performance
+
+Change-Id: I248ec6010e560671df4561d3367ada289149b4a0
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ arch/arm/configs/msm8960_defconfig | 51 +++++++++++++++++++-------------------
+ drivers/input/Kconfig              |  2 +-
+ drivers/input/mouse/Kconfig        | 14 +++++------
+ drivers/media/Kconfig              |  3 +++
+ drivers/media/video/Kconfig        |  2 +-
+ include/linux/netdevice.h          |  4 +--
+ 6 files changed, 40 insertions(+), 36 deletions(-)
+
+diff --git a/arch/arm/configs/msm8960_defconfig b/arch/arm/configs/msm8960_defconfig
+index a61dfc9..1261f94 100644
+--- a/arch/arm/configs/msm8960_defconfig
++++ b/arch/arm/configs/msm8960_defconfig
+@@ -14,6 +14,7 @@ CONFIG_RT_GROUP_SCHED=y
+ CONFIG_NAMESPACES=y
+ CONFIG_SYNC=y
+ CONFIG_SW_SYNC=y
++# CONFIG_VIDEO_COMMON is not set
+ # CONFIG_UTS_NS is not set
+ # CONFIG_IPC_NS is not set
+ # CONFIG_USER_NS is not set
+@@ -78,7 +79,7 @@ CONFIG_MSM_IPC_ROUTER_SECURITY=y
+ CONFIG_MSM_AVS_HW=y
+ # CONFIG_MSM_HW3D is not set
+ CONFIG_MSM_PIL_QDSP6V4=y
+-CONFIG_MSM_PIL_RIVA=y
++#CONFIG_MSM_PIL_RIVA=y
+ CONFIG_MSM_PIL_TZAPPS=y
+ CONFIG_MSM_PIL_DSPS=y
+ CONFIG_MSM_PIL_VIDC=y
+@@ -87,7 +88,7 @@ CONFIG_MSM_SUBSYSTEM_RESTART=y
+ CONFIG_MSM_SYSMON_COMM=y
+ #CONFIG_MSM_MODEM_8960=y
+ CONFIG_MSM_LPASS_8960=y
+-CONFIG_MSM_WCNSS_SSR_8960=y
++#CONFIG_MSM_WCNSS_SSR_8960=y
+ CONFIG_MSM_GSS_SSR_8064=y
+ CONFIG_MSM_TZ_LOG=y
+ CONFIG_MSM_RPM_LOG=y
+@@ -156,18 +157,18 @@ CONFIG_INET_ESP=m
+ CONFIG_IPV6=y
+ CONFIG_IPV6_PRIVACY=y
+ CONFIG_IPV6_ROUTER_PREF=y
+-CONFIG_IPV6_ROUTE_INFO=y
++#CONFIG_IPV6_ROUTE_INFO=y
+ CONFIG_IPV6_OPTIMISTIC_DAD=y
+-CONFIG_INET6_AH=y
+-CONFIG_INET6_ESP=y
+-CONFIG_INET6_IPCOMP=y
++#CONFIG_INET6_AH=y
++#CONFIG_INET6_ESP=y
++#CONFIG_INET6_IPCOMP=y
+ CONFIG_IPV6_MIP6=y
+ CONFIG_IPV6_MULTIPLE_TABLES=y
+ CONFIG_IPV6_SUBTREES=y
+ CONFIG_NETFILTER=y
+ CONFIG_NETFILTER_NETLINK_LOG=y
+ CONFIG_NF_CONNTRACK=y
+-CONFIG_NF_CONNTRACK_SECMARK=y
++#CONFIG_NF_CONNTRACK_SECMARK=y
+ CONFIG_NF_CONNTRACK_EVENTS=y
+ CONFIG_NF_CT_PROTO_DCCP=y
+ CONFIG_NF_CT_PROTO_SCTP=y
+@@ -185,25 +186,25 @@ CONFIG_NF_CT_NETLINK=y
+ CONFIG_NETFILTER_TPROXY=y
+ CONFIG_NETFILTER_XT_TARGET_CLASSIFY=y
+ CONFIG_NETFILTER_XT_TARGET_CONNMARK=y
+-CONFIG_NETFILTER_XT_TARGET_CONNSECMARK=y
+-CONFIG_NETFILTER_XT_TARGET_LOG=y
++#CONFIG_NETFILTER_XT_TARGET_CONNSECMARK=y
++#CONFIG_NETFILTER_XT_TARGET_LOG=y
+ CONFIG_NETFILTER_XT_TARGET_MARK=y
+ CONFIG_NETFILTER_XT_TARGET_NFQUEUE=y
+-CONFIG_NETFILTER_XT_TARGET_SECMARK=y
+-CONFIG_NETFILTER_XT_TARGET_NOTRACK=y
++#CONFIG_NETFILTER_XT_TARGET_SECMARK=y
++#CONFIG_NETFILTER_XT_TARGET_NOTRACK=y
+ CONFIG_NETFILTER_XT_MATCH_COMMENT=y
+ CONFIG_NETFILTER_XT_MATCH_CONNLIMIT=y
+ CONFIG_NETFILTER_XT_MATCH_CONNMARK=y
+ CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y
+ CONFIG_NETFILTER_XT_MATCH_DSCP=y
+-CONFIG_NETFILTER_XT_MATCH_HASHLIMIT=y
++#CONFIG_NETFILTER_XT_MATCH_HASHLIMIT=y
+ CONFIG_NETFILTER_XT_MATCH_HELPER=y
+ CONFIG_NETFILTER_XT_MATCH_IPRANGE=y
+ CONFIG_NETFILTER_XT_MATCH_LENGTH=y
+ CONFIG_NETFILTER_XT_MATCH_LIMIT=y
+ CONFIG_NETFILTER_XT_MATCH_MAC=y
+ CONFIG_NETFILTER_XT_MATCH_MARK=y
+-CONFIG_NETFILTER_XT_MATCH_MULTIPORT=y
++#CONFIG_NETFILTER_XT_MATCH_MULTIPORT=y
+ CONFIG_NETFILTER_XT_MATCH_POLICY=y
+ CONFIG_NETFILTER_XT_MATCH_PKTTYPE=y
+ CONFIG_NETFILTER_XT_MATCH_QTAGUID=y
+@@ -229,7 +230,7 @@ CONFIG_IP_NF_TARGET_NETMAP=y
+ CONFIG_IP_NF_TARGET_REDIRECT=y
+ CONFIG_IP_NF_MANGLE=y
+ CONFIG_IP_NF_RAW=y
+-CONFIG_IP_NF_SECURITY=y
++CONFIG_IP_NF_SECURITY=m
+ CONFIG_IP_NF_ARPTABLES=y
+ CONFIG_IP_NF_ARPFILTER=y
+ CONFIG_IP_NF_ARP_MANGLE=y
+@@ -270,7 +271,7 @@ CONFIG_BT_HIDP=y
+ # CONFIG_BT_HCIUART_H4 is not set
+ # CONFIG_BT_HCIUART_IBS is not set
+  CONFIG_MSM_BT_POWER is not set
+-CONFIG_CFG80211=y
++CONFIG_CFG80211=m
+ # CONFIG_CFG80211_WEXT is not set
+ CONFIG_RFKILL=y
+ CONFIG_GENLOCK=y
+@@ -278,7 +279,7 @@ CONFIG_GENLOCK_MISCDEVICE=y
+ CONFIG_CMA=y
+ CONFIG_BLK_DEV_LOOP=y
+ CONFIG_BLK_DEV_RAM=y
+-CONFIG_HAPTIC_ISA1200=y
++#CONFIG_HAPTIC_ISA1200=y
+ #CONFIG_PMIC8XXX_VIBRATOR=y
+ CONFIG_QSEECOM=y
+ CONFIG_USB_HSIC_SMSC_HUB=y
+@@ -310,12 +311,12 @@ CONFIG_SLIP_COMPRESSED=y
+ CONFIG_SLIP_MODE_SLIP6=y
+ CONFIG_USB_USBNET=y
+ CONFIG_MSM_RMNET_USB=y
+-CONFIG_WCNSS_CORE=y
++#CONFIG_WCNSS_CORE=y
+ CONFIG_INPUT_EVDEV=y
+ CONFIG_INPUT_EVBUG=m
+-CONFIG_KEYBOARD_GPIO=y
+-CONFIG_KEYBOARD_MATRIX=y
+-CONFIG_KEYBOARD_PMIC8XXX=y
++#CONFIG_KEYBOARD_GPIO=y
++#CONFIG_KEYBOARD_MATRIX=y
++#CONFIG_KEYBOARD_PMIC8XXX=y
+ CONFIG_INPUT_JOYSTICK=y
+ CONFIG_JOYSTICK_XPAD=y
+ CONFIG_INPUT_TOUCHSCREEN=y
+@@ -493,9 +494,9 @@ CONFIG_MMC_MSM_SDC3_WP_SUPPORT=y
+ CONFIG_MMC_MSM_SDC4_SUPPORT=y
+ CONFIG_MMC_MSM_SDC4_8_BIT_SUPPORT=y
+ CONFIG_MMC_MSM_SPS_SUPPORT=y
+-CONFIG_LEDS_PM8XXX=y
+-CONFIG_LEDS_TRIGGERS=y
+-CONFIG_LEDS_TRIGGER_HEARTBEAT=y
++#CONFIG_LEDS_PM8XXX=y
++#CONFIG_LEDS_TRIGGERS=y
++#CONFIG_LEDS_TRIGGER_HEARTBEAT=y
+ CONFIG_SWITCH=y
+ CONFIG_RTC_CLASS=y
+ # CONFIG_RTC_DRV_MSM is not set
+@@ -587,7 +588,7 @@ CONFIG_CFG80211=y
+ CONFIG_CFG80211_INTERNAL_REGDB=y
+ # CONFIG_CFG80211_WEXT is not set
+ CONFIG_CFG80211_DEFAULT_PS=y
+-CONFIG_RFKILL=y
++CONFIG_RFKILL=m
+ CONFIG_WIRELESS=y
+ CONFIG_WIRELESS_EXT=y
+ CONFIG_WEXT_CORE=y
+@@ -602,4 +603,4 @@ CONFIG_GENLOCK_MISCDEVICE=y
+ CONFIG_BLK_DEV_LOOP=y
+ CONFIG_WCNSS_MEM_PRE_ALLOC=y
+ CONFIG_NL80211_TESTMODE=y
+-CONFIG_KERNEL_LZO=y
++#CONFIG_KERNEL_LZO=y
+diff --git a/drivers/input/Kconfig b/drivers/input/Kconfig
+index 69d3686..576e2e2 100644
+--- a/drivers/input/Kconfig
++++ b/drivers/input/Kconfig
+@@ -72,7 +72,7 @@ comment "Userland interfaces"
+ 
+ config INPUT_MOUSEDEV
+ 	tristate "Mouse interface" if EXPERT
+-	default y
++	default n
+ 	help
+ 	  Say Y here if you want your mouse to be accessible as char devices
+ 	  13:32+ - /dev/input/mouseX and 13:63 - /dev/input/mice as an
+diff --git a/drivers/input/mouse/Kconfig b/drivers/input/mouse/Kconfig
+index 3326091..a3803aa 100644
+--- a/drivers/input/mouse/Kconfig
++++ b/drivers/input/mouse/Kconfig
+@@ -3,7 +3,7 @@
+ #
+ menuconfig INPUT_MOUSE
+ 	bool "Mice"
+-	default y
++	default n
+ 	help
+ 	  Say Y here, and a list of supported mice will be displayed.
+ 	  This option doesn't affect the kernel.
+@@ -14,7 +14,7 @@ if INPUT_MOUSE
+ 
+ config MOUSE_PS2
+ 	tristate "PS/2 mouse"
+-	default y
++	default n
+ 	select SERIO
+ 	select SERIO_LIBPS2
+ 	select SERIO_I8042 if X86
+@@ -40,7 +40,7 @@ config MOUSE_PS2
+ 
+ config MOUSE_PS2_ALPS
+ 	bool "ALPS PS/2 mouse protocol extension" if EXPERT
+-	default y
++	default n
+ 	depends on MOUSE_PS2
+ 	help
+ 	  Say Y here if you have an ALPS PS/2 touchpad connected to
+@@ -50,7 +50,7 @@ config MOUSE_PS2_ALPS
+ 
+ config MOUSE_PS2_LOGIPS2PP
+ 	bool "Logitech PS/2++ mouse protocol extension" if EXPERT
+-	default y
++	default n
+ 	depends on MOUSE_PS2
+ 	help
+ 	  Say Y here if you have a Logictech PS/2++ mouse connected to
+@@ -60,7 +60,7 @@ config MOUSE_PS2_LOGIPS2PP
+ 
+ config MOUSE_PS2_SYNAPTICS
+ 	bool "Synaptics PS/2 mouse protocol extension" if EXPERT
+-	default y
++	default n
+ 	depends on MOUSE_PS2
+ 	help
+ 	  Say Y here if you have a Synaptics PS/2 TouchPad connected to
+@@ -70,7 +70,7 @@ config MOUSE_PS2_SYNAPTICS
+ 
+ config MOUSE_PS2_LIFEBOOK
+ 	bool "Fujitsu Lifebook PS/2 mouse protocol extension" if EXPERT
+-	default y
++	default n
+ 	depends on MOUSE_PS2 && X86 && DMI
+ 	help
+ 	  Say Y here if you have a Fujitsu B-series Lifebook PS/2
+@@ -80,7 +80,7 @@ config MOUSE_PS2_LIFEBOOK
+ 
+ config MOUSE_PS2_TRACKPOINT
+ 	bool "IBM Trackpoint PS/2 mouse protocol extension" if EXPERT
+-	default y
++	default n
+ 	depends on MOUSE_PS2
+ 	help
+ 	  Say Y here if you have an IBM Trackpoint PS/2 mouse connected
+diff --git a/drivers/media/Kconfig b/drivers/media/Kconfig
+index 9575db4..cc29552 100644
+--- a/drivers/media/Kconfig
++++ b/drivers/media/Kconfig
+@@ -62,6 +62,9 @@ config VIDEO_V4L2_SUBDEV_API
+ 
+ 	  This API is mostly used by camera interfaces in embedded platforms.
+ 
++config VIDEO_COMMON
++	  bool "common"
++	  default n
+ #
+ # DVB Core
+ #
+diff --git a/drivers/media/video/Kconfig b/drivers/media/video/Kconfig
+index 0d2d91c..9b15973 100644
+--- a/drivers/media/video/Kconfig
++++ b/drivers/media/video/Kconfig
+@@ -642,7 +642,7 @@ config VIDEO_VIVI
+ config MSM_VCAP
+ 	tristate "Qualcomm MSM VCAP"
+ 	depends on VIDEO_DEV && VIDEO_V4L2
+-	default y
++	default n
+ 	---help---
+ 		Enables VCAP driver. This device allows for video capture and
+ 		video processing using the v4l2 api
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+index 33900a5..9f98c9f 100644
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -1068,13 +1068,13 @@ struct net_device {
+ 					     * Do not use this in drivers.
+ 					     */
+ 
+-#ifdef CONFIG_WIRELESS_EXT
++//#ifdef CONFIG_WIRELESS_EXT
+ 	/* List of functions to handle Wireless Extensions (instead of ioctl).
+ 	 * See <net/iw_handler.h> for details. Jean II */
+ 	const struct iw_handler_def *	wireless_handlers;
+ 	/* Instance data managed by the core of Wireless Extensions. */
+ 	struct iw_public_data *	wireless_data;
+-#endif
++//#endif
+ 	/* Management operations */
+ 	const struct net_device_ops *netdev_ops;
+ 	const struct ethtool_ops *ethtool_ops;
+-- 
+1.8.2.1
+

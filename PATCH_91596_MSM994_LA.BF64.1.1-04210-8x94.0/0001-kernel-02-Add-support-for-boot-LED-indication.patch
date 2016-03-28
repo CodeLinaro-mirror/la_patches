@@ -1,0 +1,104 @@
+From b56413685667426245188c401c4aa9da3ae63dfd Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Mon, 2 Feb 2015 13:39:24 -0800
+Subject: [PATCH] Add-support-for-boot-LED-indication
+
+Change-Id: I49faa66d7c989e073623576ee5d4efdd6c73306f
+---
+ Documentation/devicetree/bindings/fb/mdss-mdp.txt |  3 +++
+ drivers/video/msm/mdss/mdss_fb.c                  | 17 +++++++++++++++--
+ drivers/video/msm/mdss/mdss_fb.h                  |  4 +++-
+ 3 files changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/fb/mdss-mdp.txt b/Documentation/devicetree/bindings/fb/mdss-mdp.txt
+index 4ffbf27..2398869 100644
+--- a/Documentation/devicetree/bindings/fb/mdss-mdp.txt
++++ b/Documentation/devicetree/bindings/fb/mdss-mdp.txt
+@@ -496,6 +496,9 @@ Subnode properties:
+ - qcom,mdss-idle-power-collapse-enabled: Boolean property that enables support
+ 					for mdss power collapse in idle
+ 					screen use cases with smart panels.
++- qcom,boot-indication-enabled: Boolean property that enables turning on the blue
++				LED for notifying that the device is in boot
++				process.
+ 
+ Example:
+ 	mdss_mdp: qcom,mdss_mdp@fd900000 {
+diff --git a/drivers/video/msm/mdss/mdss_fb.c b/drivers/video/msm/mdss/mdss_fb.c
+index 824764b..e89f86c 100644
+--- a/drivers/video/msm/mdss/mdss_fb.c
++++ b/drivers/video/msm/mdss/mdss_fb.c
+@@ -2,7 +2,7 @@
+  * Core MDSS framebuffer driver.
+  *
+  * Copyright (C) 2007 Google Incorporated
+- * Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
+  *
+  * This software is licensed under the terms of the GNU General Public
+  * License version 2, as published by the Free Software Foundation, and
+@@ -27,7 +27,6 @@
+ #include <linux/init.h>
+ #include <linux/ioport.h>
+ #include <linux/kernel.h>
+-#include <linux/leds.h>
+ #include <linux/memory.h>
+ #include <linux/mm.h>
+ #include <linux/module.h>
+@@ -216,6 +215,11 @@ static void mdss_fb_set_bl_brightness(struct led_classdev *led_cdev,
+ 	struct msm_fb_data_type *mfd = dev_get_drvdata(led_cdev->dev->parent);
+ 	int bl_lvl;
+ 
++	if (mfd->boot_notification_led) {
++		led_trigger_event(mfd->boot_notification_led, 0);
++		mfd->boot_notification_led = NULL;
++	}
++
+ 	if (value > mfd->panel_info->brightness_max)
+ 		value = mfd->panel_info->brightness_max;
+ 
+@@ -716,6 +720,15 @@ static int mdss_fb_probe(struct platform_device *pdev)
+ 		mfd->split_mode = MDP_DUAL_LM_DUAL_DISPLAY;
+ 
+ 	mfd->mdp = *mdp_instance;
++
++	rc = of_property_read_bool(pdev->dev.of_node,
++		"qcom,boot-indication-enabled");
++
++	if (rc) {
++		led_trigger_register_simple("boot-indication",
++			&(mfd->boot_notification_led));
++	}
++
+ 	INIT_LIST_HEAD(&mfd->proc_list);
+ 
+ 	mutex_init(&mfd->bl_lock);
+diff --git a/drivers/video/msm/mdss/mdss_fb.h b/drivers/video/msm/mdss/mdss_fb.h
+index e65b4c8..73f758a 100644
+--- a/drivers/video/msm/mdss/mdss_fb.h
++++ b/drivers/video/msm/mdss/mdss_fb.h
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2008-2014, The Linux Foundation. All rights reserved.
++/* Copyright (c) 2008-2015, The Linux Foundation. All rights reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 and
+@@ -19,6 +19,7 @@
+ #include <linux/msm_mdp.h>
+ #include <linux/types.h>
+ #include <linux/notifier.h>
++#include <linux/leds.h>
+ 
+ #include "mdss_panel.h"
+ #include "mdss_mdp_splash_logo.h"
+@@ -284,6 +285,7 @@ struct msm_fb_data_type {
+ 
+ 	u32 wait_for_kickoff;
+ 	u32 thermal_level;
++	struct led_trigger *boot_notification_led;
+ };
+ 
+ static inline void mdss_fb_update_notify_update(struct msm_fb_data_type *mfd)
+-- 
+1.8.2.1
+

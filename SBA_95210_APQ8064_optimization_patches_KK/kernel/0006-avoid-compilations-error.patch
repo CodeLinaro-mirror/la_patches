@@ -1,0 +1,27 @@
+From 83812382a30783e8f956d9e9a8869ba1cf57a761 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 3 Mar 2015 14:48:05 -0800
+Subject: [PATCH 06/10] avoid compilations error
+
+Change-Id: I53226e01b24ab8e2d51f77606355a07ce2a92e0c
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ init/main.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/init/main.c b/init/main.c
+index e085d54..90faa55 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -876,7 +876,7 @@ static noinline int init_post(void)
+ 
+ 	current->signal->flags |= SIGNAL_UNKILLABLE;
+ 
+-	place_marker("Linux_Kernel - End");
++	//place_marker("Linux_Kernel - End");
+ 
+ 	if (ramdisk_execute_command) {
+ 		run_init_process(ramdisk_execute_command);
+-- 
+1.8.2.1
+

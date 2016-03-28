@@ -1,0 +1,41 @@
+From 13eef8bff4cde223a196e9979b706f6cc97491c5 Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Mon, 14 Sep 2015 15:03:54 -0700
+Subject: [PATCH] sched: fair: Return current CPU if search_cpu(s) is empty
+
+If a task is affined to CPUs that are offline, select_best_cpu
+and best_small_task_cpu will attempt to select a cpu from an
+empty mask, resulting in corruption/crashes. Fix this by
+returning the current CPU if search_cpu(s_ is empty.
+
+Change-Id: Ib56a8a2513b0ae7ec8414b5ed3134e88b24dd2ac
+Signed-off-by: Vikram Mulukutla <markivx@codeaurora.org>
+---
+ kernel/sched/fair.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index b3f30a0..c569a1d 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1820,6 +1820,8 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
+ 	hmp_capable = !cpumask_full(&temp);
+ 
+ 	cpumask_and(&search_cpu, tsk_cpus_allowed(p), cpu_online_mask);
++	if (unlikely(cpumask_empty(&search_cpu)))
++		return task_cpu(p);
+ 	if (unlikely(!cpumask_test_cpu(i, &search_cpu)))
+ 		i = cpumask_first(&search_cpu);
+ 
+@@ -2058,6 +2060,8 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
+ 	trq = task_rq(p);
+ 	i = task_cpu(p);
+ 	cpumask_and(&search_cpus, tsk_cpus_allowed(p), cpu_online_mask);
++	if (unlikely(cpumask_empty(&search_cpus)))
++		return i;
+ 	if (unlikely(!cpumask_test_cpu(i, &search_cpus)))
+ 		i = cpumask_first(&search_cpus);
+ 
+-- 
+1.9.1
+

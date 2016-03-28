@@ -1,0 +1,115 @@
+From 6f037b3d3f4b10f013558309f41aa22abab6365b Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 2 Sep 2015 11:10:41 -0700
+Subject: [PATCH] device/qcom/common: Add wigig network high performance
+ configuration
+
+Register service to apply network high performance configuration
+required for wigig. The service will be triggered from libhardware
+legacy driver loading code and run init.qcom.wigig.sh.
+
+Change-Id: I64af25f598b6bdbe424b7a5f92210fcfb39334fa
+---
+ base.mk                        |  1 +
+ rootdir/Android.mk             |  7 +++++++
+ rootdir/etc/init.qcom.rc       |  7 +++++++
+ rootdir/etc/init.qcom.wigig.sh | 39 +++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 54 insertions(+)
+ create mode 100755 rootdir/etc/init.qcom.wigig.sh
+
+diff --git a/base.mk b/base.mk
+index 5a11e19..4ef8547 100644
+--- a/base.mk
++++ b/base.mk
+@@ -227,6 +227,7 @@ INIT += init.qcom.sh
+ INIT += init.qcom.class_core.sh
+ INIT += init.class_main.sh
+ INIT += init.qcom.wifi.sh
++INIT += init.qcom.wigig.sh
+ INIT += vold.fstab
+ INIT += init.qcom.ril.path.sh
+ INIT += init.qcom.usb.rc
+diff --git a/rootdir/Android.mk b/rootdir/Android.mk
+index cb14082..f3f8c87 100644
+--- a/rootdir/Android.mk
++++ b/rootdir/Android.mk
+@@ -75,6 +75,13 @@ LOCAL_SRC_FILES    := etc/init.qcom.wifi.sh
+ include $(BUILD_PREBUILT)
+ 
+ include $(CLEAR_VARS)
++LOCAL_MODULE       := init.qcom.wigig.sh
++LOCAL_MODULE_TAGS  := optional eng
++LOCAL_MODULE_CLASS := ETC
++LOCAL_SRC_FILES    := etc/init.qcom.wigig.sh
++include $(BUILD_PREBUILT)
++
++include $(CLEAR_VARS)
+ LOCAL_MODULE       := init.crda.sh
+ LOCAL_MODULE_TAGS  := optional eng
+ LOCAL_MODULE_CLASS := ETC
+diff --git a/rootdir/etc/init.qcom.rc b/rootdir/etc/init.qcom.rc
+index 7fb4400..9495978 100644
+--- a/rootdir/etc/init.qcom.rc
++++ b/rootdir/etc/init.qcom.rc
+@@ -534,6 +534,13 @@ service btwlancoex /system/bin/sh /system/etc/init.qcom.coex.sh
+     disabled
+     oneshot
+ 
++service wigignetcfg /system/bin/sh /system/etc/init.qcom.wigig.sh
++    class late_start
++    user root
++    group root
++    disabled
++    oneshot
++
+ service amp_init /system/bin/amploader -i
+     class late_start
+     user root
+diff --git a/rootdir/etc/init.qcom.wigig.sh b/rootdir/etc/init.qcom.wigig.sh
+new file mode 100755
+index 0000000..20e8885
+--- /dev/null
++++ b/rootdir/etc/init.qcom.wigig.sh
+@@ -0,0 +1,39 @@
++#properties list
++WLAN_IF_PROPERTY="wifi.interface"
++MTU_VALUE_PROPERTY="wifi.mtu"
++RPS_VALUE_PROPERTY="wifi.rps"
++
++# default values if properties do not exist
++WLAN_IF_DEFAULT="wlan0"
++MTU_VALUE_DEFAULT="1950"
++RPS_VALUE_DEFAULT="f"
++
++wlan_if=`getprop $WLAN_IF_PROPERTY`
++if [ -z $wlan_if ]; then
++	wlan_if=$WLAN_IF_DEFAULT
++fi
++
++mtu=`getprop $MTU_VALUE_PROPERTY`
++if [ -z $mtu ]; then
++	mtu=$MTU_VALUE_DEFAULT
++fi
++
++rps=`getprop $RPS_VALUE_PROPERTY`
++if [ -z $rps ]; then
++	rps=$RPS_VALUE_DEFAULT
++fi
++
++# interface related configuration
++echo "$rps" > /sys/class/net/$wlan_if/queues/rx-0/rps_cpus
++echo "$mtu" > /sys/class/net/$wlan_if/mtu
++
++# inteface independent configuration
++echo "8388608" > /proc/sys/net/core/rmem_max
++echo "524288" > /proc/sys/net/core/rmem_default
++echo "8388608" > /proc/sys/net/core/wmem_max
++echo "524288" > /proc/sys/net/core/wmem_default
++echo "524288 6291456 8291456" > /proc/sys/net/ipv4/tcp_rmem
++echo "524288 6291456 8291456" > /proc/sys/net/ipv4/tcp_wmem
++echo "8800000" > /proc/sys/net/ipv4/tcp_limit_output_bytes
++echo "1" > /proc/sys/net/ipv4/tcp_use_userconfig
++echo "20" > /proc/sys/net/ipv4/tcp_delack_seg
+-- 
+1.8.2.1
+

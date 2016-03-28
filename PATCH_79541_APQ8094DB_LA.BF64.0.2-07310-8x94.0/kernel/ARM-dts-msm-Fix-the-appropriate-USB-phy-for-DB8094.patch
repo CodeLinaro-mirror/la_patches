@@ -1,0 +1,29 @@
+From 8652acb92994221f4afa841bf6aba85fda9a44c3 Mon Sep 17 00:00:00 2001
+From: Tanya Finkel <tfinkel@codeaurora.org>
+Date: Tue, 21 Oct 2014 13:17:57 +0300
+Subject: [PATCH 05/11] ARM: dts: msm: Fix the appropriate USB phy for DB8094
+
+On DB8094 the QUSB PHY is connected to the primary port.
+
+Change-Id: I0557856b59952d317726a0ff064c1786d8e1b4b8
+Signed-off-by: Tanya Finkel <tfinkel@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+index efc887d..011343a 100644
+--- a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
++++ b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+@@ -239,7 +239,7 @@
+ 		<0xf9b39000 0x17f>;
+ 	qcom,hsusb-otg-otg-control = <2>; /* PMIC control */
+ 	qcom,hsusb-otg-mode = <1>;   /* USB_PERIPHERAL */
+-	qcom,hsusb-otg-phy-type = <3>; /* QUSB_ULPI_PHY */
++	qcom,hsusb-otg-phy-type = <4>; /* QUSB_ULPI_PHY */
+ 	vbus_otg-supply = <&vph_pwr_vreg>;
+ 	qcom,dp-manual-pullup;
+ 
+-- 
+1.8.2.1
+

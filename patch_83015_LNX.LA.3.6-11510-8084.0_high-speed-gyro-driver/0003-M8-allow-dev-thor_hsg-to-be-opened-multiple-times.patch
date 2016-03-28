@@ -1,0 +1,352 @@
+From e44353f0befc708d3b3572cd3247e0d60b10abe8 Mon Sep 17 00:00:00 2001
+From: Mike Mager <mikemager@codeaurora.org>
+Date: Mon, 8 Dec 2014 09:54:46 -0800
+Subject: [PATCH] M8: allow /dev/thor_hsg to be opened multiple times
+
+Change-Id: I64f3455f209204b0378b5ab464fea9d5fd3b8634
+---
+ drivers/char/thor_hsg.c | 156 ++++++++++++++++++++----------------------------
+ 1 file changed, 64 insertions(+), 92 deletions(-)
+
+diff --git a/drivers/char/thor_hsg.c b/drivers/char/thor_hsg.c
+index d8c7fa4..06ee632 100644
+--- a/drivers/char/thor_hsg.c
++++ b/drivers/char/thor_hsg.c
+@@ -44,21 +44,17 @@ struct lockstep_ctl_t {
+ 	unsigned int reserved;
+ };
+ 
+-struct thor_hsg_data {
+-	struct device *device;
+-	bool   device_initialized;
+-	bool   device_opened;
+-	void   *smem_addr;
+-	size_t smem_size;
+-	struct mutex lock;
+-	volatile struct lockstep_ctl_t* lockstep_ctl;
+-};
+-
+ struct thor_hsg_device {
+ 	struct cdev cdev;
+ 	struct class *class;
+ 	dev_t dev_no;
+-	struct thor_hsg_data *thor_hsg_data;
++	struct device *device;
++	bool device_initialized;
++	bool device_opened;
++	void *smem_addr;
++	size_t smem_size;
++	struct mutex lock;
++	volatile struct lockstep_ctl_t* lockstep_ctl;
+ };
+ 
+ struct thor_hsg_user_data {
+@@ -70,6 +66,12 @@ static struct thor_hsg_device g_thor_hsg_instance = {
+ 	{ {0} },
+ 	NULL,
+ 	0,
++	NULL,
++	0,
++	0,
++	NULL,
++	0,
++	{ {0} },
+ 	NULL
+ };
+ 
+@@ -80,15 +82,13 @@ static struct thor_hsg_device g_thor_hsg_instance = {
+     int thor_hsg_lockstep_get_##m(unsigned int *m)                        \
+     {                                                                     \
+         struct thor_hsg_device *thor_hsgdevice = &g_thor_hsg_instance;    \
+-        struct thor_hsg_data *thor_hsg_data = NULL;                       \
+         int err = 0;                                                      \
+-        if (!thor_hsgdevice->thor_hsg_data || !m) {                       \
++        if (!thor_hsgdevice->device_opened || !m) {                       \
+             pr_err("Memory not allocated yet");                           \
+             err = -ENODEV;                                                \
+             goto bail;                                                    \
+         }                                                                 \
+-        thor_hsg_data = &thor_hsgdevice->thor_hsg_data[0];                \
+-        *m = thor_hsg_data->lockstep_ctl->m;                              \
++        *m = thor_hsgdevice->lockstep_ctl->m;                             \
+     bail:                                                                 \
+         return err;                                                       \
+     }                                                                     \
+@@ -97,15 +97,13 @@ static struct thor_hsg_device g_thor_hsg_instance = {
+     int thor_hsg_lockstep_set_##m(unsigned int m)                         \
+     {                                                                     \
+         struct thor_hsg_device *thor_hsgdevice = &g_thor_hsg_instance;    \
+-        struct thor_hsg_data *thor_hsg_data = NULL;                       \
+         int err = 0;                                                      \
+-        if (!thor_hsgdevice->thor_hsg_data) {                             \
++        if (!thor_hsgdevice->device_opened) {                             \
+             pr_err("Memory not allocated yet");                           \
+             err = -ENODEV;                                                \
+             goto bail;                                                    \
+         }                                                                 \
+-        thor_hsg_data = &thor_hsgdevice->thor_hsg_data[0];                \
+-        thor_hsg_data->lockstep_ctl->m = m;                               \
++        thor_hsgdevice->lockstep_ctl->m = m;                              \
+     bail:                                                                 \
+         return err;                                                       \
+     }                                                                     \
+@@ -195,38 +193,38 @@ static int check_hsg_available(void *base_addr)
+ 	return 1;
+ }
+ 
+-static int thor_hsg_init_shared_mem(struct thor_hsg_data *thor_hsg_data)
++static int thor_hsg_init_shared_mem(struct thor_hsg_device *thor_hsgdevice)
+ {
+ 	int err = 0;
+ 
+-	thor_hsg_data->smem_size = THOR_HSG_SHARED_MEM_SIZE;
+-	thor_hsg_data->smem_addr = smem_find(
++	thor_hsgdevice->smem_size = THOR_HSG_SHARED_MEM_SIZE;
++	thor_hsgdevice->smem_addr = smem_find(
+ 		426,
+-		thor_hsg_data->smem_size,
++		thor_hsgdevice->smem_size,
+ 		0,
+ 		SMEM_ANY_HOST_FLAG
+ 	);
+ 
+-	if (!thor_hsg_data->smem_addr) {
+-		dev_err(thor_hsg_data->device, "%s: Could not allocate smem memory",
++	if (!thor_hsgdevice->smem_addr) {
++		dev_err(thor_hsgdevice->device, "%s: Could not allocate smem memory",
+ 			__func__);
+ 		err = -ENOMEM;
+ 		goto bail;
+ 	}
+ 
+-	dev_dbg(thor_hsg_data->device, "%s: SMEM address=0x%x smem_size=%d",
+-		__func__, (unsigned int)thor_hsg_data->smem_addr,
+-		thor_hsg_data->smem_size);
++	dev_dbg(thor_hsgdevice->device, "%s: SMEM address=0x%x smem_size=%d",
++		__func__, (unsigned int)thor_hsgdevice->smem_addr,
++		thor_hsgdevice->smem_size);
+ 
+-	if (check_hsg_available(thor_hsg_data->smem_addr)) {
+-		dev_err(thor_hsg_data->device, "%s: Data from ADSP is not available",
++	if (check_hsg_available(thor_hsgdevice->smem_addr)) {
++		dev_err(thor_hsgdevice->device, "%s: Data from ADSP is not available",
+ 			__func__);
+ 		err = -ECOMM;
+ 		goto bail;
+ 	}
+ 
+-	thor_hsg_data->lockstep_ctl =
+-		(struct lockstep_ctl_t*) (((int) thor_hsg_data->smem_addr) + LOCKSTEP_CTL_OFFSET);
++	thor_hsgdevice->lockstep_ctl =
++		(struct lockstep_ctl_t*) (((int) thor_hsgdevice->smem_addr) + LOCKSTEP_CTL_OFFSET);
+ 
+ bail:
+ 	return err;
+@@ -234,37 +232,29 @@ bail:
+ 
+ static int thor_hsg_open(struct inode *inode, struct file *filp)
+ {
+-	struct thor_hsg_device *device = &g_thor_hsg_instance;
+-	struct thor_hsg_data *thor_hsg_data = NULL;
++	struct thor_hsg_device *thor_hsgdevice = &g_thor_hsg_instance;
+ 	int err = 0;
+ 
+-	if (!inode || !device->thor_hsg_data) {
++	if (!inode) {
+ 		pr_err("Memory not allocated yet");
+ 		err = -ENODEV;
+ 		goto bail;
+ 	}
+ 
+-	thor_hsg_data = &device->thor_hsg_data[0];
+-
+-	if (thor_hsg_data->device_opened) {
+-		dev_err(thor_hsg_data->device, "%s: Device already opened",
+-			__func__);
+-		err = -EEXIST;
+-		goto bail;
+-	}
++	mutex_lock(&thor_hsgdevice->lock);
+ 
+-	err = thor_hsg_init_shared_mem(thor_hsg_data);
+-	if (err != 0) {
+-		goto bail;
++	if (!thor_hsgdevice->device_opened) {
++		err = thor_hsg_init_shared_mem(thor_hsgdevice);
++		if (err != 0) {
++			mutex_unlock(&thor_hsgdevice->lock);
++			goto bail;
++		}
++		thor_hsgdevice->device_opened = 1;
+ 	}
+ 
+-	mutex_init(&thor_hsg_data->lock);
++	mutex_unlock(&thor_hsgdevice->lock);
+ 
+-	thor_hsg_data->device_opened = 1;
+-
+-	filp->private_data = (void *)thor_hsg_data;
+-
+-	return 0;
++	filp->private_data = (void *)thor_hsgdevice;
+ 
+ bail:
+ 	return err;
+@@ -272,25 +262,15 @@ bail:
+ 
+ static int thor_hsg_release(struct inode *inode, struct file *filp)
+ {
+-	struct thor_hsg_device *thor_hsgdevice = &g_thor_hsg_instance;
+-	struct thor_hsg_data *thor_hsg_data = NULL;
++	struct thor_hsg_device *thor_hsg_dev = &g_thor_hsg_instance;
+ 	int err = 0;
+ 
+-	if (!inode || !thor_hsgdevice->thor_hsg_data) {
++	if (!inode || !thor_hsg_dev->device_opened) {
+ 		pr_err("Memory not allocated yet");
+ 		err = -ENODEV;
+ 		goto bail;
+ 	}
+ 
+-	thor_hsg_data = &thor_hsgdevice->thor_hsg_data[0];
+-
+-	if (thor_hsg_data->device_opened == 1) {
+-		dev_dbg(thor_hsg_data->device, "%s: Destroying %s.", __func__,
+-			"thor_hsg_adsp");
+-		thor_hsg_data->device_opened = 0;
+-		mutex_destroy(&thor_hsg_data->lock);
+-	}
+-
+ 	filp->private_data = NULL;
+ 
+ bail:
+@@ -301,12 +281,11 @@ static long thor_hsg_ioctl(struct file *file, unsigned int cmd,
+ 					     unsigned long arg)
+ {
+ 	int ret;
+-	struct thor_hsg_data *thor_hsg_data = file->private_data;
++	struct thor_hsg_device *thor_hsg_dev = file->private_data;
+ 
+-	if (!thor_hsg_data)
++	if (!thor_hsg_dev)
+ 		return -EINVAL;
+ 
+-	mutex_lock(&thor_hsg_data->lock);
+ 	switch (cmd) {
+ 	case THOR_HSG_IOCTL_READ_DATA:
+ 		if (arg != 0) {
+@@ -323,12 +302,12 @@ static long thor_hsg_ioctl(struct file *file, unsigned int cmd,
+ 				ret = -ENODATA;
+ 				break;
+ 			}
+-			if (udata.length > thor_hsg_data->smem_size) {
+-				pr_err("%s: Length too big: %d > %d.", __func__, udata.length, thor_hsg_data->smem_size);
++			if (udata.length > thor_hsg_dev->smem_size) {
++				pr_err("%s: Length too big: %d > %d.", __func__, udata.length, thor_hsg_dev->smem_size);
+ 				ret = -ENODATA;
+ 				break;
+ 			}
+-			ret = copy_to_user((void*) udata.data, thor_hsg_data->smem_addr, 
++			ret = copy_to_user((void*) udata.data, thor_hsg_dev->smem_addr, 
+ 				udata.length);
+ 			if (ret != 0) {
+ 				pr_err("%s: Error in copy_to_user(). Err code = %d",
+@@ -344,7 +323,6 @@ static long thor_hsg_ioctl(struct file *file, unsigned int cmd,
+ 		pr_err("%s: Unrecognized ioctl command %d\n", __func__, cmd);
+ 		ret = -ENOIOCTLCMD;
+ 	}
+-	mutex_unlock(&thor_hsg_data->lock);
+ 
+ 	return ret;
+ }
+@@ -364,19 +342,11 @@ static int __init thor_hsg_init(void)
+ 
+ 	pr_err("%s: IOCTL is %08x\n", __func__, THOR_HSG_IOCTL_READ_DATA);
+ 
+-	thor_hsgdevice->thor_hsg_data = kcalloc(1,
+-		sizeof(struct thor_hsg_data), GFP_KERNEL);
+-	if (!thor_hsgdevice->thor_hsg_data) {
+-		pr_err("Not enough memory for thor_hsg devices");
+-		err = -ENOMEM;
+-		goto bail;
+-	}
+-
+ 	err = alloc_chrdev_region(&thor_hsgdevice->dev_no, 0,
+ 		1, "thor_hsgctl");
+ 	if (err) {
+ 		pr_err("Error in alloc_chrdev_region.");
+-		goto data_bail;
++		goto bail;
+ 	}
+ 	major = MAJOR(thor_hsgdevice->dev_no);
+ 
+@@ -395,20 +365,23 @@ static int __init thor_hsg_init(void)
+ 		goto cdev_bail;
+ 	}
+ 
+-	thor_hsgdevice->thor_hsg_data[0].device = device_create(
++	thor_hsgdevice->device = device_create(
+ 		thor_hsgdevice->class, NULL, MKDEV(major, 0),
+ 		NULL, "%s", "thor_hsg");
+-	if (IS_ERR(thor_hsgdevice->thor_hsg_data[0].device)) {
+-		err = PTR_ERR(thor_hsgdevice->thor_hsg_data[0].device);
++	if (IS_ERR(thor_hsgdevice->device)) {
++		err = PTR_ERR(thor_hsgdevice->device);
+ 		pr_err("Error in device_create");
+ 		goto device_bail;
+ 	}
+-	thor_hsgdevice->thor_hsg_data[0].device_initialized = 1;
+-	dev_dbg(thor_hsgdevice->thor_hsg_data[0].device,
++
++	mutex_init(&thor_hsgdevice->lock);
++
++	thor_hsgdevice->device_initialized = 1;
++	dev_dbg(thor_hsgdevice->device,
+ 		"%s: created /dev/%s c %d %d'", __func__,
+-		"thor_hsg_adsp", major, 0);
++		"thor_hsg", major, 0);
+ 
+-	err = sysfs_create_group(&thor_hsgdevice->thor_hsg_data[0].device->kobj, &thor_hsg_fs_attr_group);
++	err = sysfs_create_group(&thor_hsgdevice->device->kobj, &thor_hsg_fs_attr_group);
+ 	if (err) {
+ 		pr_err("Error in sysfs_create_group");
+ 		goto device_bail;
+@@ -417,7 +390,8 @@ static int __init thor_hsg_init(void)
+ 	goto bail;
+ 
+ device_bail:
+-	if (thor_hsgdevice->thor_hsg_data[0].device_initialized)
++	if (thor_hsgdevice->device_initialized)
++		mutex_destroy(&thor_hsgdevice->lock);
+ 		device_destroy(thor_hsgdevice->class,
+ 			MKDEV(MAJOR(thor_hsgdevice->dev_no), 0));
+ 	class_destroy(thor_hsgdevice->class);
+@@ -425,8 +399,6 @@ cdev_bail:
+ 	cdev_del(&thor_hsgdevice->cdev);
+ chrdev_bail:
+ 	unregister_chrdev_region(thor_hsgdevice->dev_no, 1);
+-data_bail:
+-	kfree(thor_hsgdevice->thor_hsg_data);
+ bail:
+ 	return err;
+ }
+@@ -435,14 +407,14 @@ static void __exit thor_hsg_exit(void)
+ {
+ 	struct thor_hsg_device *thor_hsgdevice = &g_thor_hsg_instance;
+ 
+-	if (thor_hsgdevice->thor_hsg_data[0].device_initialized) {
++	if (thor_hsgdevice->device_initialized) {
++		mutex_destroy(&thor_hsgdevice->lock);
+ 		device_destroy(thor_hsgdevice->class,
+ 			MKDEV(MAJOR(thor_hsgdevice->dev_no), 0));
+ 	}
+ 	class_destroy(thor_hsgdevice->class);
+ 	cdev_del(&thor_hsgdevice->cdev);
+ 	unregister_chrdev_region(thor_hsgdevice->dev_no, 1);
+-	kfree(thor_hsgdevice->thor_hsg_data);
+ }
+ 
+ module_init(thor_hsg_init);
+-- 
+1.8.2.1
+

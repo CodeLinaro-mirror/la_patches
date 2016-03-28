@@ -1,0 +1,65 @@
+From 637098f66dfbc4b8714d596de57c14b0f957a10b Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:34:41 -0700
+Subject: [PATCH 09/22] msm: mdss: add support to read force clock lane HS
+ property
+
+This change adds support to read force clock lane to HS
+property from panel dt file.
+
+Change-Id: Ic55288e410dd8f2bd0572746a66b6370d2155239
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt | 2 ++
+ drivers/video/msm/mdss/mdss_dsi_panel.c                 | 2 ++
+ drivers/video/msm/mdss/mdss_panel.h                     | 2 +-
+ 3 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt b/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt
+index 8f855d3..eb0346b 100644
+--- a/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt
++++ b/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt
+@@ -370,6 +370,7 @@ Optional properties:
+ 					"vflip" = panel is flipped in vertical direction
+ - qcom,panel-ack-disabled: A boolean property to indicate, whether we need to wait for any ACK from the panel
+ 			   for any commands that we send.
++- qcom,mdss-dsi-force-clock-lane-hs:	Boolean to force dsi clock lanes to HS mode always.
+ 
+ Note, if a given optional qcom,* binding is not present, then the driver will configure
+ the default values specified.
+@@ -500,5 +501,6 @@ Example:
+ 						<40 120 128>,
+ 						<128 240 64>;
+ 		qcom,mdss-dsi-panel-orientation = "180"
++		qcom,mdss-dsi-force-clock-lane-hs;
+ 	};
+ };
+diff --git a/drivers/video/msm/mdss/mdss_dsi_panel.c b/drivers/video/msm/mdss/mdss_dsi_panel.c
+index c3271b2..c5e83fe 100644
+--- a/drivers/video/msm/mdss/mdss_dsi_panel.c
++++ b/drivers/video/msm/mdss/mdss_dsi_panel.c
+@@ -1639,6 +1639,8 @@ static int mdss_panel_parse_dt(struct device_node *np,
+ 				pr_err("TE-ESD not valid for video mode\n");
+ 		}
+ 	}
++	pinfo->mipi.force_clk_lane_hs = of_property_read_bool(np,
++		"qcom,mdss-dsi-force-clock-lane-hs");
+ 
+ 	rc = mdss_dsi_parse_panel_features(np, ctrl_pdata);
+ 	if (rc) {
+diff --git a/drivers/video/msm/mdss/mdss_panel.h b/drivers/video/msm/mdss/mdss_panel.h
+index fd7e87e..aa8a5f7 100644
+--- a/drivers/video/msm/mdss/mdss_panel.h
++++ b/drivers/video/msm/mdss/mdss_panel.h
+@@ -281,7 +281,7 @@ struct mipi_panel_info {
+ 	/* The packet-size should not bet changed */
+ 	char no_max_pkt_size;
+ 	/* Clock required during LP commands */
+-	char force_clk_lane_hs;
++	bool force_clk_lane_hs;
+ 
+ 	char vsync_enable;
+ 	char hw_vsync_mode;
+-- 
+1.8.2.1
+

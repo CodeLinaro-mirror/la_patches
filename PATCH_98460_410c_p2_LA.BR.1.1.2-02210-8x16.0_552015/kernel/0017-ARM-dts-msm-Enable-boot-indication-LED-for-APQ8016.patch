@@ -1,0 +1,41 @@
+From 7e168cbabe92a1ffe5ab0448261ba44c2f833310 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:41:58 -0700
+Subject: [PATCH 17/22] ARM: dts: msm: Enable boot indication LED for APQ8016
+
+The boot indication LED will be turned-on in bootloader and be turned-
+off when HLOS display takes over.
+
+Change-Id: If69d05ff03c19e8ac03b1ffc537f120e360a5a68
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/apq8016-sbc.dtsi | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi b/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi
+index fa43c3e..4432da0 100644
+--- a/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi
++++ b/arch/arm/boot/dts/qcom/apq8016-sbc.dtsi
+@@ -789,7 +789,7 @@
+ 				qcom,max-current = <40>;
+ 				qcom,id = <8>;
+ 				linux,default-trigger =
+-						"none";
++						"boot-indication";
+ 				qcom,default-state = "on";
+ 				qcom,source-sel = <1>;
+ 				qcom,mode-ctrl = <0x10>;
+@@ -838,6 +838,10 @@
+ };
+ 
+ 
++&mdss_fb0 {
++	qcom,boot-indication-enabled;
++};
++
+ &spmi_bus {
+ 	qcom,pm8916@0 {
+ 		qcom,leds@a100 { /* WLAN LED */
+-- 
+1.8.2.1
+

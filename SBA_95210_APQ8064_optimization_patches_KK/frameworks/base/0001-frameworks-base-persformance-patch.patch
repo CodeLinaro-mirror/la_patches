@@ -1,0 +1,108 @@
+From 213726d1bc5d8b50aa191445a9548d6bf2457fb4 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Mon, 9 Mar 2015 10:36:18 -0700
+Subject: [PATCH] frameworks:base: persformance patch
+
+Change-Id: I2d87fe547e298bd1dcdb6b024dde4f831045a1fa
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ core/java/com/android/internal/os/ZygoteInit.java      |  4 ++--
+ .../java/com/android/server/AssetAtlasService.java     |  2 +-
+ services/java/com/android/server/SystemServer.java     | 18 +++++++++---------
+ .../com/android/server/am/ActivityManagerService.java  |  6 ++++++
+ 4 files changed, 18 insertions(+), 12 deletions(-)
+
+diff --git a/core/java/com/android/internal/os/ZygoteInit.java b/core/java/com/android/internal/os/ZygoteInit.java
+index e207e5d..95c5663 100644
+--- a/core/java/com/android/internal/os/ZygoteInit.java
++++ b/core/java/com/android/internal/os/ZygoteInit.java
+@@ -96,7 +96,7 @@ public class ZygoteInit {
+     private static final String PRELOADED_CLASSES = "preloaded-classes";
+ 
+     /** Controls whether we should preload resources during zygote init. */
+-    private static final boolean PRELOAD_RESOURCES = true;
++    private static final boolean PRELOAD_RESOURCES = false;
+ 
+     /**
+      * Invokes a static "main(argv[]) method on class "className".
+@@ -228,7 +228,7 @@ public class ZygoteInit {
+     }
+ 
+     static void preload() {
+-        preloadClasses();
++       // preloadClasses();
+         preloadResources();
+         preloadOpenGL();
+     }
+diff --git a/services/java/com/android/server/AssetAtlasService.java b/services/java/com/android/server/AssetAtlasService.java
+index 26b4652..e113aa1 100644
+--- a/services/java/com/android/server/AssetAtlasService.java
++++ b/services/java/com/android/server/AssetAtlasService.java
+@@ -435,7 +435,7 @@ public class AssetAtlasService extends IAssetAtlas.Stub {
+             float delay = (System.nanoTime() - begin) / 1000.0f / 1000.0f / 1000.0f;
+             Log.d(LOG_TAG, String.format("Found best atlas configuration in %.2fs", delay));
+         }
+-
++		  if (results.size() == 0) return null;
+         WorkerResult result = results.get(0);
+         return new Configuration(result.type, result.width, result.height, result.count);
+     }
+diff --git a/services/java/com/android/server/SystemServer.java b/services/java/com/android/server/SystemServer.java
+index 02f5c4038..b714f4e 100644
+--- a/services/java/com/android/server/SystemServer.java
++++ b/services/java/com/android/server/SystemServer.java
+@@ -817,16 +817,16 @@ class ServerThread {
+         // These are needed to propagate to the runnable below.
+         final Context contextF = context;
+         final MountService mountServiceF = mountService;
+-        final BatteryService batteryF = battery;
+-        final NetworkManagementService networkManagementF = networkManagement;
+-        final NetworkStatsService networkStatsF = networkStats;
+-        final NetworkPolicyManagerService networkPolicyF = networkPolicy;
+-        final ConnectivityService connectivityF = connectivity;
++        //final BatteryService batteryF = battery;
++        //final NetworkManagementService networkManagementF = networkManagement;
++        //final NetworkStatsService networkStatsF = networkStats;
++        //final NetworkPolicyManagerService networkPolicyF = networkPolicy;
++        //final ConnectivityService connectivityF = connectivity;
+         //final DockObserver dockF = dock;
+         final UsbService usbF = usb;
+-        final TwilightService twilightF = twilight;
++        //final TwilightService twilightF = twilight;
+         final UiModeManagerService uiModeF = uiMode;
+-        final AppWidgetService appWidgetF = appWidget;
++        //final AppWidgetService appWidgetF = appWidget;
+         //final WallpaperManagerService wallpaperF = wallpaper;
+         final InputMethodManagerService immF = imm;
+         //final RecognitionManagerService recognitionF = recognition;
+@@ -839,8 +839,8 @@ class ServerThread {
+         //final DreamManagerService dreamyF = dreamy;
+         //final AssetAtlasService atlasF = atlas;
+         final InputManagerService inputManagerF = inputManager;
+-        final TelephonyRegistry telephonyRegistryF = telephonyRegistry;
+-        final MSimTelephonyRegistry msimTelephonyRegistryF = msimTelephonyRegistry;
++        //final TelephonyRegistry telephonyRegistryF = telephonyRegistry;
++        //final MSimTelephonyRegistry msimTelephonyRegistryF = msimTelephonyRegistry;
+         //final PrintManagerService printManagerF = printManager;
+         final MediaRouterService mediaRouterF = mediaRouter;
+         BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
+diff --git a/services/java/com/android/server/am/ActivityManagerService.java b/services/java/com/android/server/am/ActivityManagerService.java
+index 8329df2..1ed51bc 100644
+--- a/services/java/com/android/server/am/ActivityManagerService.java
++++ b/services/java/com/android/server/am/ActivityManagerService.java
+@@ -5186,6 +5186,12 @@ public final class ActivityManagerService extends ActivityManagerNative
+                 // Tell anyone interested that we are done booting!
+                 SystemProperties.set("sys.boot_completed", "1");
+                 SystemProperties.set("dev.bootcomplete", "1");
++					 IPackageManager pm = AppGlobals.getPackageManager();
++					/* try {
++						  pm.laterScanApp();
++					 } catch (RemoteException e) {
++						  throw new SecurityException(e);
++					 }*/
+                 for (int i=0; i<mStartedUsers.size(); i++) {
+                     UserStartedState uss = mStartedUsers.valueAt(i);
+                     if (uss.mState == UserStartedState.STATE_BOOTING) {
+-- 
+1.8.2.1
+

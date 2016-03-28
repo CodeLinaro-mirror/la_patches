@@ -1,0 +1,63 @@
+From 83b2a8003aab6f10919c97fb1d90f9aaa0fc236a Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Mon, 2 Mar 2015 17:46:57 -0800
+Subject: [PATCH 1/5] system:core: performance patch
+
+Change-Id: Iecff6ff0ed24d81f432ae37cf11f2f7da1ed612b
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ rootdir/init.rc | 13 +++++++++----
+ 1 file changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/rootdir/init.rc b/rootdir/init.rc
+index e8c58c3..745e62a 100644
+--- a/rootdir/init.rc
++++ b/rootdir/init.rc
+@@ -431,8 +431,8 @@ service console /system/bin/sh
+     user shell
+     group log
+ 
+-on property:ro.debuggable=1
+-    start console
++#on property:ro.debuggable=1
++#    start console
+ 
+ # adbd is controlled via property triggers in init.<platform>.usb.rc
+ service adbd /sbin/adbd
+@@ -442,8 +442,8 @@ service adbd /sbin/adbd
+     seclabel u:r:adbd:s0
+ 
+ # adbd on at boot in emulator
+-on property:ro.kernel.qemu=1
+-    start adbd
++#on property:ro.kernel.qemu=1
++#    start adbd
+ 
+ service servicemanager /system/bin/servicemanager
+     class core
+@@ -476,6 +476,7 @@ service ril-daemon /system/bin/rild
+     socket rild-debug stream 660 radio system
+     user root
+     group radio cache inet misc audio log qcom_diag
++	 disabled
+ 
+ service surfaceflinger /system/bin/surfaceflinger
+     class main
+@@ -495,6 +496,7 @@ service drm /system/bin/drmserver
+     class main
+     user drm
+     group drm system inet drmrpc
++	 diabled
+ 
+ service media /system/bin/mediaserver
+     class main
+@@ -555,3 +557,6 @@ service mdnsd /system/bin/mdnsd
+     socket mdnsd stream 0660 mdnsr inet
+     disabled
+     oneshot
++on property:sys.boot_completed=1
++	 start ril-daemon
++	 start drm
+-- 
+1.8.2.1
+

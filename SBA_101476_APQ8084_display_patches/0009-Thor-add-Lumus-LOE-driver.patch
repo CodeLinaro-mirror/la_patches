@@ -1,0 +1,1721 @@
+From 252b0541cd93e96e9b8fabc4bd1c2a73b4092140 Mon Sep 17 00:00:00 2001
+From: Mike Mager <mikemager@codeaurora.org>
+Date: Sat, 13 Sep 2014 21:53:25 -0700
+Subject: [PATCH] Thor: add Lumus LOE driver
+
+Change-Id: I8f6513b53bbdc80edc920e43f860e9ae42569253
+---
+ drivers/video/msm/mdss/Makefile    |    2 +
+ drivers/video/msm/mdss/lumus_loe.c | 1650 ++++++++++++++++++++++++++++++++++++
+ include/linux/lumus_loe.h          |   22 +
+ 3 files changed, 1674 insertions(+)
+ create mode 100644 drivers/video/msm/mdss/lumus_loe.c
+ create mode 100644 include/linux/lumus_loe.h
+
+diff --git a/drivers/video/msm/mdss/Makefile b/drivers/video/msm/mdss/Makefile
+index 5855c56..c0ecb65 100644
+--- a/drivers/video/msm/mdss/Makefile
++++ b/drivers/video/msm/mdss/Makefile
+@@ -49,3 +49,5 @@ obj-$(CONFIG_FB_MSM_MDSS_DSI_CTRL_STATUS) += dsi_status_v2.o
+ else
+ obj-$(CONFIG_FB_MSM_MDSS_DSI_CTRL_STATUS) += mdss_dsi_status.o
+ endif
++
++obj-$(CONFIG_CRD_THOR_DISPLAY) += lumus_loe.o
+diff --git a/drivers/video/msm/mdss/lumus_loe.c b/drivers/video/msm/mdss/lumus_loe.c
+new file mode 100644
+index 0000000..719dadd
+--- /dev/null
++++ b/drivers/video/msm/mdss/lumus_loe.c
+@@ -0,0 +1,1650 @@
+/*
+* Copyright (c) 2012-2015, The Linux Foundation. All rights reserved.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 and
+* only version 2 as published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+*/
+
++
++/*
++ * Lumus LOE driver.
++ */
++
++/* #define DEBUG 1 */
++
++#define DRV_NAME "lumus_loe"
++
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/delay.h>
++#include <linux/err.h>
++#include <linux/lumus_loe.h>
++#include <linux/module.h>
++
++// for 1280x720
++#define DEFAULT_BORDER_WIDTH       48
++#define DEFAULT_BORDER_HEIGHT      28
++
++#define UNLOCK_CODE			0x5143
++
++#define I2C_ADDR_HX7816		0x3C
++#define I2C_ADDR_HX7318		0x49
++
++#define HX7318_CTRL_REG_MASK   0x21
++
++#define BACKLIGHT_DEFAULT 	7000
++
++#define I2C_WRITE_REG(i2c,reg,val)														\
++	if (i2c_smbus_write_byte_data(i2c,reg,val)) { 										\
++		pr_debug("%s: i2c_smbus_write_byte_data failed for reg %x",__func__, reg);		\
++		break;																			\
++	} else {																			\
++		usleep(10000);																	\
++	}																					\
++
++typedef enum
++{
++  GET_DEVICE_INFO,        // 0
++  SET_DEVICE_INFO,
++  GET_SW_REVISION,
++  SET_NRST_LCD,
++  SET_BACKLIGHT,
++  GET_BACKLIGHTLIMITS,
++  SET_BACKLIGHTLIMITS,
++  GET_LCD_CONTROL,
++  SET_LCD_CONTROL,
++  GET_GAMMA,
++  SET_GAMMA,             // 10
++  GET_SCREENPOS,
++  SET_SCREENPOS,
++  GET_SERLOCK,
++  SET_BISTEN,
++  GET_CONTRAST,
++  SET_CONTRAST,
++  GET_BRIGHTNESS,
++  SET_BRIGHTNESS,
++  GET_HUE,
++  SET_HUE,
++  GET_SAT,
++  SET_SAT                // 22
++} head_362_cmd_T;
++
++typedef struct
++{
++  short Vendor_ID;
++  short Device_ID;
++  short BoardRevision;
++  char  ManufactureWeek;
++  char  ManufactureYear;
++  short SerNum;
++  char  Flags;  // left=0 right=1
++}HW_Info_T;
++
++typedef struct
++  {
++      unsigned short Red;
++      unsigned short Green;
++      unsigned short Blue;
++} H_381_BL_T;
++
++struct lumus_loe {
++	struct i2c_device_id *id;
++
++	/* the three I2C devices in the LOE */
++	struct i2c_client *ctrl;	// MSP430
++	struct i2c_client *asic;	// HX7816
++	struct i2c_client *lcos;	// HX7318
++
++	/* device provisioning */
++	int allow_write;
++	HW_Info_T HW;
++	short screen_pos;
++
++	/* scrolling border offsets */
++	int x_offset;
++	int y_offset;
++
++	int resolution;
++};
++
++static void lumus_loe_update_border(struct lumus_loe *me);
++static int lumus_loe_update_deviceinfo(struct lumus_loe *me, HW_Info_T *pHW);
++
++/******************************************************************************
++ * sysfs attributes
++ *
++ *   Device provisioning:
++ *       'unlock'     :  Write Only. To prevent accidentally overwriting non-
++ *                       volatile provisioned data, this node must be written
++ *                       with UNLOCK_CODE before setting the provisioned data.
++ *                       It is a one-shot, so the unlock code must be written
++ *                       prior to writing each provisioned data nodes.
++ *       'serial_num' :  Read/Write. Allows reading/writing the 16-bit serial
++ *                       number field of the LOE's Device Info provisioned data.
++ *                       Requires unlocking to write.
++ *       'screen_pos' :  Read/Write. Allows reading/writing the 16-bit Screen
++ *                       Position provisioned data. Requires unlocking to write.
++ *                       Bits 15-8 set the initial x_offset and bits 7-0 set the
++ *                       initial y_offset. Changing this value won't affect the
++ *                       actual screen position until the next boot.
++ *
++ *   Scrolling border:
++ *       'x_offset'   :  Read/Write. The default value of this node comes from
++ *                       the provisioned Screen Position value (see
++ *                       'screen_pos'). Writing the x_offset value will change
++ *                       the horizontal border width at run-time. The range
++ *                       depends on the width of the active area of the display.
++ *                       For example, if the active area width is 1280, the
++ *                       range of this node will be 1376 - 1280 = 96 so the
++ *                       range would be -48 to 48.
++ *       'y_offset'   :  Read/Write. The default value of this node comes from
++ *                       the provisioned Screen Position value (see
++ *                       'screen_pos'). Writing the y_offset value will change
++ *                       the vertical border height at run-time. The range
++ *                       depends on the height of the active area of the
++ *                       display. For example, if the active area height is 720,
++ *                       the range of this node will be 776 - 720 = 56 so the
++ *                       range would be -28 to 28.
++ *****************************************************************************/
++
++/* 'unlock' write */
++static ssize_t lumus_loe_set_unlock(struct device *dev,
++				 struct device_attribute *attr,
++				 const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct lumus_loe *me = (struct lumus_loe*) i2c_get_clientdata(client);
++	unsigned long code;
++
++	if (strict_strtoul(buf, 16, &code) == 0 && code == UNLOCK_CODE) {
++		me->allow_write = 1;
++	}
++	return strlen(buf);
++}
++
++static DEVICE_ATTR(unlock, S_IWUGO, NULL, lumus_loe_set_unlock);
++
++/* 'serial_num' read */
++static ssize_t lumus_loe_show_serial_num(struct device *dev,
++				 struct device_attribute *attr,
++				 char *buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct lumus_loe *me = (struct lumus_loe*) i2c_get_clientdata(client);
++	return sprintf(buf, "0x%04x\n", (short) me->HW.SerNum);
++}
++
++/* 'serial_num' write */
++static ssize_t lumus_loe_set_serial_num(struct device *dev,
++				 struct device_attribute *attr,
++				 const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct lumus_loe *me = (struct lumus_loe*) i2c_get_clientdata(client);
++	unsigned long serial_num;
++	int rc;
++
++	rc = strict_strtoul(buf, 16, &serial_num);
++	if (rc || serial_num > 0xffff) {
++		pr_err("%s: invalid serial number: %s", __func__, buf);
++	} else {
++		HW_Info_T HW;
++		memcpy(&HW, &me->HW, sizeof(HW));
++		HW.SerNum = (short) serial_num;
++		rc = lumus_loe_update_deviceinfo(me, &HW);
++		if (rc != 0) {
++			pr_err("%s: failed to write serial number: %d", __func__, rc);
++		}
++	}
++	return strlen(buf);
++}
++
++static DEVICE_ATTR(serial_num, S_IRUGO | S_IWUGO, lumus_loe_show_serial_num, lumus_loe_set_serial_num);
++
++/* 'screen_pos' read */
++static ssize_t lumus_loe_show_screen_pos(struct device *dev,
++				 struct device_attribute *attr,
++				 char *buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct lumus_loe *me = (struct lumus_loe*) i2c_get_clientdata(client);
++	return sprintf(buf, "0x%04x\n", me->screen_pos & 0xffff);
++}
++
++/* 'screen_pos' write */
++static ssize_t lumus_loe_set_screen_pos(struct device *dev,
++				 struct device_attribute *attr,
++				 const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct lumus_loe *me = (struct lumus_loe*) i2c_get_clientdata(client);
++
++	if (me->allow_write) {
++		unsigned long sp;
++		int rc;
++		signed char pos[2];
++
++		rc = strict_strtoul(buf, 16, &sp);
++
++		pos[0] = (sp >> 8) & 0xff;	// x_offset
++		pos[1] = sp & 0xff;       	// y_offset
++
++		if (rc || sp > 0xffff ||
++		    abs(pos[0]) > DEFAULT_BORDER_WIDTH || abs(pos[1]) > DEFAULT_BORDER_HEIGHT) {
++			pr_err("%s: invalid screen position: %s", __func__, buf);
++		} else {
++			rc = i2c_smbus_write_i2c_block_data(me->ctrl, SET_SCREENPOS, sizeof(pos),(void*) pos);
++			if (rc == 0) {
++				me->screen_pos = (short) sp;
++			} else {
++				pr_err("%s: failed to write screen position: %d", __func__, rc);
++			}
++		}
++		me->allow_write = 0;
++	}
++	return strlen(buf);
++}
++
++static DEVICE_ATTR(screen_pos, S_IRUGO | S_IWUGO, lumus_loe_show_screen_pos, lumus_loe_set_screen_pos);
++
++/* 'x_offset' read */
++static ssize_t lumus_loe_show_x_offset(struct device *dev,
++				 struct device_attribute *attr,
++				 char *buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct lumus_loe *me = (struct lumus_loe*) i2c_get_clientdata(client);
++	return sprintf(buf, "%d\n", me->x_offset);
++}
++
++/* 'x_offset' write */
++static ssize_t lumus_loe_set_x_offset(struct device *dev,
++				 struct device_attribute *attr,
++				 const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct lumus_loe *me = (struct lumus_loe*) i2c_get_clientdata(client);
++	long x = 0;
++	int rc;
++
++	rc = strict_strtol(buf, 10, &x);
++	if (rc || abs(x) > DEFAULT_BORDER_WIDTH) {
++		pr_err("%s: invalid x offset, range is -%d to %d", __func__,
++			DEFAULT_BORDER_WIDTH, DEFAULT_BORDER_WIDTH);
++	} else {
++		me->x_offset = x;
++		lumus_loe_update_border(me);
++	}
++	return strlen(buf);
++}
++
++static DEVICE_ATTR(x_offset, S_IRUGO | S_IWUGO, lumus_loe_show_x_offset, lumus_loe_set_x_offset);
++
++/* 'y_offset' read */
++static ssize_t lumus_loe_show_y_offset(struct device *dev,
++				 struct device_attribute *attr,
++				 char *buf)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct lumus_loe *me = (struct lumus_loe*) i2c_get_clientdata(client);
++	return sprintf(buf, "%d\n", me->y_offset);
++}
++
++/* 'y_offset' write */
++static ssize_t lumus_loe_set_y_offset(struct device *dev,
++				 struct device_attribute *attr,
++				 const char *buf, size_t count)
++{
++	struct i2c_client *client = to_i2c_client(dev);
++	struct lumus_loe *me = (struct lumus_loe*) i2c_get_clientdata(client);
++	long y;
++	int rc;
++
++	rc = strict_strtol(buf, 10, &y);
++	if (rc || abs(y) > DEFAULT_BORDER_HEIGHT) {
++		pr_err("%s: invalid y offset, range is -%d to %d", __func__,
++			DEFAULT_BORDER_HEIGHT, DEFAULT_BORDER_HEIGHT);
++	} else {
++		me->y_offset = y;
++		lumus_loe_update_border(me);
++	}
++	return strlen(buf);
++}
++
++static DEVICE_ATTR(y_offset, S_IRUGO | S_IWUGO, lumus_loe_show_y_offset, lumus_loe_set_y_offset);
++
++static struct attribute *lumus_loe_attrs[] = {
++	&dev_attr_unlock.attr,
++	&dev_attr_serial_num.attr,
++	&dev_attr_screen_pos.attr,
++	&dev_attr_x_offset.attr,
++	&dev_attr_y_offset.attr,
++	NULL,
++};
++
++static struct attribute_group lumus_loe_attr_group = {
++	.attrs = lumus_loe_attrs,
++};
++/******************************************************************************
++ *****************************************************************************/
++
++static void lumus_loe_update_border(struct lumus_loe *me)
++{
++	int l, r, u, d;
++	l = DEFAULT_BORDER_WIDTH + me->x_offset;
++	r = (DEFAULT_BORDER_WIDTH*2) - l;
++	u = DEFAULT_BORDER_HEIGHT + me->y_offset;
++	d = (DEFAULT_BORDER_HEIGHT*2) - u;
++	i2c_smbus_write_byte_data(me->asic, 0x7B, 0x0F);   // BORDER L/R addr
++	i2c_smbus_write_byte_data(me->asic, 0x7C, l);      // BORDER left
++	i2c_smbus_write_byte_data(me->asic, 0x7D, r);      // BORDER right
++	i2c_smbus_write_byte_data(me->asic, 0x7C, u);      // BORDER up
++	i2c_smbus_write_byte_data(me->asic, 0x7D, d);      // BORDER down
++	pr_debug("%s: left=%d, right=%d, up=%d, down=%d", __func__, l, r, u, d);
++}
++
++static int lumus_loe_update_deviceinfo(struct lumus_loe *me, HW_Info_T *pHW)
++{
++	int rc = -1;
++	if (me->allow_write) {
++		/* the first two shorts must be skipped to write the device info */
++		rc = i2c_smbus_write_i2c_block_data(me->ctrl, SET_DEVICE_INFO,
++			sizeof(*pHW)-4, (unsigned char*)(((int)pHW)+4));
++		if (rc == 0) {
++			/* update our cached copy */
++			memcpy(&me->HW, pHW, sizeof(*pHW));
++		}
++		me->allow_write = 0;
++	}
++	return rc;
++}
++
++static int lumus_loe_init_HX7816(struct lumus_loe *me)
++{
++	int ret = -1;
++
++	pr_debug("%s: initializing HX7816 LCOS controller", __func__);
++
++	switch (me->resolution) {
++	case LUMUS_LOE_RES_1280x720_60FPS:
++	case LUMUS_LOE_RES_1280x720_100FPS:
++		I2C_WRITE_REG(me->asic, 0xFE, 0x33);   // Password
++
++		// INP Format
++		I2C_WRITE_REG(me->asic, 0x10, 0x07);   // INP_CTRL: SYNC+DE mode, HS,VS negative polarity
++		I2C_WRITE_REG(me->asic, 0x11, 0x69);   // INP_HSTART = 0x69 = 105
++		I2C_WRITE_REG(me->asic, 0x12, 0x00);   //
++		I2C_WRITE_REG(me->asic, 0x13, 0xae);   // INP_HTOTAL = 0x5ae = 1454
++		I2C_WRITE_REG(me->asic, 0x14, 0x05);
++		I2C_WRITE_REG(me->asic, 0x15, 0x00);   // INP_HSIZE  = 0x500 = 1280
++		I2C_WRITE_REG(me->asic, 0x16, 0x05);
++		I2C_WRITE_REG(me->asic, 0x17, 0x1a);   // INP_VSTART = 26
++		I2C_WRITE_REG(me->asic, 0x18, 0x00);
++		I2C_WRITE_REG(me->asic, 0x19, 0xeb);   // INP_VTOTAL = 747
++		I2C_WRITE_REG(me->asic, 0x1a, 0x02);
++		I2C_WRITE_REG(me->asic, 0x1B, 0xd0);   // INP_VSIZE = 0x2d0 = 720
++		I2C_WRITE_REG(me->asic, 0x1C, 0x02);
++
++		// Embedded Pattern Generator
++		I2C_WRITE_REG(me->asic, 0x30, 0x51);   // TP Pattern 1280x720
++		I2C_WRITE_REG(me->asic, 0x3A, 0x3d);   // VS RESET
++		I2C_WRITE_REG(me->asic, 0x3B, 0x61);
++		I2C_WRITE_REG(me->asic, 0x3C, 0x00);
++
++		// Scalar and Embedded Pattern Output Timing
++		I2C_WRITE_REG(me->asic, 0x40, 0x80);   // scaler out H_total = 1664
++		I2C_WRITE_REG(me->asic, 0x41, 0x06);
++		I2C_WRITE_REG(me->asic, 0x42, 0x10);   // H_SYNC = 16
++		I2C_WRITE_REG(me->asic, 0x43, 0x00);
++		I2C_WRITE_REG(me->asic, 0x44, 0x54);   // H_Start = 84 (H_Start=256 KSC ok but 257 fail)
++		I2C_WRITE_REG(me->asic, 0x45, 0x00);
++		I2C_WRITE_REG(me->asic, 0x46, 0x00);   // H_Size = 1280
++		I2C_WRITE_REG(me->asic, 0x47, 0x05);
++		I2C_WRITE_REG(me->asic, 0x48, 0x34);   // V_TOTAL = 820
++		I2C_WRITE_REG(me->asic, 0x49, 0x03);
++		I2C_WRITE_REG(me->asic, 0x4A, 0x03);   // V_Sync = 3
++		I2C_WRITE_REG(me->asic, 0x4B, 0x00);
++		I2C_WRITE_REG(me->asic, 0x4C, 0x1C);   // V_Start = 28
++		I2C_WRITE_REG(me->asic, 0x4D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x4E, 0xd0);   // V_Size = 720
++		I2C_WRITE_REG(me->asic, 0x4F, 0x02);
++
++		// Keystone Correction
++		I2C_WRITE_REG(me->asic, 0x54, 0x03);   // KSC disable, WXGA resolution ?????????
++
++		// Scalar Setting
++		I2C_WRITE_REG(me->asic, 0x66, 0x00);   // Y_ratio
++		I2C_WRITE_REG(me->asic, 0x67, 0x00);
++		I2C_WRITE_REG(me->asic, 0x68, 0x00);
++		I2C_WRITE_REG(me->asic, 0x69, 0x00);   // Y= (768-1)/(768-1)*4096= 4096
++		I2C_WRITE_REG(me->asic, 0x6A, 0x00);
++		I2C_WRITE_REG(me->asic, 0x66, 0x01);   // X_ratio
++		I2C_WRITE_REG(me->asic, 0x67, 0x00);
++		I2C_WRITE_REG(me->asic, 0x68, 0x00);
++		I2C_WRITE_REG(me->asic, 0x69, 0x00);   // X= (1366-1)/(1366-1)*4096= 4096
++		I2C_WRITE_REG(me->asic, 0x6A, 0x00);
++		I2C_WRITE_REG(me->asic, 0x6B, 0x30);   // SCALER Disable, x delay =3
++
++		// SDRAM Control
++		I2C_WRITE_REG(me->asic, 0x70, 0x01);   // NORMAL, 2 SDRAM
++		I2C_WRITE_REG(me->asic, 0x73, 0x03);   // SAMPLE PHASE , latency =3
++
++		// Frame Control
++		I2C_WRITE_REG(me->asic, 0x77, 0x08);   // Sub-Frame 8
++		I2C_WRITE_REG(me->asic, 0x78, 0x50);   // RRGGBBGG
++		I2C_WRITE_REG(me->asic, 0x79, 0x5A);
++		I2C_WRITE_REG(me->asic, 0x7A, 0x0F);
++		I2C_WRITE_REG(me->asic, 0x7B, 0x00);   // V_Total_Address
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_0
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_0
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_1
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_1
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_2
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_2
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_3
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_3
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_4
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_4
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_5
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_5
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_6
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_6
++		I2C_WRITE_REG(me->asic, 0x7C, 0x40);   // V_Total_7
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_7
++		I2C_WRITE_REG(me->asic, 0x7B, 0x0A);   // H_Total_Address
++		I2C_WRITE_REG(me->asic, 0x7C, 0x70);   // H_Total     // 1648 (under 1641 results in green line)
++		I2C_WRITE_REG(me->asic, 0x7D, 0x06);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x54);   // H_ACT_STR   // 84
++		I2C_WRITE_REG(me->asic, 0x7D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x60);   // H_ACT_SIZE  // 1376
++		I2C_WRITE_REG(me->asic, 0x7D, 0x05);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x0a);   // V_ACT_STR   // 10
++		I2C_WRITE_REG(me->asic, 0x7D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x08);   // V_ACT_SIZE  // 776
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);
++		lumus_loe_update_border(me);
++		I2C_WRITE_REG(me->asic, 0x7E, 0x10);   // BORDER Enable
++
++		// MINI-DSI Controller
++		I2C_WRITE_REG(me->asic, 0x90, 0x11);   // Mini-DSI enable, PN swap
++
++		// LVDS RX
++		I2C_WRITE_REG(me->asic, 0x98, 0x47);   // LVDS enable, LVDS PLL normal
++
++		// Output Stage
++		I2C_WRITE_REG(me->asic, 0xA0, 0x03);   // 2 Port ,CS
++		I2C_WRITE_REG(me->asic, 0xA2, 0x1B);   // PORT swap
++		I2C_WRITE_REG(me->asic, 0xA3, 0x00);   // BIT non-swap
++
++		// LED Controller
++		I2C_WRITE_REG(me->asic, 0xC0, 0x50);   // LED Sequence: RRGGBBGG
++		I2C_WRITE_REG(me->asic, 0xC1, 0x5A);
++		I2C_WRITE_REG(me->asic, 0xC2, 0x0F);
++		I2C_WRITE_REG(me->asic, 0xC3, 0x00);   // LED 0 ON ADDR
++		I2C_WRITE_REG(me->asic, 0xC4, 0x2b);   // LED 0 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x04);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xd1);   // LED 0 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x06);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x7b);   // LED 1 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x07);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x21);   // LED 1 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0A);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xcb);   // LED 2 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0a);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x71);   // LED 2 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0d);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x1b);   // LED 3 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0e);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xc1);   // LED 3 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x10);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x6b);   // LED 4 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x11);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x11);   // LED 4 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x14);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xBb);   // LED 5 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x14);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x61);   // LED 5 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x17);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x0b);   // LED 6 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x18);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x31);   // LED 6 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x00);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xdb);   // LED 7 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x00);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x81);   // LED 7 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x03);
++
++		// CABC
++		I2C_WRITE_REG(me->asic, 0xC8, 0x00);   // CABC disabled
++		I2C_WRITE_REG(me->asic, 0xC9, 0x44);   // CABC 50%
++		I2C_WRITE_REG(me->asic, 0xCC, 0x00);   // CABC addr=0
++		I2C_WRITE_REG(me->asic, 0xCD, 0x04);   // Horizontal 1366
++		I2C_WRITE_REG(me->asic, 0xCD, 0x06);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x07);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x08);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x09);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0A);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0B);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0C);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x03);   // Vertical 768
++		I2C_WRITE_REG(me->asic, 0xCD, 0x05);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x07);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x09);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0B);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++
++		// PLL
++		I2C_WRITE_REG(me->asic, 0xD0, 0x02);   // PLL Normal Mode
++		I2C_WRITE_REG(me->asic, 0xD1, 0x0A);   // SELM_A, PLLA = SDRAM CLK = 144 MHz
++		I2C_WRITE_REG(me->asic, 0xD2, 0x02);   // SELP_A
++		I2C_WRITE_REG(me->asic, 0xD3, 0x00);
++		I2C_WRITE_REG(me->asic, 0xD4, 0x00);   // DC_A = 0, DCS_A = 0
++		I2C_WRITE_REG(me->asic, 0xD5, 0x04);   // SELM_B, PLLB = CLK LCOS = 155 MHz
++		I2C_WRITE_REG(me->asic, 0xD6, 0x00);   // SELP_B
++		I2C_WRITE_REG(me->asic, 0xD7, 0x44);
++		I2C_WRITE_REG(me->asic, 0xD8, 0x0e);   // DC_B = 3652, DCS_B = 0
++		I2C_WRITE_REG(me->asic, 0xD9, 0x08);   // SELM_C, PLLC = CLK SCO = 82 MHz
++		I2C_WRITE_REG(me->asic, 0xDA, 0x04);   // SELP_C
++		I2C_WRITE_REG(me->asic, 0xDC, 0x00);
++		I2C_WRITE_REG(me->asic, 0xDD, 0x08);   // DC_C = 683, DCS_C =0
++		I2C_WRITE_REG(me->asic, 0xDE, 0x04);   // SELP_E, PLLE = CLK SCM  = 96 MHz
++
++		// PLL_SSC
++		I2C_WRITE_REG(me->asic, 0xED, 0x01);   // PLLA Normal
++		I2C_WRITE_REG(me->asic, 0xEE, 0x01);   // PLLB Normal
++		I2C_WRITE_REG(me->asic, 0xEF, 0x01);   // PLLC Normal
++
++		// System
++		I2C_WRITE_REG(me->asic, 0xF1, 0x0d);   // SDRAM PHASE
++		I2C_WRITE_REG(me->asic, 0xF2, 0x0b);   // LCOS PHASE
++		I2C_WRITE_REG(me->asic, 0xF3, 0x01);   // Dual Edge
++		I2C_WRITE_REG(me->asic, 0xF7, 0x71);   // LVDS input
++		I2C_WRITE_REG(me->asic, 0xF0, 0x11);   // Display on, Sys enable
++
++		ret = 0;
++		break;
++
++	case LUMUS_LOE_RES_1366x768_60FPS:	// (untested)
++
++		I2C_WRITE_REG(me->asic, 0xFE, 0x33);   // Password
++
++		// INP Format
++		I2C_WRITE_REG(me->asic, 0x10, 0x07);   // INP_CTRL: SYNC+DE mode, HS,VS negative polarity
++		I2C_WRITE_REG(me->asic, 0x11, 0x69);   // INP_HSTART = 0x69 = 105
++		I2C_WRITE_REG(me->asic, 0x12, 0x00);   //
++		I2C_WRITE_REG(me->asic, 0x13, 0xad);   // INP_HTOTAL = 0x5ad = 1453
++		I2C_WRITE_REG(me->asic, 0x14, 0x05);
++		I2C_WRITE_REG(me->asic, 0x15, 0x00);   // INP_HSIZE  = 0x500 = 1280
++		I2C_WRITE_REG(me->asic, 0x16, 0x05);
++		I2C_WRITE_REG(me->asic, 0x17, 0x1A);   // INP_VSTART = 26
++		I2C_WRITE_REG(me->asic, 0x18, 0x00);
++		I2C_WRITE_REG(me->asic, 0x19, 0xeb);   // INP_VTOTAL = 747
++		I2C_WRITE_REG(me->asic, 0x1a, 0x02);
++		I2C_WRITE_REG(me->asic, 0x1B, 0xd0);   // INP_VSIZE = 0x2d0 = 720
++		I2C_WRITE_REG(me->asic, 0x1C, 0x02);
++
++		// Embedded Pattern Generator
++		I2C_WRITE_REG(me->asic, 0x30, 0x60);   // TP Pattern 1366x768
++		I2C_WRITE_REG(me->asic, 0x3A, 0xb0);   // VS RESET
++		I2C_WRITE_REG(me->asic, 0x3B, 0x8D);
++		I2C_WRITE_REG(me->asic, 0x3C, 0x00);
++
++		// Scalar and Embedded Pattern Output Timing
++		I2C_WRITE_REG(me->asic, 0x40, 0xf2);   // scaler out H_total
++		I2C_WRITE_REG(me->asic, 0x41, 0x06);
++		I2C_WRITE_REG(me->asic, 0x42, 0x0a);   // H_SYNC = 10
++		I2C_WRITE_REG(me->asic, 0x43, 0x00);
++		I2C_WRITE_REG(me->asic, 0x44, 0x54);   // H_Start = 84 (H_Start=256 KSC ok but 257 fail)
++		I2C_WRITE_REG(me->asic, 0x45, 0x00);
++		I2C_WRITE_REG(me->asic, 0x46, 0x56);   // H_Valid = 1366
++		I2C_WRITE_REG(me->asic, 0x47, 0x05);
++		I2C_WRITE_REG(me->asic, 0x48, 0x1d);   // V_TOTAL = 797
++		I2C_WRITE_REG(me->asic, 0x49, 0x03);
++		I2C_WRITE_REG(me->asic, 0x4A, 0x01);   // V_Sync = 1
++		I2C_WRITE_REG(me->asic, 0x4B, 0x00);
++		I2C_WRITE_REG(me->asic, 0x4C, 0x0a);   // V_Start = 10
++		I2C_WRITE_REG(me->asic, 0x4D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x4E, 0x00);   // V_Size = 768
++		I2C_WRITE_REG(me->asic, 0x4F, 0x03);
++
++		// Keystone Correction
++		I2C_WRITE_REG(me->asic, 0x54, 0x03);   // KSC disable, WXGA resolution ?????????
++
++		// Scalar Setting
++		I2C_WRITE_REG(me->asic, 0x66, 0x00);   // Y_ratio
++		I2C_WRITE_REG(me->asic, 0x67, 0xff);
++		I2C_WRITE_REG(me->asic, 0x68, 0x0f);
++		I2C_WRITE_REG(me->asic, 0x69, 0x00);   // Y= (768-1)/(768-1)*4096= 4096
++		I2C_WRITE_REG(me->asic, 0x6A, 0x0f);
++		I2C_WRITE_REG(me->asic, 0x66, 0x01);   // X_ratio
++		I2C_WRITE_REG(me->asic, 0x67, 0xff);
++		I2C_WRITE_REG(me->asic, 0x68, 0x0f);
++		I2C_WRITE_REG(me->asic, 0x69, 0xfe);   // X= (1366-1)/(1366-1)*4096= 4096
++		I2C_WRITE_REG(me->asic, 0x6A, 0x0e);
++		I2C_WRITE_REG(me->asic, 0x6B, 0x31);   // SCALER Enable, x delay =3
++
++		// Frame Control
++		I2C_WRITE_REG(me->asic, 0x70, 0x01);   // NORMAL, 2 SDRAM
++		I2C_WRITE_REG(me->asic, 0x73, 0x03);   // SAMPLE PHASE , latency =3
++		I2C_WRITE_REG(me->asic, 0x77, 0x08);   // Sub-Frame 8
++		I2C_WRITE_REG(me->asic, 0x78, 0x50);   // RRGGBBGG
++		I2C_WRITE_REG(me->asic, 0x79, 0x5A);
++		I2C_WRITE_REG(me->asic, 0x7A, 0x00);
++		I2C_WRITE_REG(me->asic, 0x7B, 0x00);   // V_Total_Address
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_0
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_0
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_1
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_1
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_2
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_2
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_3
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_3
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_4
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_4
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_5
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_5
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_6
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_6
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_7
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_7
++		I2C_WRITE_REG(me->asic, 0x7B, 0x0A);   // H_Total_Address
++		I2C_WRITE_REG(me->asic, 0x7C, 0xf0);   // H_Total     // 1520
++		I2C_WRITE_REG(me->asic, 0x7D, 0x05);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x54);   // H_ACT_STR   // 84
++		I2C_WRITE_REG(me->asic, 0x7D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x60);   // H_ACT_SIZE  // 1376
++		I2C_WRITE_REG(me->asic, 0x7D, 0x05);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x0a);   // V_ACT_STR   // 48
++		I2C_WRITE_REG(me->asic, 0x7D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x08);   // V_ACT_SIZE  // 776
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);
++		I2C_WRITE_REG(me->asic, 0x7B, 0x0F);   // BORDER L/R addr
++		I2C_WRITE_REG(me->asic, 0x7C, 0x05);   // BORDER left
++		I2C_WRITE_REG(me->asic, 0x7D, 0x05);   // BORDER right
++		I2C_WRITE_REG(me->asic, 0x7C, 0x04);   // BORDER up
++		I2C_WRITE_REG(me->asic, 0x7D, 0x04);   // BORDER down
++		I2C_WRITE_REG(me->asic, 0x7E, 0x10);   // BORDER Enable
++
++		// MINI-DSI Controller
++		I2C_WRITE_REG(me->asic, 0x90, 0x11);   // Mini-DSI enable, PN swap
++
++		// LVDS RX
++		I2C_WRITE_REG(me->asic, 0x98, 0x47);   // LVDS enable, LVDS PLL normal
++
++		// Output Stage
++		I2C_WRITE_REG(me->asic, 0xA0, 0x03);   // 2 Port ,CS
++		I2C_WRITE_REG(me->asic, 0xA2, 0x1B);   // PORT swap
++		I2C_WRITE_REG(me->asic, 0xA3, 0x00);   // BIT non-swap
++
++		// LED Controller
++		I2C_WRITE_REG(me->asic, 0xC0, 0x50);   // LED Sequence: RRGGBBGG
++		I2C_WRITE_REG(me->asic, 0xC1, 0x5A);
++		I2C_WRITE_REG(me->asic, 0xC2, 0x00);
++		I2C_WRITE_REG(me->asic, 0xC3, 0x00);   // LED 0 ON ADDR
++		I2C_WRITE_REG(me->asic, 0xC4, 0x2b);   // LED 0 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x04);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xd1);   // LED 0 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x06);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x7b);   // LED 1 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x07);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x21);   // LED 1 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0A);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xcb);   // LED 2 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0a);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x71);   // LED 2 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0d);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x1b);   // LED 3 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0e);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xc1);   // LED 3 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x10);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x6b);   // LED 4 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x11);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x11);   // LED 4 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x14);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xbb);   // LED 5 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x14);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x61);   // LED 5 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x17);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x0b);   // LED 6 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x18);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x31);   // LED 6 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x00);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xdb);   // LED 7 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x00);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x81);   // LED 7 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x03);
++
++		// CABC
++		I2C_WRITE_REG(me->asic, 0xC9, 0x44);   // CABC 50%
++		I2C_WRITE_REG(me->asic, 0xCC, 0x00);   // CABC addr=0
++		I2C_WRITE_REG(me->asic, 0xCD, 0x04);   // Horizontal 1366
++		I2C_WRITE_REG(me->asic, 0xCD, 0x06);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x07);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x08);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x09);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0A);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0B);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0C);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x03);   // Vertical 768
++		I2C_WRITE_REG(me->asic, 0xCD, 0x05);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x07);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x09);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0B);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++
++		// PLL
++		I2C_WRITE_REG(me->asic, 0xD0, 0x02);   // PLL Normal Mode
++		I2C_WRITE_REG(me->asic, 0xD1, 0x0A);   // SELM_A, PLLA = SDRAM CLK = 150 MHz
++		I2C_WRITE_REG(me->asic, 0xD2, 0x02);   // SELP_A
++		I2C_WRITE_REG(me->asic, 0xD3, 0x00);
++		I2C_WRITE_REG(me->asic, 0xD4, 0x00);   // DC_A = 4096, DCS_A = 0
++		I2C_WRITE_REG(me->asic, 0xD5, 0x04);   // SELM_B, PLLB = CLK LCOS = 180 MHz
++		I2C_WRITE_REG(me->asic, 0xD6, 0x00);   // SELP_B
++		I2C_WRITE_REG(me->asic, 0xD7, 0x44);
++		I2C_WRITE_REG(me->asic, 0xD8, 0x0e);   // DC_B = 4096, DCS_B = 1
++		I2C_WRITE_REG(me->asic, 0xD9, 0x05);   // SELM_C, PLLC = CLK SCO = 85 MHz
++		I2C_WRITE_REG(me->asic, 0xDA, 0x02);   // SELP_C
++		I2C_WRITE_REG(me->asic, 0xDC, 0x8f);
++		I2C_WRITE_REG(me->asic, 0xDD, 0x02);   // DC_C = 683, DCS_C =0
++		I2C_WRITE_REG(me->asic, 0xDE, 0x05);   // SELP_E, PLLE = CLK SCM  = 86 MHz
++
++		// PLL_SSC
++		I2C_WRITE_REG(me->asic, 0xED, 0x01);   // PLLA Normal
++		I2C_WRITE_REG(me->asic, 0xEE, 0x01);   // PLLB Normal
++		I2C_WRITE_REG(me->asic, 0xEF, 0x01);   // PLLC Normal
++
++		// System
++		I2C_WRITE_REG(me->asic, 0xF1, 0x0d);   // SDRAM PHASE
++		I2C_WRITE_REG(me->asic, 0xF2, 0x0b);   // LCOS PHASE
++		I2C_WRITE_REG(me->asic, 0xF3, 0x01);   // Dual Edge
++		I2C_WRITE_REG(me->asic, 0xF7, 0x71);   // LVDS input
++		I2C_WRITE_REG(me->asic, 0xF0, 0x11);   // Display on, Sys enable
++
++		ret = 0;
++		break;
++
++	case LUMUS_LOE_RES_800x600_SCALED_TO_1280x720_60FPS:
++
++		I2C_WRITE_REG(me->asic, 0xFE, 0x33);   // Password
++
++		// INP Format
++		I2C_WRITE_REG(me->asic, 0x10, 0x07); // INP_CTRL: SYNC+DE mode, HS,VS negative polarity
++		I2C_WRITE_REG(me->asic, 0x15, 0x20); // INP_HSIZE = 0x320 = 800
++		I2C_WRITE_REG(me->asic, 0x16, 0x03);
++		I2C_WRITE_REG(me->asic, 0x1B, 0x58); // INP_VSIZE = 0x258 = 600
++		I2C_WRITE_REG(me->asic, 0x1C, 0x02);
++
++		// Embedded Pattern Generator
++		I2C_WRITE_REG(me->asic, 0x30, 0x51);   // TP Pattern 1280x720
++		I2C_WRITE_REG(me->asic, 0x3A, 0x4E);   // VS RESET
++		I2C_WRITE_REG(me->asic, 0x3B, 0x20);
++		I2C_WRITE_REG(me->asic, 0x3C, 0x00);
++
++		// Scalar and Embedded Pattern Output Timing
++		I2C_WRITE_REG(me->asic, 0x40, 0x57);   // scaler out H_total = 1879
++		I2C_WRITE_REG(me->asic, 0x41, 0x07);
++		I2C_WRITE_REG(me->asic, 0x42, 0x10);   // H_SYNC = 16
++		I2C_WRITE_REG(me->asic, 0x43, 0x00);
++		I2C_WRITE_REG(me->asic, 0x44, 0x54);   // H_Start = 84 (H_Start=256 KSC ok but 257 fail)
++		I2C_WRITE_REG(me->asic, 0x45, 0x00);
++		I2C_WRITE_REG(me->asic, 0x46, 0x00);   // H_Size = 1280
++		I2C_WRITE_REG(me->asic, 0x47, 0x05);
++		I2C_WRITE_REG(me->asic, 0x48, 0xD7);   // V_TOTAL = 727
++		I2C_WRITE_REG(me->asic, 0x49, 0x02);
++		I2C_WRITE_REG(me->asic, 0x4A, 0x02);   // V_Sync = 2
++		I2C_WRITE_REG(me->asic, 0x4B, 0x00);
++		I2C_WRITE_REG(me->asic, 0x4C, 0x02);   // V_Start = 2
++		I2C_WRITE_REG(me->asic, 0x4D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x4E, 0xd0);   // V_Size = 720
++		I2C_WRITE_REG(me->asic, 0x4F, 0x02);
++
++		// Keystone Correction
++		I2C_WRITE_REG(me->asic, 0x54, 0x03); //KSC disable, WXGA resolution
++
++		// Scalar Setting
++		I2C_WRITE_REG(me->asic, 0x66, 0x00); // Y_ratio
++		I2C_WRITE_REG(me->asic, 0x67, 0xFF);
++		I2C_WRITE_REG(me->asic, 0x68, 0x0F);
++		I2C_WRITE_REG(me->asic, 0x69, 0x54); // Y= (600-1)/(720-1)*4096= 3412
++		I2C_WRITE_REG(me->asic, 0x6A, 0x0d);
++		I2C_WRITE_REG(me->asic, 0x66, 0x01); // X_ratio
++		I2C_WRITE_REG(me->asic, 0x67, 0xFF);
++		I2C_WRITE_REG(me->asic, 0x68, 0x0F);
++		I2C_WRITE_REG(me->asic, 0x69, 0xfe); // X= (800-1)/(1280-1)*4096= 2558
++		I2C_WRITE_REG(me->asic, 0x6A, 0x09);
++		I2C_WRITE_REG(me->asic, 0x6B, 0x31); // SCALER Enable, x delay =3
++
++		// SDRAM Control
++		I2C_WRITE_REG(me->asic, 0x70, 0x01); // NORMAL, 2 SDRAM
++		I2C_WRITE_REG(me->asic, 0x73, 0x03); // SAMPLE PHASE , latency =3
++
++		// Frame Control
++		I2C_WRITE_REG(me->asic, 0x77, 0x08);   // Sub-Frame 8
++		I2C_WRITE_REG(me->asic, 0x78, 0x50);   // RRGGBBGG
++		I2C_WRITE_REG(me->asic, 0x79, 0x5A);
++		I2C_WRITE_REG(me->asic, 0x7A, 0x0F);
++		I2C_WRITE_REG(me->asic, 0x7B, 0x00);   // V_Total_Address
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_0
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_0
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_1
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_1
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_2
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_2
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_3
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_3
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_4
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_4
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_5
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_5
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_6
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_6
++		I2C_WRITE_REG(me->asic, 0x7C, 0x40);   // V_Total_7
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_7
++		I2C_WRITE_REG(me->asic, 0x7B, 0x0A);   // H_Total_Address
++		I2C_WRITE_REG(me->asic, 0x7C, 0x70);   // H_Total     // 1648 (under 1641 results in green line)
++		I2C_WRITE_REG(me->asic, 0x7D, 0x06);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x54);   // H_ACT_STR   // 84
++		I2C_WRITE_REG(me->asic, 0x7D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x60);   // H_ACT_SIZE  // 1376
++		I2C_WRITE_REG(me->asic, 0x7D, 0x05);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x0a);   // V_ACT_STR   // 10
++		I2C_WRITE_REG(me->asic, 0x7D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x08);   // V_ACT_SIZE  // 776
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);
++		lumus_loe_update_border(me);
++		I2C_WRITE_REG(me->asic, 0x7E, 0x10);   // BORDER Enable
++
++		// MINI-DSI Controller
++		I2C_WRITE_REG(me->asic, 0x90, 0x11); // DSI enable
++
++		// LVDS RX
++		I2C_WRITE_REG(me->asic, 0x98, 0x47); // LVDS enable, LVDS PLL normal
++
++		// Output Stage
++		I2C_WRITE_REG(me->asic, 0xA0, 0x03); // 2 Port ,CS
++		I2C_WRITE_REG(me->asic, 0xA2, 0x1B); // PORT swap
++		I2C_WRITE_REG(me->asic, 0xA3, 0x00); // BIT non-swap
++
++		// LED Controller
++		I2C_WRITE_REG(me->asic, 0xC0, 0x50);   // LED Sequence: RRGGBBGG
++		I2C_WRITE_REG(me->asic, 0xC1, 0x5A);
++		I2C_WRITE_REG(me->asic, 0xC2, 0x0F);
++		I2C_WRITE_REG(me->asic, 0xC3, 0x00);   // LED 0 ON ADDR
++		I2C_WRITE_REG(me->asic, 0xC4, 0x2b);   // LED 0 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x04);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xd1);   // LED 0 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x06);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x7b);   // LED 1 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x07);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x21);   // LED 1 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0A);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xcb);   // LED 2 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0a);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x71);   // LED 2 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0d);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x1b);   // LED 3 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0e);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xc1);   // LED 3 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x10);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x6b);   // LED 4 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x11);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x11);   // LED 4 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x14);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xBb);   // LED 5 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x14);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x61);   // LED 5 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x17);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x0b);   // LED 6 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x18);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x31);   // LED 6 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x00);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xdb);   // LED 7 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x00);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x81);   // LED 7 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x03);
++
++		// CABC
++		I2C_WRITE_REG(me->asic, 0xC8, 0x00); // CABC disabled
++		I2C_WRITE_REG(me->asic, 0xC9, 0x44); // CABC 50%
++		I2C_WRITE_REG(me->asic, 0xCC, 0x00); // CABC addr=0
++		I2C_WRITE_REG(me->asic, 0xCD, 0x04); // Horizontal 1366
++		I2C_WRITE_REG(me->asic, 0xCD, 0x06);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x07);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x08);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x09);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0A);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0B);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0C);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x03); // Vertical 768
++		I2C_WRITE_REG(me->asic, 0xCD, 0x05);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x07);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x09);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0B);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++
++		// PLL
++		I2C_WRITE_REG(me->asic, 0xD0, 0x02);   // PLL Normal Mode
++
++		I2C_WRITE_REG(me->asic, 0xD1, 0x0A);   // SELM_A, PLLA = SDRAM CLK = 144 MHz
++		I2C_WRITE_REG(me->asic, 0xD2, 0x02);   // SELP_A
++		I2C_WRITE_REG(me->asic, 0xD3, 0x00);
++		I2C_WRITE_REG(me->asic, 0xD4, 0x00);   // DC_A = 0, DCS_A = 0
++
++		I2C_WRITE_REG(me->asic, 0xD5, 0x04);   // SELM_B, PLLB = CLK LCOS = 155 MHz
++		I2C_WRITE_REG(me->asic, 0xD6, 0x00);   // SELP_B
++		I2C_WRITE_REG(me->asic, 0xD7, 0x44);
++		I2C_WRITE_REG(me->asic, 0xD8, 0x0e);   // DC_B = 3652, DCS_B = 0
++
++		I2C_WRITE_REG(me->asic, 0xD9, 0x08);   // SELM_C, PLLC = CLK SCO = 82 MHz
++		I2C_WRITE_REG(me->asic, 0xDA, 0x04);   // SELP_C
++		I2C_WRITE_REG(me->asic, 0xDC, 0x00);
++		I2C_WRITE_REG(me->asic, 0xDD, 0x08);   // DC_C = 2048, DCS_C =0
++
++		I2C_WRITE_REG(me->asic, 0xDE, 0x04);   // SELP_E, PLLE = CLK SCM  = 96 MHz
++
++		// PLL_SSC
++		I2C_WRITE_REG(me->asic, 0xED, 0x01); // PLLA Normal
++		I2C_WRITE_REG(me->asic, 0xEE, 0x01); // PLLB Normal
++		I2C_WRITE_REG(me->asic, 0xEF, 0x01); // PLLC Normal
++
++		// System
++		I2C_WRITE_REG(me->asic, 0xF1, 0x0d);   // SDRAM PHASE
++		I2C_WRITE_REG(me->asic, 0xF2, 0x0b);   // LCOS PHASE
++		I2C_WRITE_REG(me->asic, 0xF3, 0x01); // Dual Edge
++		I2C_WRITE_REG(me->asic, 0xF7, 0x71); // LVDS input
++		I2C_WRITE_REG(me->asic, 0xF0, 0x11); // Display on, Sys enable
++
++		ret = 0;
++		break;
++
++	case LUMUS_LOE_RES_800x600_SCALED_TO_1280x720_100FPS:
++
++		I2C_WRITE_REG(me->asic, 0xFE, 0x33);   // Password
++
++		// INP Format
++		I2C_WRITE_REG(me->asic, 0x10, 0x07); // INP_CTRL: SYNC+DE mode, HS,VS negative polarity
++		I2C_WRITE_REG(me->asic, 0x15, 0x20); // INP_HSIZE = 0x320 = 800
++		I2C_WRITE_REG(me->asic, 0x16, 0x03);
++		I2C_WRITE_REG(me->asic, 0x1B, 0x58); // INP_VSIZE = 0x258 = 600
++		I2C_WRITE_REG(me->asic, 0x1C, 0x02);
++
++		// Embedded Pattern Generator
++		I2C_WRITE_REG(me->asic, 0x30, 0x51);   // TP Pattern 1280x720
++		I2C_WRITE_REG(me->asic, 0x3A, 0x57);   // VS RESET
++		I2C_WRITE_REG(me->asic, 0x3B, 0x1e);
++		I2C_WRITE_REG(me->asic, 0x3C, 0x00);
++
++		// Scalar and Embedded Pattern Output Timing
++		I2C_WRITE_REG(me->asic, 0x40, 0xe5);   // scaler out H_total = 1765
++		I2C_WRITE_REG(me->asic, 0x41, 0x06);
++		I2C_WRITE_REG(me->asic, 0x42, 0x10);   // H_SYNC = 16
++		I2C_WRITE_REG(me->asic, 0x43, 0x00);
++		I2C_WRITE_REG(me->asic, 0x44, 0x54);   // H_Start = 84 (H_Start=256 KSC ok but 257 fail)
++		I2C_WRITE_REG(me->asic, 0x45, 0x00);
++		I2C_WRITE_REG(me->asic, 0x46, 0x00);   // H_Size = 1280
++		I2C_WRITE_REG(me->asic, 0x47, 0x05);
++		I2C_WRITE_REG(me->asic, 0x48, 0x68);   // V_TOTAL = 872
++		I2C_WRITE_REG(me->asic, 0x49, 0x03);
++		I2C_WRITE_REG(me->asic, 0x4A, 0x02);   // V_Sync = 2
++		I2C_WRITE_REG(me->asic, 0x4B, 0x00);
++		I2C_WRITE_REG(me->asic, 0x4C, 0x95);   // V_Start = 149
++		I2C_WRITE_REG(me->asic, 0x4D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x4E, 0xd0);   // V_Size = 720
++		I2C_WRITE_REG(me->asic, 0x4F, 0x02);
++
++		// Keystone Correction
++		I2C_WRITE_REG(me->asic, 0x54, 0x03); //KSC disable, WXGA resolution
++
++		// Scalar Setting
++		I2C_WRITE_REG(me->asic, 0x66, 0x00); // Y_ratio
++		I2C_WRITE_REG(me->asic, 0x67, 0xFF);
++		I2C_WRITE_REG(me->asic, 0x68, 0x0F);
++		I2C_WRITE_REG(me->asic, 0x69, 0x54); // Y= (600-1)/(720-1)*4096= 3412
++		I2C_WRITE_REG(me->asic, 0x6A, 0x0d);
++		I2C_WRITE_REG(me->asic, 0x66, 0x01); // X_ratio
++		I2C_WRITE_REG(me->asic, 0x67, 0xFF);
++		I2C_WRITE_REG(me->asic, 0x68, 0x0F);
++		I2C_WRITE_REG(me->asic, 0x69, 0xfe); // X= (800-1)/(1280-1)*4096= 2558
++		I2C_WRITE_REG(me->asic, 0x6A, 0x09);
++		I2C_WRITE_REG(me->asic, 0x6B, 0x31); // SCALER Enable, x delay =3
++
++		// SDRAM Control
++		I2C_WRITE_REG(me->asic, 0x70, 0x01); // NORMAL, 2 SDRAM
++		I2C_WRITE_REG(me->asic, 0x73, 0x03); // SAMPLE PHASE , latency =3
++
++		// Frame Control
++		I2C_WRITE_REG(me->asic, 0x77, 0x08);   // Sub-Frame 8
++		I2C_WRITE_REG(me->asic, 0x78, 0x50);   // RRGGBBGG
++		I2C_WRITE_REG(me->asic, 0x79, 0x5A);
++		I2C_WRITE_REG(me->asic, 0x7A, 0x0F);
++		I2C_WRITE_REG(me->asic, 0x7B, 0x00);   // V_Total_Address
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_0
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_0
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_1
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_1
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_2
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_2
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_3
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_3
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_4
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_4
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_5
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_5
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_6
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_6
++		I2C_WRITE_REG(me->asic, 0x7C, 0x40);   // V_Total_7
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_7
++		I2C_WRITE_REG(me->asic, 0x7B, 0x0A);   // H_Total_Address
++		I2C_WRITE_REG(me->asic, 0x7C, 0x70);   // H_Total     // 1648 (under 1641 results in green line)
++		I2C_WRITE_REG(me->asic, 0x7D, 0x06);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x54);   // H_ACT_STR   // 84
++		I2C_WRITE_REG(me->asic, 0x7D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x60);   // H_ACT_SIZE  // 1376
++		I2C_WRITE_REG(me->asic, 0x7D, 0x05);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x0a);   // V_ACT_STR   // 10
++		I2C_WRITE_REG(me->asic, 0x7D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x08);   // V_ACT_SIZE  // 776
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);
++		lumus_loe_update_border(me);
++		I2C_WRITE_REG(me->asic, 0x7E, 0x10);   // BORDER Enable
++
++		// MINI-DSI Controller
++		I2C_WRITE_REG(me->asic, 0x90, 0x11); // DSI enable
++
++		// LVDS RX
++		I2C_WRITE_REG(me->asic, 0x98, 0x47); // LVDS enable, LVDS PLL normal
++
++		// Output Stage
++		I2C_WRITE_REG(me->asic, 0xA0, 0x03); // 2 Port ,CS
++		I2C_WRITE_REG(me->asic, 0xA2, 0x1B); // PORT swap
++		I2C_WRITE_REG(me->asic, 0xA3, 0x00); // BIT non-swap
++
++		// LED Controller
++		I2C_WRITE_REG(me->asic, 0xC0, 0x50);   // LED Sequence: RRGGBBGG
++		I2C_WRITE_REG(me->asic, 0xC1, 0x5A);
++		I2C_WRITE_REG(me->asic, 0xC2, 0x0F);
++		I2C_WRITE_REG(me->asic, 0xC3, 0x00);   // LED 0 ON ADDR
++		I2C_WRITE_REG(me->asic, 0xC4, 0x2b);   // LED 0 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x04);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xd1);   // LED 0 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x06);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x7b);   // LED 1 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x07);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x21);   // LED 1 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0A);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xcb);   // LED 2 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0a);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x71);   // LED 2 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0d);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x1b);   // LED 3 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0e);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xc1);   // LED 3 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x10);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x6b);   // LED 4 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x11);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x11);   // LED 4 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x14);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xBb);   // LED 5 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x14);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x61);   // LED 5 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x17);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x0b);   // LED 6 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x18);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x31);   // LED 6 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x00);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xdb);   // LED 7 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x00);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x81);   // LED 7 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x03);
++
++		// CABC
++		I2C_WRITE_REG(me->asic, 0xC8, 0x00); // CABC disabled
++		I2C_WRITE_REG(me->asic, 0xC9, 0x44); // CABC 50%
++		I2C_WRITE_REG(me->asic, 0xCC, 0x00); // CABC addr=0
++		I2C_WRITE_REG(me->asic, 0xCD, 0x04); // Horizontal 1366
++		I2C_WRITE_REG(me->asic, 0xCD, 0x06);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x07);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x08);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x09);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0A);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0B);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0C);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x03); // Vertical 768
++		I2C_WRITE_REG(me->asic, 0xCD, 0x05);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x07);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x09);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0B);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++
++		// PLL
++		I2C_WRITE_REG(me->asic, 0xD0, 0x02);   // PLL Normal Mode
++
++		I2C_WRITE_REG(me->asic, 0xD1, 0x04);   // SELM_A, PLLA = SDRAM CLK = 166 MHz
++		I2C_WRITE_REG(me->asic, 0xD2, 0x00);   // SELP_A
++		I2C_WRITE_REG(me->asic, 0xD3, 0x55);
++		I2C_WRITE_REG(me->asic, 0xD4, 0x1D);   // DC_A = 7509, DCS_A = 0
++
++		I2C_WRITE_REG(me->asic, 0xD5, 0x04);   // SELM_B, PLLB = CLK LCOS = 155 MHz
++		I2C_WRITE_REG(me->asic, 0xD6, 0x00);   // SELP_B
++		I2C_WRITE_REG(me->asic, 0xD7, 0x44);
++		I2C_WRITE_REG(me->asic, 0xD8, 0x0e);   // DC_B = 3652, DCS_B = 0
++
++		I2C_WRITE_REG(me->asic, 0xD9, 0x04);   // SELM_C, PLLC = CLK SCO = 154 MHz
++		I2C_WRITE_REG(me->asic, 0xDA, 0x00);   // SELP_C
++		I2C_WRITE_REG(me->asic, 0xDC, 0x55);
++		I2C_WRITE_REG(me->asic, 0xDD, 0x0d);   // DC_C = 5461, DCS_C =0
++
++		I2C_WRITE_REG(me->asic, 0xDE, 0x00);   // SELP_E, PLLE = CLK SCM  = 166 MHz
++
++		// PLL_SSC
++		I2C_WRITE_REG(me->asic, 0xED, 0x01); // PLLA Normal
++		I2C_WRITE_REG(me->asic, 0xEE, 0x01); // PLLB Normal
++		I2C_WRITE_REG(me->asic, 0xEF, 0x01); // PLLC Normal
++
++		// System
++		I2C_WRITE_REG(me->asic, 0xF1, 0x0d);   // SDRAM PHASE
++		I2C_WRITE_REG(me->asic, 0xF2, 0x0b);   // LCOS PHASE
++		I2C_WRITE_REG(me->asic, 0xF3, 0x01); // Dual Edge
++		I2C_WRITE_REG(me->asic, 0xF7, 0x71); // LVDS input
++		I2C_WRITE_REG(me->asic, 0xF0, 0x11); // Display on, Sys enable
++
++		ret = 0;
++		break;
++
++	case LUMUS_LOE_RES_800x600_SCALED_TO_1280x720_120FPS:
++
++		I2C_WRITE_REG(me->asic, 0xFE, 0x33);   // Password
++
++		// INP Format
++		I2C_WRITE_REG(me->asic, 0x10, 0x07); // INP_CTRL: SYNC+DE mode, HS,VS negative polarity
++		I2C_WRITE_REG(me->asic, 0x15, 0x20); // INP_HSIZE = 0x320 = 800
++		I2C_WRITE_REG(me->asic, 0x16, 0x03);
++		I2C_WRITE_REG(me->asic, 0x1B, 0x58); // INP_VSIZE = 0x258 = 600
++		I2C_WRITE_REG(me->asic, 0x1C, 0x02);
++
++		// Embedded Pattern Generator
++		I2C_WRITE_REG(me->asic, 0x30, 0x51);   // TP Pattern 1280x720
++		I2C_WRITE_REG(me->asic, 0x3A, 0x55);   // VS RESET
++		I2C_WRITE_REG(me->asic, 0x3B, 0x1e);
++		I2C_WRITE_REG(me->asic, 0x3C, 0x00);
++
++		// Scalar and Embedded Pattern Output Timing
++		I2C_WRITE_REG(me->asic, 0x40, 0xe4);   // scaler out H_total = 1764
++		I2C_WRITE_REG(me->asic, 0x41, 0x06);
++		I2C_WRITE_REG(me->asic, 0x42, 0x10);   // H_SYNC = 16
++		I2C_WRITE_REG(me->asic, 0x43, 0x00);
++		I2C_WRITE_REG(me->asic, 0x44, 0x54);   // H_Start = 84 (H_Start=256 KSC ok but 257 fail)
++		I2C_WRITE_REG(me->asic, 0x45, 0x00);
++		I2C_WRITE_REG(me->asic, 0x46, 0x00);   // H_Size = 1280
++		I2C_WRITE_REG(me->asic, 0x47, 0x05);
++		I2C_WRITE_REG(me->asic, 0x48, 0xD7);   // V_TOTAL = 727
++		I2C_WRITE_REG(me->asic, 0x49, 0x02);
++		I2C_WRITE_REG(me->asic, 0x4A, 0x02);   // V_Sync = 2
++		I2C_WRITE_REG(me->asic, 0x4B, 0x00);
++		I2C_WRITE_REG(me->asic, 0x4C, 0x02);   // V_Start = 2
++		I2C_WRITE_REG(me->asic, 0x4D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x4E, 0xd0);   // V_Size = 720
++		I2C_WRITE_REG(me->asic, 0x4F, 0x02);
++
++		// Keystone Correction
++		I2C_WRITE_REG(me->asic, 0x54, 0x03); //KSC disable, WXGA resolution
++
++		// Scalar Setting
++		I2C_WRITE_REG(me->asic, 0x66, 0x00); // Y_ratio
++		I2C_WRITE_REG(me->asic, 0x67, 0xFF);
++		I2C_WRITE_REG(me->asic, 0x68, 0x0F);
++		I2C_WRITE_REG(me->asic, 0x69, 0x54); // Y= (600-1)/(720-1)*4096= 3412
++		I2C_WRITE_REG(me->asic, 0x6A, 0x0d);
++		I2C_WRITE_REG(me->asic, 0x66, 0x01); // X_ratio
++		I2C_WRITE_REG(me->asic, 0x67, 0xFF);
++		I2C_WRITE_REG(me->asic, 0x68, 0x0F);
++		I2C_WRITE_REG(me->asic, 0x69, 0xfe); // X= (800-1)/(1280-1)*4096= 2558
++		I2C_WRITE_REG(me->asic, 0x6A, 0x09);
++		I2C_WRITE_REG(me->asic, 0x6B, 0x31); // SCALER Enable, x delay =3
++
++		// SDRAM Control
++		I2C_WRITE_REG(me->asic, 0x70, 0x01); // NORMAL, 2 SDRAM
++		I2C_WRITE_REG(me->asic, 0x73, 0x03); // SAMPLE PHASE , latency =3
++
++		// Frame Control
++		I2C_WRITE_REG(me->asic, 0x77, 0x08);   // Sub-Frame 8
++		I2C_WRITE_REG(me->asic, 0x78, 0x50);   // RRGGBBGG
++		I2C_WRITE_REG(me->asic, 0x79, 0x5A);
++		I2C_WRITE_REG(me->asic, 0x7A, 0x0F);
++		I2C_WRITE_REG(me->asic, 0x7B, 0x00);   // V_Total_Address
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_0
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_0
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_1
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_1
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_2
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_2
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_3
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_3
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_4
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_4
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_5
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_5
++		I2C_WRITE_REG(me->asic, 0x7C, 0x50);   // V_Total_6
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_6
++		I2C_WRITE_REG(me->asic, 0x7C, 0x40);   // V_Total_7
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);   // V_Total_7
++		I2C_WRITE_REG(me->asic, 0x7B, 0x0A);   // H_Total_Address
++		I2C_WRITE_REG(me->asic, 0x7C, 0x70);   // H_Total     // 1648 (under 1641 results in green line)
++		I2C_WRITE_REG(me->asic, 0x7D, 0x06);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x54);   // H_ACT_STR   // 84
++		I2C_WRITE_REG(me->asic, 0x7D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x60);   // H_ACT_SIZE  // 1376
++		I2C_WRITE_REG(me->asic, 0x7D, 0x05);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x0a);   // V_ACT_STR   // 10
++		I2C_WRITE_REG(me->asic, 0x7D, 0x00);
++		I2C_WRITE_REG(me->asic, 0x7C, 0x08);   // V_ACT_SIZE  // 776
++		I2C_WRITE_REG(me->asic, 0x7D, 0x03);
++		lumus_loe_update_border(me);
++		I2C_WRITE_REG(me->asic, 0x7E, 0x10);   // BORDER Enable
++
++		// MINI-DSI Controller
++		I2C_WRITE_REG(me->asic, 0x90, 0x11); // DSI enable
++
++		// LVDS RX
++		I2C_WRITE_REG(me->asic, 0x98, 0x47); // LVDS enable, LVDS PLL normal
++
++		// Output Stage
++		I2C_WRITE_REG(me->asic, 0xA0, 0x03); // 2 Port ,CS
++		I2C_WRITE_REG(me->asic, 0xA2, 0x1B); // PORT swap
++		I2C_WRITE_REG(me->asic, 0xA3, 0x00); // BIT non-swap
++
++		// LED Controller
++		I2C_WRITE_REG(me->asic, 0xC0, 0x50);   // LED Sequence: RRGGBBGG
++		I2C_WRITE_REG(me->asic, 0xC1, 0x5A);
++		I2C_WRITE_REG(me->asic, 0xC2, 0x0F);
++		I2C_WRITE_REG(me->asic, 0xC3, 0x00);   // LED 0 ON ADDR
++		I2C_WRITE_REG(me->asic, 0xC4, 0x2b);   // LED 0 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x04);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xd1);   // LED 0 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x06);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x7b);   // LED 1 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x07);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x21);   // LED 1 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0A);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xcb);   // LED 2 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0a);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x71);   // LED 2 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0d);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x1b);   // LED 3 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x0e);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xc1);   // LED 3 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x10);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x6b);   // LED 4 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x11);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x11);   // LED 4 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x14);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xBb);   // LED 5 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x14);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x61);   // LED 5 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x17);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x0b);   // LED 6 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x18);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x31);   // LED 6 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x00);
++		I2C_WRITE_REG(me->asic, 0xC4, 0xdb);   // LED 7 ON
++		I2C_WRITE_REG(me->asic, 0xC5, 0x00);
++		I2C_WRITE_REG(me->asic, 0xC4, 0x81);   // LED 7 OFF
++		I2C_WRITE_REG(me->asic, 0xC5, 0x03);
++
++		// CABC
++		I2C_WRITE_REG(me->asic, 0xC8, 0x00); // CABC disabled
++		I2C_WRITE_REG(me->asic, 0xC9, 0x44); // CABC 50%
++		I2C_WRITE_REG(me->asic, 0xCC, 0x00); // CABC addr=0
++		I2C_WRITE_REG(me->asic, 0xCD, 0x04); // Horizontal 1366
++		I2C_WRITE_REG(me->asic, 0xCD, 0x06);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x07);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x08);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x09);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0A);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0B);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0C);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x03); // Vertical 768
++		I2C_WRITE_REG(me->asic, 0xCD, 0x05);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x07);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x09);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x0B);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++		I2C_WRITE_REG(me->asic, 0xCD, 0x00);
++
++		// PLL
++		I2C_WRITE_REG(me->asic, 0xD0, 0x02);   // PLL Normal Mode
++
++		I2C_WRITE_REG(me->asic, 0xD1, 0x04);   // SELM_A, PLLA = SDRAM CLK = 166 MHz
++		I2C_WRITE_REG(me->asic, 0xD2, 0x00);   // SELP_A
++		I2C_WRITE_REG(me->asic, 0xD3, 0x55);
++		I2C_WRITE_REG(me->asic, 0xD4, 0x1D);   // DC_A = 7509, DCS_A = 0
++
++		I2C_WRITE_REG(me->asic, 0xD5, 0x04);   // SELM_B, PLLB = CLK LCOS = 155 MHz
++		I2C_WRITE_REG(me->asic, 0xD6, 0x00);   // SELP_B
++		I2C_WRITE_REG(me->asic, 0xD7, 0x44);
++		I2C_WRITE_REG(me->asic, 0xD8, 0x0e);   // DC_B = 3652, DCS_B = 0
++
++		I2C_WRITE_REG(me->asic, 0xD9, 0x04);   // SELM_C, PLLC = CLK SCO = 154 MHz
++		I2C_WRITE_REG(me->asic, 0xDA, 0x00);   // SELP_C
++		I2C_WRITE_REG(me->asic, 0xDC, 0x55);
++		I2C_WRITE_REG(me->asic, 0xDD, 0x0d);   // DC_C = 5461, DCS_C =0
++
++		I2C_WRITE_REG(me->asic, 0xDE, 0x00);   // SELP_E, PLLE = CLK SCM  = 166 MHz
++
++		// PLL_SSC
++		I2C_WRITE_REG(me->asic, 0xED, 0x01); // PLLA Normal
++		I2C_WRITE_REG(me->asic, 0xEE, 0x01); // PLLB Normal
++		I2C_WRITE_REG(me->asic, 0xEF, 0x01); // PLLC Normal
++
++		// System
++		I2C_WRITE_REG(me->asic, 0xF1, 0x0d);   // SDRAM PHASE
++		I2C_WRITE_REG(me->asic, 0xF2, 0x0b);   // LCOS PHASE
++		I2C_WRITE_REG(me->asic, 0xF3, 0x01); // Dual Edge
++		I2C_WRITE_REG(me->asic, 0xF7, 0x71); // LVDS input
++		I2C_WRITE_REG(me->asic, 0xF0, 0x11); // Display on, Sys enable
++
++		ret = 0;
++		break;
++
++	default:
++		break;
++	}
++
++	pr_debug("%s: %s", __func__, (0 == ret) ? "success" : "failed");
++
++	return ret;
++}
++
++static int lumus_loe_init_HX7318(struct lumus_loe *me, char ctrl)
++{
++	int ret = -1;
++
++	pr_debug("%s: initializing HX7318 LCOS (%02x)", __func__, ctrl);
++
++	do {
++		// single glass
++		I2C_WRITE_REG(me->lcos, 0x00, ctrl);
++		I2C_WRITE_REG(me->lcos, 0x01, 0x47);
++		I2C_WRITE_REG(me->lcos, 0x13, 0x45);
++		I2C_WRITE_REG(me->lcos, 0x14, 0x80);
++		I2C_WRITE_REG(me->lcos, 0x17, 0x08);
++		I2C_WRITE_REG(me->lcos, 0x61, 0x28);
++		I2C_WRITE_REG(me->lcos, 0x82, 0xEB);
++
++		I2C_WRITE_REG(me->lcos, 0x19, 0x13);	// default is 0x2a
++		I2C_WRITE_REG(me->lcos, 0x1A, 0xE8);	// default is 0xd5
++
++		I2C_WRITE_REG(me->lcos, 0x21, 0x14);
++		I2C_WRITE_REG(me->lcos, 0x22, 0x14);
++		I2C_WRITE_REG(me->lcos, 0x23, 0x02);
++		I2C_WRITE_REG(me->lcos, 0x24, 0xEB);
++		I2C_WRITE_REG(me->lcos, 0x25, 0xEB);
++		I2C_WRITE_REG(me->lcos, 0x26, 0xFD);
++		I2C_WRITE_REG(me->lcos, 0x27, 0x51);
++		I2C_WRITE_REG(me->lcos, 0x28, 0x47);
++		I2C_WRITE_REG(me->lcos, 0x29, 0x5B);
++		I2C_WRITE_REG(me->lcos, 0x2A, 0xAE);
++		I2C_WRITE_REG(me->lcos, 0x2B, 0xB8);
++		I2C_WRITE_REG(me->lcos, 0x2C, 0xA4);
++		I2C_WRITE_REG(me->lcos, 0x2D, 0x65);
++		I2C_WRITE_REG(me->lcos, 0x2E, 0x5F);
++		I2C_WRITE_REG(me->lcos, 0x2F, 0x73);
++		I2C_WRITE_REG(me->lcos, 0x30, 0x9A);
++		I2C_WRITE_REG(me->lcos, 0x31, 0xA0);
++		I2C_WRITE_REG(me->lcos, 0x32, 0x8C);
++		I2C_WRITE_REG(me->lcos, 0x33, 0x76);
++		I2C_WRITE_REG(me->lcos, 0x34, 0x70);
++		I2C_WRITE_REG(me->lcos, 0x35, 0x7F);
++		I2C_WRITE_REG(me->lcos, 0x36, 0x89);
++		I2C_WRITE_REG(me->lcos, 0x37, 0x8F);
++		I2C_WRITE_REG(me->lcos, 0x38, 0x80);
++		I2C_WRITE_REG(me->lcos, 0x39, 0x85);
++		I2C_WRITE_REG(me->lcos, 0x3A, 0x7F);
++		I2C_WRITE_REG(me->lcos, 0x3B, 0x8F);
++		I2C_WRITE_REG(me->lcos, 0x3C, 0x7A);
++		I2C_WRITE_REG(me->lcos, 0x3D, 0x80);
++		I2C_WRITE_REG(me->lcos, 0x3E, 0x70);
++		I2C_WRITE_REG(me->lcos, 0x3F, 0x97);
++		I2C_WRITE_REG(me->lcos, 0x40, 0x90);
++		I2C_WRITE_REG(me->lcos, 0x41, 0x95);
++		I2C_WRITE_REG(me->lcos, 0x42, 0x68);
++		I2C_WRITE_REG(me->lcos, 0x43, 0x6F);
++		I2C_WRITE_REG(me->lcos, 0x44, 0x6A);
++		I2C_WRITE_REG(me->lcos, 0x45, 0xA9);
++		I2C_WRITE_REG(me->lcos, 0x46, 0xA0);
++		I2C_WRITE_REG(me->lcos, 0x47, 0xA3);
++		I2C_WRITE_REG(me->lcos, 0x48, 0x56);
++		I2C_WRITE_REG(me->lcos, 0x49, 0x5F);
++		I2C_WRITE_REG(me->lcos, 0x4A, 0x5C);
++		I2C_WRITE_REG(me->lcos, 0x4B, 0xCA);
++		I2C_WRITE_REG(me->lcos, 0x4C, 0xC3);
++		I2C_WRITE_REG(me->lcos, 0x4D, 0xDF);
++		I2C_WRITE_REG(me->lcos, 0x4E, 0x35);
++		I2C_WRITE_REG(me->lcos, 0x4F, 0x3C);
++		I2C_WRITE_REG(me->lcos, 0x50, 0x20);
++
++		ret = 0;
++
++	} while (0);
++
++	pr_debug("%s: %s", __func__, (0 == ret) ? "success" : "failed");
++
++	return ret;
++}
++
++static int lumus_loe_init_eye(struct lumus_loe *me)
++{
++	int ret = -1;
++
++	do {
++		char ctrl = 0;
++		signed char pos[2];
++		H_381_BL_T Backlight = { BACKLIGHT_DEFAULT, BACKLIGHT_DEFAULT, BACKLIGHT_DEFAULT };
++		int retries = 0;
++
++		/* try to read device info */
++		while (retries < 10) {
++			if (i2c_smbus_read_i2c_block_data(me->ctrl, GET_DEVICE_INFO, sizeof(me->HW), (unsigned char*)&me->HW)==sizeof(me->HW)) {
++				pr_info("\tVendor ID = %04x", me->HW.Vendor_ID);
++				pr_info("\tDevice ID = %04x", me->HW.Device_ID);
++				pr_info("\tBoard Revision = %04x", me->HW.BoardRevision);
++				pr_info("\tManufacture Week = %d", me->HW.ManufactureWeek);
++				pr_info("\tManufacture Year = %d", me->HW.ManufactureYear);
++				pr_info("\tSerial Number = %04x", me->HW.SerNum);
++				pr_info("\tFlags = %d", me->HW.Flags);
++				break;
++			} else {
++				pr_err("%s: error reading device info", __func__);
++			}
++			usleep(10000);
++			retries++;
++		}
++
++		if (retries == 10) {
++			pr_err("%s: failed to get device info after %d tries", __func__, 10);
++			break;
++		}
++
++		ctrl = i2c_smbus_read_byte_data(me->ctrl, GET_LCD_CONTROL);
++		ctrl |= HX7318_CTRL_REG_MASK;
++
++		(void) i2c_smbus_write_byte_data(me->ctrl, SET_NRST_LCD, 0);
++		usleep(10000);
++		(void) i2c_smbus_write_byte_data(me->ctrl, SET_NRST_LCD, 1);
++		usleep(100000);
++
++		/* get screen position offsets */
++		if (i2c_smbus_read_i2c_block_data(me->ctrl, GET_SCREENPOS, sizeof(pos),(void*) pos) == sizeof(pos)) {
++			me->x_offset = pos[0];
++			me->y_offset = pos[1];
++			me->screen_pos = (me->x_offset << 8) + me->y_offset;
++			pr_debug("%s: offsets are x=%d, y=%d", __func__, me->x_offset, me->y_offset);
++		} else {
++			pr_err("%s: error reading screen positions", __func__);
++			ret = -1;
++			break;
++		}
++
++		/* initialize ASIC */
++		ret = lumus_loe_init_HX7816(me);
++		if (ret < 0) {
++			pr_err("%s: error initializing Himax ASIC", __func__);
++			break;
++		}
++
++		/* initialize LCOS */
++		ret = lumus_loe_init_HX7318(me, ctrl);
++		if (ret < 0) {
++			pr_err("%s: error initializing Himax LCOS", __func__);
++			break;
++		}
++
++		/* set backlight */
++		(void) i2c_smbus_write_i2c_block_data(me->ctrl, SET_BACKLIGHT, sizeof(Backlight), (unsigned char*)&Backlight);	///* set backlight value */
++
++		ret = 0;
++
++	} while (0);
++
++	return ret;
++}
++
++int lumus_loe_power_on(void *ctxt)
++{
++	struct lumus_loe* me = (struct lumus_loe*) ctxt;
++	if (me == NULL) {
++		return 1;
++	}
++	pr_info("%s:%s", __func__, me->id->name);
++	return lumus_loe_init_eye(me);
++}
++
++int lumus_loe_power_off(void *ctxt)
++{
++	struct lumus_loe* me = (struct lumus_loe*) ctxt;
++	if (me == NULL) {
++		return 1;
++	}
++	pr_info("%s:%s", __func__, me->id->name);
++
++	/* reset the controller to turn off the display */
++	(void) i2c_smbus_write_byte_data(me->ctrl, SET_NRST_LCD, 0);
++	usleep(10000);
++	(void) i2c_smbus_write_byte_data(me->ctrl, SET_NRST_LCD, 1);
++	usleep(100000);
++
++	return 0;
++}
++
++/*
++ * I2C init/probing/exit functions
++ */
++static int lumus_loe_probe(struct i2c_client *client,
++			 const struct i2c_device_id *id)
++{
++	struct i2c_adapter *adap = to_i2c_adapter(client->dev.parent);
++	struct lumus_loe_platform_data *pdata = client->dev.platform_data;
++	struct lumus_loe *data;
++	int ret = -ENODEV;
++
++	if (!i2c_check_functionality(adap, I2C_FUNC_SMBUS_WORD_DATA))
++		goto err;
++
++	if (pdata == NULL) {
++		pr_err("%s: platform data is NULL", __func__);
++		goto err;
++	}
++
++	data = kzalloc(sizeof(struct lumus_loe), GFP_KERNEL);
++	if (!data) {
++		ret = -ENOMEM;
++		goto err;
++	}
++
++	data->id = (struct i2c_device_id*) id;
++	data->ctrl = client;	// address 0x52
++	data->resolution = pdata->resolution;
++
++	data->asic = i2c_new_dummy(client->adapter, I2C_ADDR_HX7816);
++	if (data->asic == NULL) {
++		pr_err("%s: failed to create i2c client for LCOS controller", __func__);
++		goto exit_free;
++	}
++
++	data->lcos = i2c_new_dummy(client->adapter, I2C_ADDR_HX7318);
++	if (data->lcos == NULL) {
++		pr_err("%s: failed to create i2c client for LCOS", __func__);
++		goto exit_free;
++	}
++
++	if (sysfs_create_group(&client->dev.kobj, &lumus_loe_attr_group)) {
++		pr_err("lumus_loe: failed to create attributes!");
++	}
++
++	i2c_set_clientdata(client, data);
++
++	/* now configure the platform data */
++	pdata->ctxt = data;
++	pdata->power_on = lumus_loe_power_on;
++	pdata->power_off = lumus_loe_power_off;
++
++	pr_info("%s", __func__);
++
++	return 0;
++
++exit_free:
++	kfree(data);
++err:
++	return ret;
++}
++
++static int lumus_loe_remove(struct i2c_client *client)
++{
++	struct lumus_loe *data = (struct lumus_loe*) i2c_get_clientdata(client);
++	if (data->asic != NULL) {
++		i2c_unregister_device(data->asic);
++	}
++	if (data->lcos != NULL) {
++		i2c_unregister_device(data->lcos);
++	}
++	sysfs_remove_group(&client->dev.kobj, &lumus_loe_attr_group);
++	return 0;
++}
++
++static const struct i2c_device_id lumus_loe_id[] = {
++	{ "lumus_loe_left", 0 },
++	{ "lumus_loe_right", 1 },
++	{ }
++};
++MODULE_DEVICE_TABLE(i2c, lumus_loe_id);
++
++static struct i2c_driver lumus_loe_driver = {
++	.driver		= {
++		.name	= DRV_NAME,
++		.owner	= THIS_MODULE,
++	},
++	.probe		= lumus_loe_probe,
++	.remove		= lumus_loe_remove,
++	.id_table	= lumus_loe_id,
++};
++
++static int __init lumus_loe_init(void)
++{
++	return i2c_add_driver(&lumus_loe_driver);
++}
++
++static void __exit lumus_loe_exit(void)
++{
++	i2c_del_driver(&lumus_loe_driver);
++}
++
++module_init(lumus_loe_init);
++module_exit(lumus_loe_exit);
++
++MODULE_DESCRIPTION("Lumus LOE driver");
+diff --git a/include/linux/lumus_loe.h b/include/linux/lumus_loe.h
+new file mode 100644
+index 0000000..1db3f86
+--- /dev/null
++++ b/include/linux/lumus_loe.h
+@@ -0,0 +1,22 @@
++/*
++ * Definitions for Lumus LOE
++ */
++#ifndef LUMUS_LOE_H
++#define LUMUS_LOE_H
++
++#define LUMUS_LOE_RES_1280x720_60FPS	0
++#define LUMUS_LOE_RES_1366x768_60FPS	1
++#define LUMUS_LOE_RES_800x600_SCALED_TO_1280x720_60FPS	2
++#define LUMUS_LOE_RES_800x600_SCALED_TO_1280x720_120FPS	3
++#define LUMUS_LOE_RES_800x600_SCALED_TO_1280x720_100FPS	4
++#define LUMUS_LOE_RES_1280x720_100FPS	5
++
++struct lumus_loe_platform_data {
++	void *ctxt;
++	int (*power_on)(void *ctxt);
++	int (*power_off)(void *ctxt);
++	int resolution;
++};
++
++#endif /* LUMUS_LOE_H */
++
+-- 
+1.8.2.1
+

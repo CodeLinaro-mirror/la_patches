@@ -1,0 +1,58 @@
+From 38ca75922062bdaea2433f7153ef973445b9e1d2 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Fri, 20 Mar 2015 17:14:45 -0700
+Subject: [PATCH] msm: mdss: hdmi: vote for power with continuous splash screen
+
+When continuous splash screen is enabled, enable power and clocks at
+probe and then add vote for the same to keep track of current status.
+
+Change-Id: I4fd17cec0899304452f546209a477c172c6eb9f4
+Signed-off-by: Ajay Singh Parmar <aparmar@codeaurora.org>
+---
+ drivers/video/msm/mdss/mdss_hdmi_tx.c | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/drivers/video/msm/mdss/mdss_hdmi_tx.c b/drivers/video/msm/mdss/mdss_hdmi_tx.c
+index 64e490f..33ae82e 100644
+--- a/drivers/video/msm/mdss/mdss_hdmi_tx.c
++++ b/drivers/video/msm/mdss/mdss_hdmi_tx.c
+@@ -1895,6 +1895,27 @@ exit:
+ 	return rc;
+ } /* hdmi_tx_config_power */
+ 
++static int hdmi_tx_vote_power(struct hdmi_tx_ctrl *hdmi_ctrl,
++	enum hdmi_tx_power_module_type module)
++{
++	struct dss_module_power *power_data = NULL;
++
++	if (!hdmi_ctrl || module >= HDMI_TX_MAX_PM) {
++		DEV_ERR("%s: Error: invalid input\n", __func__);
++		return -EINVAL;
++	}
++
++	power_data = &hdmi_ctrl->pdata.power_data[module];
++	if (!power_data) {
++		DEV_ERR("%s: Error: invalid power data\n", __func__);
++		return -EINVAL;
++	}
++
++	power_data->enable = true;
++
++	return 0;
++}
++
+ static int hdmi_tx_enable_power(struct hdmi_tx_ctrl *hdmi_ctrl,
+ 	enum hdmi_tx_power_module_type module, int enable)
+ {
+@@ -4098,6 +4119,8 @@ static int hdmi_tx_probe(struct platform_device *pdev)
+ 			msm_dss_enable_clk(
+ 				hdmi_ctrl->pdata.power_data[i].clk_config,
+ 				hdmi_ctrl->pdata.power_data[i].num_clk, 1);
++
++			hdmi_tx_vote_power(hdmi_ctrl, i);
+ 		}
+ 
+ 		hdmi_tx_audio_tear_down(hdmi_ctrl);
+-- 
+1.8.2.1
+

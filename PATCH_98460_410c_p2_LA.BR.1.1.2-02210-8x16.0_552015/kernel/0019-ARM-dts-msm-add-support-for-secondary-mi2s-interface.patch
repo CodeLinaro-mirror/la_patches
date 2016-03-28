@@ -1,0 +1,121 @@
+From 41c919d90e304c5ffff5b40b7109b13b18ec28b6 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:43:09 -0700
+Subject: [PATCH 19/22] ARM: dts: msm: add support for secondary mi2s interface
+
+Update 8909 dtsi files to support playback over secondary
+mi2s path.
+
+Change-Id: I09316628ecd0120af268afd8296b46c209016b8b
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/msm8909-cdp.dtsi     | 10 +++++-
+ arch/arm/boot/dts/qcom/msm8909-pinctrl.dtsi | 54 +++++++++++++++++++++++++++++
+ sound/soc/msm/qdsp6v2/q6afe.c               |  1 +
+ 3 files changed, 64 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/qcom/msm8909-cdp.dtsi b/arch/arm/boot/dts/qcom/msm8909-cdp.dtsi
+index 95bbd9f..e7fca70 100644
+--- a/arch/arm/boot/dts/qcom/msm8909-cdp.dtsi
++++ b/arch/arm/boot/dts/qcom/msm8909-cdp.dtsi
+@@ -120,11 +120,19 @@
+ 		pinctrl-names = "cdc_lines_act",
+ 				"cdc_lines_sus",
+ 				"cross_conn_det_act",
+-				"cross_conn_det_sus";
++				"cross_conn_det_sus",
++				"cdc_lines_sec_ext_act",
++				"cdc_lines_sec_ext_sus";
+ 		pinctrl-0 = <&cdc_pdm_lines_act>;
+ 		pinctrl-1 = <&cdc_pdm_lines_sus>;
+ 		pinctrl-2 = <&cross_conn_det_act>;
+ 		pinctrl-3 = <&cross_conn_det_sus>;
++		pinctrl-4 = <&cdc_pdm_lines_act &cdc_ext_pa_act
++				&cdc_ext_pa_d0_act &cdc_ext_mclk_act
++				&cross_conn_det_act>;
++		pinctrl-5 = <&cdc_pdm_lines_sus &cdc_ext_pa_sus
++				&cdc_ext_pa_d0_sus &cdc_ext_mclk_sus
++				&cross_conn_det_sus>;
+ 		qcom,cdc-us-euro-gpios = <&msm_gpio 97 0>;
+ 		asoc-platform = <&pcm0>, <&pcm1>, <&voip>, <&voice>,
+ 				<&loopback>, <&compress>, <&hostless>,
+diff --git a/arch/arm/boot/dts/qcom/msm8909-pinctrl.dtsi b/arch/arm/boot/dts/qcom/msm8909-pinctrl.dtsi
+index 538cb5c..02ee4a6 100644
+--- a/arch/arm/boot/dts/qcom/msm8909-pinctrl.dtsi
++++ b/arch/arm/boot/dts/qcom/msm8909-pinctrl.dtsi
+@@ -192,6 +192,60 @@
+ 			};
+ 		};
+ 
++		vdd_spkdrv {
++			qcom,pins = <&gp 4>;
++			qcom,num-grp-pins = <1>;
++			qcom,pin-func = <0>;
++			label = "vdd_spkdrv";
++			vdd_spkdrv_default: vdd_spkdrv_default {
++				drive-strength = <8>;
++				bias-pull-up;
++			};
++		};
++
++		cdc-ext-pa-lines {
++			qcom,pins = <&gp 94>, <&gp 96>,
++					 <&gp 110>;
++			qcom,num-grp-pins = <3>;
++			qcom,pin-func = <1>;
++			label = "cdc-ext-pa-lines";
++			cdc_ext_pa_act: ext_pa_on {
++				drive-strength = <8>;
++			};
++			cdc_ext_pa_sus: ext_pa_off {
++				drive-strength = <2>;
++				bias-disable;
++			};
++		};
++
++		cdc-ext-pa-d0-lines {
++			qcom,pins = <&gp 95>;
++			qcom,num-grp-pins = <1>;
++			qcom,pin-func = <2>;
++			label = "cdc-ext-pa-d0-lines";
++			cdc_ext_pa_d0_act: ext_pa_d0_on {
++				drive-strength = <8>;
++			};
++			cdc_ext_pa_d0_sus: ext_pa_d0_off {
++				drive-strength = <2>;
++				bias-disable;
++			};
++		};
++
++		cdc-ext-mclk-lines {
++			qcom,pins = <&gp 98>;
++			qcom,num-grp-pins = <1>;
++			qcom,pin-func = <2>;
++			label = "cdc-ext-mclk-lines";
++			cdc_ext_mclk_act: ext_mclk_on {
++				drive-strength = <8>;
++			};
++			cdc_ext_mclk_sus: ext_mclk_off {
++				drive-strength = <2>;
++				bias-disable;
++			};
++		};
++
+ 		/* QDSD pin type */
+ 		qdsd: qdsd {
+ 			/* 0-> clk, 1 -> cmd, 2->data0, 3->data1, 4->data2, 5->data3 */
+diff --git a/sound/soc/msm/qdsp6v2/q6afe.c b/sound/soc/msm/qdsp6v2/q6afe.c
+index 008fea0..df4ca6e 100644
+--- a/sound/soc/msm/qdsp6v2/q6afe.c
++++ b/sound/soc/msm/qdsp6v2/q6afe.c
+@@ -3426,6 +3426,7 @@ int afe_validate_port(u16 port_id)
+ 	case SLIMBUS_6_TX:
+ 	case AFE_PORT_ID_PRIMARY_MI2S_RX:
+ 	case AFE_PORT_ID_PRIMARY_MI2S_TX:
++	case AFE_PORT_ID_SECONDARY_MI2S_RX:
+ 	case AFE_PORT_ID_QUATERNARY_MI2S_RX:
+ 	case AFE_PORT_ID_QUATERNARY_MI2S_TX:
+ 	case AFE_PORT_ID_TERTIARY_MI2S_TX:
+-- 
+1.8.2.1
+

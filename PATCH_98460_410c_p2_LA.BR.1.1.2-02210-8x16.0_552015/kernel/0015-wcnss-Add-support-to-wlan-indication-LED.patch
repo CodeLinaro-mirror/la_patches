@@ -1,0 +1,108 @@
+From 2039d86d916fea651b63958e69d7e4a58d98d8e2 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:40:19 -0700
+Subject: [PATCH 15/22] wcnss: Add support to wlan indication LED
+
+The WLAN indication LED will be turned on/off when
+WLAN will be enabled/disabled respectively.
+
+Change-Id: I9daf6f6046bc85445dd46a7c2350998564ea13d4
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ Documentation/devicetree/bindings/wcnss/wcnss-wlan.txt |  4 +++-
+ drivers/net/wireless/wcnss/wcnss_vreg.c                | 14 ++++++++++++++
+ drivers/net/wireless/wcnss/wcnss_wlan.c                |  4 ++++
+ include/linux/wcnss_wlan.h                             |  1 +
+ 4 files changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/devicetree/bindings/wcnss/wcnss-wlan.txt b/Documentation/devicetree/bindings/wcnss/wcnss-wlan.txt
+index 53a2682..dda4e8a 100644
+--- a/Documentation/devicetree/bindings/wcnss/wcnss-wlan.txt
++++ b/Documentation/devicetree/bindings/wcnss/wcnss-wlan.txt
+@@ -50,7 +50,9 @@ in TX data path.
+ 	1200   -  WCN XO settling time (usec)
+ 	1      -  WCN RPM power collapse enabled
+ 	1      -  WCN standalone power collapse enabled
+-
++	6      -  GPIO strength value
++- qcom,wlan-indication-enabled: the WLAN indication LED will be turned on/off when
++WLAN will be enabled/disabled respectively.
+ 
+ Example:
+ 
+diff --git a/drivers/net/wireless/wcnss/wcnss_vreg.c b/drivers/net/wireless/wcnss/wcnss_vreg.c
+index 424f292..507057f 100644
+--- a/drivers/net/wireless/wcnss/wcnss_vreg.c
++++ b/drivers/net/wireless/wcnss/wcnss_vreg.c
+@@ -24,6 +24,7 @@
+ #include <linux/list.h>
+ #include <linux/slab.h>
+ #include <linux/clk.h>
++#include <linux/leds.h>
+ 
+ 
+ static void __iomem *msm_wcnss_base;
+@@ -32,6 +33,7 @@ static DEFINE_MUTEX(list_lock);
+ static DEFINE_SEMAPHORE(wcnss_power_on_lock);
+ static int auto_detect;
+ static int is_power_on;
++DEFINE_LED_TRIGGER(wlan_indication_led);
+ 
+ #define RIVA_PMU_OFFSET         0x28
+ #define PRONTO_PMU_OFFSET       0x1004
+@@ -646,6 +648,9 @@ int wcnss_req_power_on_lock(char *driver_name)
+ 	list_add(&node->list, &power_on_lock_list);
+ 	mutex_unlock(&list_lock);
+ 
++	if (wlan_indication_led)
++		led_trigger_event(wlan_indication_led, LED_FULL);
++
+ 	return 0;
+ 
+ err:
+@@ -672,6 +677,15 @@ int wcnss_free_power_on_lock(char *driver_name)
+ 		up(&wcnss_power_on_lock);
+ 	mutex_unlock(&list_lock);
+ 
++	if (wlan_indication_led)
++		led_trigger_event(wlan_indication_led, LED_OFF);
++
+ 	return ret;
+ }
+ EXPORT_SYMBOL(wcnss_free_power_on_lock);
++
++void wcnss_en_wlan_led_trigger(void)
++{
++	led_trigger_register_simple("wlan-indication-led",
++		&wlan_indication_led);
++}
+diff --git a/drivers/net/wireless/wcnss/wcnss_wlan.c b/drivers/net/wireless/wcnss/wcnss_wlan.c
+index 17a7c10..e892420 100644
+--- a/drivers/net/wireless/wcnss/wcnss_wlan.c
++++ b/drivers/net/wireless/wcnss/wcnss_wlan.c
+@@ -2927,6 +2927,10 @@ wcnss_trigger_config(struct platform_device *pdev)
+ 	/* Remove pm_qos request */
+ 	wcnss_disable_pc_remove_req();
+ 
++	if (of_property_read_bool(pdev->dev.of_node,
++		"qcom,wlan-indication-enabled"))
++		wcnss_en_wlan_led_trigger();
++
+ 	return 0;
+ 
+ fail_ioremap2:
+diff --git a/include/linux/wcnss_wlan.h b/include/linux/wcnss_wlan.h
+index 9d30984c..6cbb1f1 100644
+--- a/include/linux/wcnss_wlan.h
++++ b/include/linux/wcnss_wlan.h
+@@ -110,6 +110,7 @@ void wcnss_riva_dump_pmic_regs(void);
+ int wcnss_xo_auto_detect_enabled(void);
+ u32 wcnss_get_wlan_rx_buff_count(void);
+ int wcnss_wlan_iris_xo_mode(void);
++void wcnss_en_wlan_led_trigger(void);
+ #ifdef CONFIG_WCNSS_REGISTER_DUMP_ON_BITE
+ void wcnss_log_debug_regs_on_bite(void);
+ #else
+-- 
+1.8.2.1
+

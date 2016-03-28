@@ -1,0 +1,329 @@
+From 5270f7de647e23eb2c335adf261767e5097dd48b Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 26 Aug 2015 11:15:46 -0700
+Subject: [PATCH] 
+ frameworks-opt-net-wifi-01-Basic-Support-RSSI-for-60GHz-band-1312562
+
+Change-Id: Ie0c91c1836e8a98f376ac0f003d2a9d462ad690e
+---
+ .../server/wifi/WifiAutoJoinController.java        | 72 +++++++++-----------
+ .../com/android/server/wifi/WifiConfigStore.java   | 78 +++++++++++++++++++++-
+ .../com/android/server/wifi/WifiStateMachine.java  |  6 +-
+ 3 files changed, 114 insertions(+), 42 deletions(-)
+
+diff --git a/service/java/com/android/server/wifi/WifiAutoJoinController.java b/service/java/com/android/server/wifi/WifiAutoJoinController.java
+index 50bc374..9266812 100644
+--- a/service/java/com/android/server/wifi/WifiAutoJoinController.java
++++ b/service/java/com/android/server/wifi/WifiAutoJoinController.java
+@@ -584,6 +584,7 @@ public class WifiAutoJoinController {
+          * we prefer 2.4GHz otherwise.
+          * Note that 2.4GHz doesn't need a boost since at equal power the RSSI is typically
+          * at least 6-10 dB higher
++         * TODO: Handle comparison between 2.4/5 and 60G once joining 60G and legacy results will be available.
+          */
+         rssiBoost5 = rssiBoostFrom5GHzRssi(visibility.rssi5, dbg+"->");
+ 
+@@ -841,8 +842,8 @@ public class WifiAutoJoinController {
+         return order;
+     }
+ 
+-    boolean isBadCandidate(int rssi5, int rssi24) {
+-        return (rssi5 < -80 && rssi24 < -90);
++    boolean isBadCandidate(int rssi5, int rssi24,int rssi60) {
++        return (rssi5 < -80 && rssi24 < -90 && rssi60 < -100);
+     }
+ 
+     int compareWifiConfigurationsTop(WifiConfiguration a, WifiConfiguration b) {
+@@ -875,10 +876,11 @@ public class WifiAutoJoinController {
+         }
+         if (rssi
+                 > mWifiConfigStore.bandPreferenceBoostThreshold5) {
++            //TODO: Add support for 60GHz once such join is relevant
+             // Boost by 2 dB for each point
+             //    Start boosting at -65
+             //    Boost by 20 if above -55
+-            //    Boost by 40 if abore -45
++            //    Boost by 40 if above -45
+             int boost = mWifiConfigStore.bandPreferenceBoostFactor5
+                     *(rssi - mWifiConfigStore.bandPreferenceBoostThreshold5);
+             if (boost > 50) {
+@@ -1296,39 +1298,25 @@ public class WifiAutoJoinController {
+             // Try to unblacklist based on good visibility
+             if (config.visibility.rssi5 < mWifiConfigStore.thresholdUnblacklistThreshold5Soft
+                     && config.visibility.rssi24
+-                    < mWifiConfigStore.thresholdUnblacklistThreshold24Soft) {
++                    < mWifiConfigStore.thresholdUnblacklistThreshold24Soft
++					&& config.visibility.rssi60 < mWifiConfigStore.thresholdUnblacklistThreshold60Soft) {
+                 if (DBG) {
+-                    logDbg("attemptAutoJoin do not unblacklist due to low visibility "
+-                            + config.autoJoinStatus
+-                            + " key " + config.configKey(true)
+-                            + " rssi=(" + config.visibility.rssi24
+-                            + "," + config.visibility.rssi5
+-                            + ") num=(" + config.visibility.num24
+-                            + "," + config.visibility.num5 + ")");
++                    logMsgWithVisibilityDump(config,"attemptAutoJoin do not unblacklist due to low visibility ");
+                 }
+             } else if (config.visibility.rssi5 < mWifiConfigStore.thresholdUnblacklistThreshold5Hard
+                     && config.visibility.rssi24
+-                    < mWifiConfigStore.thresholdUnblacklistThreshold24Hard) {
++                    < mWifiConfigStore.thresholdUnblacklistThreshold24Hard
++					&& config.visibility.rssi60 < mWifiConfigStore.thresholdUnblacklistThreshold60Hard) {
+                 // If the network is simply temporary disabled, don't allow reconnect until
+                 // RSSI becomes good enough
+                 config.setAutoJoinStatus(config.autoJoinStatus - 1);
+                 if (DBG) {
+-                    logDbg("attemptAutoJoin good candidate seen, bumped soft -> status="
+-                            + config.autoJoinStatus
+-                            + " " + config.configKey(true) + " rssi=("
+-                            + config.visibility.rssi24 + "," + config.visibility.rssi5
+-                            + ") num=(" + config.visibility.num24
+-                            + "," + config.visibility.num5 + ")");
++                    logMsgWithVisibilityDump(config, "attemptAutoJoin good candidate seen, bumped soft -> status=");
+                 }
+             } else {
+                 config.setAutoJoinStatus(config.autoJoinStatus - 3);
+                 if (DBG) {
+-                    logDbg("attemptAutoJoin good candidate seen, bumped hard -> status="
+-                            + config.autoJoinStatus
+-                            + " " + config.configKey(true) + " rssi=("
+-                            + config.visibility.rssi24 + "," + config.visibility.rssi5
+-                            + ") num=(" + config.visibility.num24
+-                            + "," + config.visibility.num5 + ")");
++                    logMsgWithVisibilityDump(config, "attemptAutoJoin good candidate seen, bumped hard -> status=");
+                 }
+             }
+ 
+@@ -1336,12 +1324,7 @@ public class WifiAutoJoinController {
+                     WifiConfiguration.AUTO_JOIN_TEMPORARY_DISABLED) {
+                 // Network is blacklisted, skip
+                 if (DBG) {
+-                    logDbg("attemptAutoJoin skip blacklisted -> status="
+-                            + config.autoJoinStatus
+-                            + " " + config.configKey(true) + " rssi=("
+-                            + config.visibility.rssi24 + "," + config.visibility.rssi5
+-                            + ") num=(" + config.visibility.num24
+-                            + "," + config.visibility.num5 + ")");
++                    logMsgWithVisibilityDump(config, "attemptAutoJoin skip blacklisted -> status=");
+                 }
+                 continue;
+             }
+@@ -1367,14 +1350,11 @@ public class WifiAutoJoinController {
+             if ((config.visibility.rssi5 + boost)
+                         < mWifiConfigStore.thresholdInitialAutoJoinAttemptMin5RSSI
+                         && (config.visibility.rssi24 + boost)
+-                        < mWifiConfigStore.thresholdInitialAutoJoinAttemptMin24RSSI) {
++                        < mWifiConfigStore.thresholdInitialAutoJoinAttemptMin24RSSI
++                        && (config.visibility.rssi60 + boost)
++                        < mWifiConfigStore.thresholdInitialAutoJoinAttemptMin60RSSI) {
+                 if (DBG) {
+-                    logDbg("attemptAutoJoin skip due to low visibility -> status="
+-                            + config.autoJoinStatus
+-                            + " key " + config.configKey(true) + " rssi="
+-                            + config.visibility.rssi24 + ", " + config.visibility.rssi5
+-                            + " num=" + config.visibility.num24
+-                            + ", " + config.visibility.num5);
++                    logMsgWithVisibilityDump(config, "attemptAutoJoin skip due to low visibility -> status=");
+                 }
+ 
+                 // Don't try to autojoin a network that is too far but
+@@ -1468,10 +1448,12 @@ public class WifiAutoJoinController {
+         if (mNetworkScoreCache != null) {
+             int rssi5 = WifiConfiguration.INVALID_RSSI;
+             int rssi24 = WifiConfiguration.INVALID_RSSI;
+-            WifiConfiguration.Visibility visibility;
++            int rssi60 = WifiConfiguration.INVALID_RSSI;
++
+             if (candidate != null) {
+                 rssi5 = candidate.visibility.rssi5;
+                 rssi24 = candidate.visibility.rssi24;
++                rssi60 = candidate.visibility.rssi60;
+             }
+ 
+             // Get current date
+@@ -1480,7 +1462,7 @@ public class WifiAutoJoinController {
+             // The untrusted network with highest score
+             ScanResult untrustedCandidate = null;
+             // Look for untrusted scored network only if the current candidate is bad
+-            if (isBadCandidate(rssi24, rssi5)) {
++            if (isBadCandidate(rssi24, rssi5, rssi60)) {
+                 for (ScanResult result : scanResultCache.values()) {
+                     int rssiBoost = 0;
+                     // We look only at untrusted networks with a valid SSID
+@@ -1684,5 +1666,17 @@ public class WifiAutoJoinController {
+         }
+         if (VDBG) logDbg("Done attemptAutoJoin status=" + Integer.toString(networkSwitchType));
+     }
++
++    private void logMsgWithVisibilityDump(WifiConfiguration config, String msg) {
++        logDbg(msg
++                + config.autoJoinStatus
++                + " key " + config.configKey(true)
++                + " rssi=(" + config.visibility.rssi24
++                + "," + config.visibility.rssi5
++                + "," + config.visibility.rssi60
++                + ") num=(" + config.visibility.num24
++                + "," + config.visibility.num5
++                + "," + config.visibility.num60 + ")");
++    }
+ }
+ 
+diff --git a/service/java/com/android/server/wifi/WifiConfigStore.java b/service/java/com/android/server/wifi/WifiConfigStore.java
+index 76255d4..beeddde 100755
+--- a/service/java/com/android/server/wifi/WifiConfigStore.java
++++ b/service/java/com/android/server/wifi/WifiConfigStore.java
+@@ -212,6 +212,10 @@ public class WifiConfigStore extends IpConfigStore {
+             = "THRESHOLD_UNBLACKLIST_HARD_24G:  ";
+     private static final String THRESHOLD_UNBLACKLIST_SOFT_24G_KEY
+             = "THRESHOLD_UNBLACKLIST_SOFT_24G:  ";
++    private static final String THRESHOLD_UNBLACKLIST_HARD_60G_KEY
++            = "THRESHOLD_UNBLACKLIST_HARD_60G:  ";
++    private static final String THRESHOLD_UNBLACKLIST_SOFT_60G_KEY
++            = "THRESHOLD_UNBLACKLIST_SOFT_60G:  ";
+     private static final String THRESHOLD_GOOD_RSSI_5_KEY
+             = "THRESHOLD_GOOD_RSSI_5:  ";
+     private static final String THRESHOLD_LOW_RSSI_5_KEY
+@@ -224,6 +228,12 @@ public class WifiConfigStore extends IpConfigStore {
+             = "THRESHOLD_LOW_RSSI_24:  ";
+     private static final String THRESHOLD_BAD_RSSI_24_KEY
+             = "THRESHOLD_BAD_RSSI_24:  ";
++    private static final String THRESHOLD_GOOD_RSSI_60_KEY
++            = "THRESHOLD_GOOD_RSSI_60:  ";
++    private static final String THRESHOLD_LOW_RSSI_60_KEY
++            = "THRESHOLD_LOW_RSSI_60:  ";
++    private static final String THRESHOLD_BAD_RSSI_60_KEY
++            = "THRESHOLD_BAD_RSSI_60:  ";
+ 
+     private static final String THRESHOLD_MAX_TX_PACKETS_FOR_NETWORK_SWITCHING_KEY
+             = "THRESHOLD_MAX_TX_PACKETS_FOR_NETWORK_SWITCHING:   ";
+@@ -310,13 +320,17 @@ public class WifiConfigStore extends IpConfigStore {
+             = WifiConfiguration.INITIAL_AUTO_JOIN_ATTEMPT_MIN_5;
+     public int thresholdInitialAutoJoinAttemptMin24RSSI
+             = WifiConfiguration.INITIAL_AUTO_JOIN_ATTEMPT_MIN_24;
+-
++    public int thresholdInitialAutoJoinAttemptMin60RSSI
++            = WifiConfiguration.INITIAL_AUTO_JOIN_ATTEMPT_MIN_60;
+     public int thresholdBadRssi5 = WifiConfiguration.BAD_RSSI_5;
+     public int thresholdLowRssi5 = WifiConfiguration.LOW_RSSI_5;
+     public int thresholdGoodRssi5 = WifiConfiguration.GOOD_RSSI_5;
+     public int thresholdBadRssi24 = WifiConfiguration.BAD_RSSI_24;
+     public int thresholdLowRssi24 = WifiConfiguration.LOW_RSSI_24;
+     public int thresholdGoodRssi24 = WifiConfiguration.GOOD_RSSI_24;
++    public int thresholdBadRssi60 = WifiConfiguration.BAD_RSSI_60;
++    public int thresholdLowRssi60 = WifiConfiguration.LOW_RSSI_60;
++    public int thresholdGoodRssi60 = WifiConfiguration.GOOD_RSSI_60;
+ 
+     public int associatedFullScanBackoff = 12; // Will be divided by 8 by WifiStateMachine
+     public int associatedFullScanMaxIntervalMilli = 300000;
+@@ -349,6 +363,10 @@ public class WifiConfigStore extends IpConfigStore {
+             = WifiConfiguration.UNBLACKLIST_THRESHOLD_24_HARD;
+     public int thresholdUnblacklistThreshold24Soft
+             = WifiConfiguration.UNBLACKLIST_THRESHOLD_24_SOFT;
++    public int thresholdUnblacklistThreshold60Hard
++            = WifiConfiguration.UNBLACKLIST_THRESHOLD_60_HARD;
++    public int thresholdUnblacklistThreshold60Soft
++            = WifiConfiguration.UNBLACKLIST_THRESHOLD_60_SOFT;
+     public int enableVerboseLogging = 0;
+     boolean showNetworks = true; // TODO set this back to false, used for debugging 17516271
+ 
+@@ -638,7 +656,8 @@ public class WifiConfigStore extends IpConfigStore {
+                 continue;
+             }
+             if (config.visibility.rssi5 == WifiConfiguration.INVALID_RSSI &&
+-                    config.visibility.rssi24 == WifiConfiguration.INVALID_RSSI) {
++                    config.visibility.rssi24 == WifiConfiguration.INVALID_RSSI &&
++                    config.visibility.rssi60 == WifiConfiguration.INVALID_RSSI) {
+                 continue;
+             }
+             if (networks == null)
+@@ -2257,6 +2276,28 @@ public class WifiConfigStore extends IpConfigStore {
+                         Log.d(TAG,"readAutoJoinConfig: incorrect format :" + key);
+                     }
+                 }
++                if (key.startsWith(THRESHOLD_UNBLACKLIST_HARD_60G_KEY)) {
++                    String st = key.replace(THRESHOLD_UNBLACKLIST_HARD_60G_KEY, "");
++                    st = st.replace(SEPARATOR_KEY, "");
++                    try {
++                        thresholdUnblacklistThreshold60Hard = Integer.parseInt(st);
++                        Log.d(TAG,"readAutoJoinConfig: thresholdUnblacklistThreshold60Hard = "
++                            + Integer.toString(thresholdUnblacklistThreshold60Hard));
++                    } catch (NumberFormatException e) {
++                        Log.d(TAG,"readAutoJoinConfig: incorrect format :" + key);
++                    }
++                }
++                if (key.startsWith(THRESHOLD_UNBLACKLIST_SOFT_60G_KEY)) {
++                    String st = key.replace(THRESHOLD_UNBLACKLIST_SOFT_60G_KEY, "");
++                    st = st.replace(SEPARATOR_KEY, "");
++                    try {
++                        thresholdUnblacklistThreshold60Soft = Integer.parseInt(st);
++                        Log.d(TAG,"readAutoJoinConfig: thresholdUnblacklistThreshold60Soft = "
++                            + Integer.toString(thresholdUnblacklistThreshold60Soft));
++                    } catch (NumberFormatException e) {
++                        Log.d(TAG,"readAutoJoinConfig: incorrect format :" + key);
++                    }
++                }
+ 
+                 if (key.startsWith(THRESHOLD_GOOD_RSSI_5_KEY)) {
+                     String st = key.replace(THRESHOLD_GOOD_RSSI_5_KEY, "");
+@@ -2325,6 +2366,39 @@ public class WifiConfigStore extends IpConfigStore {
+                         Log.d(TAG,"readAutoJoinConfig: incorrect format :" + key);
+                     }
+                 }
++                if (key.startsWith(THRESHOLD_GOOD_RSSI_60_KEY)) {
++                    String st = key.replace(THRESHOLD_GOOD_RSSI_60_KEY, "");
++                    st = st.replace(SEPARATOR_KEY, "");
++                    try {
++                        thresholdGoodRssi60 = Integer.parseInt(st);
++                        Log.d(TAG,"readAutoJoinConfig: thresholdGoodRssi60 = "
++                            + Integer.toString(thresholdGoodRssi60));
++                    } catch (NumberFormatException e) {
++                        Log.d(TAG,"readAutoJoinConfig: incorrect format :" + key);
++                    }
++                }
++                if (key.startsWith(THRESHOLD_LOW_RSSI_60_KEY)) {
++                    String st = key.replace(THRESHOLD_LOW_RSSI_60_KEY, "");
++                    st = st.replace(SEPARATOR_KEY, "");
++                    try {
++                        thresholdLowRssi60 = Integer.parseInt(st);
++                        Log.d(TAG,"readAutoJoinConfig: thresholdLowRssi60 = "
++                            + Integer.toString(thresholdLowRssi60));
++                    } catch (NumberFormatException e) {
++                        Log.d(TAG,"readAutoJoinConfig: incorrect format :" + key);
++                    }
++                }
++                if (key.startsWith(THRESHOLD_BAD_RSSI_60_KEY)) {
++                    String st = key.replace(THRESHOLD_BAD_RSSI_60_KEY, "");
++                    st = st.replace(SEPARATOR_KEY, "");
++                    try {
++                        thresholdBadRssi60 = Integer.parseInt(st);
++                        Log.d(TAG,"readAutoJoinConfig: thresholdBadRssi60 = "
++                            + Integer.toString(thresholdBadRssi60));
++                    } catch (NumberFormatException e) {
++                        Log.d(TAG,"readAutoJoinConfig: incorrect format :" + key);
++                    }
++                }
+ 
+                 if (key.startsWith(THRESHOLD_MAX_TX_PACKETS_FOR_NETWORK_SWITCHING_KEY)) {
+                     String st = key.replace(THRESHOLD_MAX_TX_PACKETS_FOR_NETWORK_SWITCHING_KEY, "");
+diff --git a/service/java/com/android/server/wifi/WifiStateMachine.java b/service/java/com/android/server/wifi/WifiStateMachine.java
+index d2f8f29..f723db5 100644
+--- a/service/java/com/android/server/wifi/WifiStateMachine.java
++++ b/service/java/com/android/server/wifi/WifiStateMachine.java
+@@ -3384,9 +3384,13 @@ public class WifiStateMachine extends StateMachine {
+                     try {
+                         level = Integer.parseInt(line.substring(LEVEL_STR.length()));
+                         /* some implementations avoid negative values by adding 256
++                         * some other report signal level in positive percent [0,100]
+                          * so we need to adjust for that here.
+                          */
+-                        if (level > 0) level -= 256;
++                        //Assuming this code not handling super HW capable to report RSSI = -156
++                        if (level > 100) level -= 256;
++                        else if(level > 0) level = -101 + level;//so 100% = -1 20% = -81
++
+                     } catch(NumberFormatException e) {
+                         level = 0;
+                     }
+-- 
+1.8.2.1
+

@@ -1,0 +1,207 @@
+From 645045674a705a4b415e271c052f9cf0025af356 Mon Sep 17 00:00:00 2001
+From: Shimrit Malichi <smalichi@codeaurora.org>
+Date: Mon, 23 Jun 2014 08:57:05 +0300
+Subject: [PATCH 03/11] ARM: dts: msm: camera device tree changes for
+ Dragonboard APQ8994
+
+Add Dragonboard device tree for sensor slots, actuators with pinctrl.
+
+Change-Id: I3a6185cdcc3b2ea54dc8d60cd2e498b29be8830c
+Signed-off-by: Shimrit Malichi <smalichi@codeaurora.org>
+---
+ .../qcom/apq8094-camera-sensor-dragonboard.dtsi    | 170 +++++++++++++++++++++
+ arch/arm/boot/dts/qcom/apq8094-v1-dragonboard.dts  |   1 +
+ 2 files changed, 171 insertions(+)
+ create mode 100644 arch/arm/boot/dts/qcom/apq8094-camera-sensor-dragonboard.dtsi
+
+diff --git a/arch/arm/boot/dts/qcom/apq8094-camera-sensor-dragonboard.dtsi b/arch/arm/boot/dts/qcom/apq8094-camera-sensor-dragonboard.dtsi
+new file mode 100644
+index 0000000..d3b3fd0
+--- /dev/null
++++ b/arch/arm/boot/dts/qcom/apq8094-camera-sensor-dragonboard.dtsi
+@@ -0,0 +1,170 @@
++/*
++ * Copyright (c) 2014, The Linux Foundation. All rights reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 and
++ * only version 2 as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ */
++
++&cci {
++	actuator0: qcom,actuator@0 {
++		cell-index = <0>;
++		reg = <0x0>;
++		compatible = "qcom,actuator";
++		qcom,cci-master = <0>;
++		cam_vaf-supply = <&pm8994_l23>;
++		qcom,cam-vreg-name = "cam_vaf";
++		qcom,cam-vreg-type = <0>;
++		qcom,cam-vreg-min-voltage = <2800000>;
++		qcom,cam-vreg-max-voltage = <2800000>;
++		qcom,cam-vreg-op-mode = <100000>;
++	};
++
++	actuator1: qcom,actuator@1 {
++		cell-index = <1>;
++		reg = <0x1>;
++		compatible = "qcom,actuator";
++		qcom,cci-master = <0>;
++		cam_vaf-supply = <&pm8994_l19>;
++		qcom,cam-vreg-name = "cam_vaf";
++		qcom,cam-vreg-type = <0>;
++		qcom,cam-vreg-min-voltage = <2800000>;
++		qcom,cam-vreg-max-voltage = <2800000>;
++		qcom,cam-vreg-op-mode = <100000>;
++	};
++
++	actuator2: qcom,actuator@2 {
++		cell-index = <2>;
++		reg = <0x2>;
++		compatible = "qcom,actuator";
++		qcom,cci-master = <0>;
++		cam_vaf-supply = <&pm8994_l23>;
++		qcom,cam-vreg-name = "cam_vaf";
++		qcom,cam-vreg-type = <0>;
++		qcom,cam-vreg-min-voltage = <2800000>;
++		qcom,cam-vreg-max-voltage = <2800000>;
++		qcom,cam-vreg-op-mode = <100000>;
++	};
++
++	qcom,camera@0 {
++		cell-index = <0>;
++		compatible = "qcom,camera";
++		reg = <0x0>;
++		qcom,csiphy-sd-index = <0>;
++		qcom,csid-sd-index = <0>;
++		qcom,mount-angle = <90>;
++		qcom,actuator-src = <&actuator0>;
++		cam_vdig-supply = <&pm8994_l3>;
++		cam_vio-supply = <&pm8994_lvs1>;
++		cam_vana-supply = <&pm8994_l17>;
++		qcom,cam-vreg-name = "cam_vdig", "cam_vio", "cam_vana";
++		qcom,cam-vreg-type = <0 1 0>;
++		qcom,cam-vreg-min-voltage = <1200000 0 2800000>;
++		qcom,cam-vreg-max-voltage = <1200000 0 2800000>;
++		qcom,cam-vreg-op-mode = <105000 0 80000>;
++		qcom,gpio-no-mux = <0>;
++		pinctrl-names = "cam_default", "cam_suspend";
++		pinctrl-0 = <&cam_sensor_mclk0_active &cam_sensor_rear_active>;
++		pinctrl-1 = <&cam_sensor_mclk0_suspend &cam_sensor_rear_suspend>;
++		gpios = <&msm_gpio 13 0>,
++			<&msm_gpio 92 0>,
++			<&msm_gpio 91 0>;
++		qcom,gpio-reset = <1>;
++		qcom,gpio-standby = <2>;
++		qcom,gpio-req-tbl-num = <0 1 2>;
++		qcom,gpio-req-tbl-flags = <1 0 0>;
++		qcom,gpio-req-tbl-label = "CAMIF_MCLK0",
++					  "CAM_RESET0",
++					  "CAM_STANDBY0";
++		qcom,sensor-position = <0>;
++		qcom,sensor-mode = <0>;
++		qcom,cci-master = <0>;
++		status = "ok";
++		clocks = <&clock_mmss clk_mclk0_clk_src>,
++				<&clock_mmss clk_camss_mclk0_clk>;
++		clock-names = "cam_src_clk", "cam_clk";
++	};
++
++	qcom,camera@1 {
++		cell-index = <1>;
++		compatible = "qcom,camera";
++		reg = <0x1>;
++		qcom,csiphy-sd-index = <1>;
++		qcom,csid-sd-index = <1>;
++		qcom,mount-angle = <90>;
++		qcom,actuator-src = <&actuator1>;
++		cam_vdig-supply = <&pm8994_l3>;
++		cam_vio-supply = <&pm8994_lvs1>;
++		cam_vana-supply = <&pm8994_l10>;
++		qcom,cam-vreg-name = "cam_vdig", "cam_vio", "cam_vana";
++		qcom,cam-vreg-type = <0 1 0>;
++		qcom,cam-vreg-min-voltage = <1200000 0 2800000>;
++		qcom,cam-vreg-max-voltage = <1200000 0 2800000>;
++		qcom,cam-vreg-op-mode = <105000 0 80000>;
++		qcom,gpio-no-mux = <0>;
++		pinctrl-names = "cam_default", "cam_suspend";
++		pinctrl-0 = <&cam_sensor_mclk1_active &cam_sensor_rear2_active>;
++		pinctrl-1 = <&cam_sensor_mclk1_suspend &cam_sensor_rear2_suspend>;
++		gpios = <&msm_gpio 14 0>,
++			<&msm_gpio 94 0>,
++			<&msm_gpio 93 0>;
++		qcom,gpio-reset = <1>;
++		qcom,gpio-standby = <2>;
++		qcom,gpio-req-tbl-num = <0 1 2>;
++		qcom,gpio-req-tbl-flags = <1 0 0>;
++		qcom,gpio-req-tbl-label = "CAMIF_MCLK1",
++					  "CAM_RESET1",
++					  "CAM_STANDBY1";
++		qcom,sensor-position = <0>;
++		qcom,sensor-mode = <0>;
++		qcom,cci-master = <0>;
++		status = "ok";
++		clocks = <&clock_mmss clk_mclk1_clk_src>,
++			<&clock_mmss clk_camss_mclk1_clk>;
++		clock-names = "cam_src_clk", "cam_clk";
++	};
++
++	qcom,camera@2 {
++		cell-index = <2>;
++		compatible = "qcom,camera";
++		reg = <0x02>;
++		qcom,csiphy-sd-index = <2>;
++		qcom,csid-sd-index = <2>;
++		qcom,mount-angle = <90>;
++		qcom,actuator-src = <&actuator2>;
++		cam_vdig-supply = <&pm8994_l3>;
++		cam_vio-supply = <&pm8994_lvs1>;
++		cam_vana-supply = <&pm8994_l29>;
++		qcom,cam-vreg-name = "cam_vdig", "cam_vio", "cam_vana";
++		qcom,cam-vreg-type = <0 1 0>;
++		qcom,cam-vreg-min-voltage = <1200000 0 2800000>;
++		qcom,cam-vreg-max-voltage = <1200000 0 2800000>;
++		qcom,cam-vreg-op-mode = <105000 0 80000>;
++		qcom,gpio-no-mux = <0>;
++		pinctrl-names = "cam_default", "cam_suspend";
++		pinctrl-0 = <&cam_sensor_mclk2_active &cam_sensor_front_active>;
++		pinctrl-1 = <&cam_sensor_mclk2_suspend &cam_sensor_front_suspend>;
++		gpios = <&msm_gpio 15 0>,
++			<&msm_gpio 104 0>,
++			<&msm_gpio 105 0>;
++		qcom,gpio-reset = <1>;
++		qcom,gpio-standby = <2>;
++		qcom,gpio-req-tbl-num = <0 1 2>;
++		qcom,gpio-req-tbl-flags = <1 0 0>;
++		qcom,gpio-req-tbl-label = "CAMIF_MCLK2",
++					  "CAM_RESET2",
++					  "CAM_STANDBY2";
++		qcom,sensor-position = <1>;
++		qcom,sensor-mode = <0>;
++		qcom,cci-master = <0>;
++		status = "ok";
++		clocks = <&clock_mmss clk_mclk2_clk_src>,
++			<&clock_mmss clk_camss_mclk2_clk>;
++		clock-names = "cam_src_clk", "cam_clk";
++	};
++};
+diff --git a/arch/arm/boot/dts/qcom/apq8094-v1-dragonboard.dts b/arch/arm/boot/dts/qcom/apq8094-v1-dragonboard.dts
+index af4cbd8..56b5fa2 100644
+--- a/arch/arm/boot/dts/qcom/apq8094-v1-dragonboard.dts
++++ b/arch/arm/boot/dts/qcom/apq8094-v1-dragonboard.dts
+@@ -15,6 +15,7 @@
+ 
+ #include "apq8094-v1.dtsi"
+ #include "apq8094-dragonboard.dtsi"
++#include "apq8094-camera-sensor-dragonboard.dtsi"
+ 
+ / {
+ 	model = "Qualcomm Technologies, Inc. APQ8094 Dragonboard";
+-- 
+1.8.2.1
+

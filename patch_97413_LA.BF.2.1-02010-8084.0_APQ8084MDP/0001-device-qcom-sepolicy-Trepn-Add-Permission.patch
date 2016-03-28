@@ -1,0 +1,98 @@
+From 3fb90a8a67c5866a20f8d43f824f0b139b5a1788 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 25 Mar 2015 16:02:10 -0700
+Subject: [PATCH] device-qcom-sepolicy-Trepn-Add-Permission
+
+Change-Id: Ibc01e12c35d4bd9c602301b50d5c130cc849fdd4
+---
+ Android.mk                |  3 ++-
+ common/app.te             |  6 ++++++
+ common/device.te          |  3 +++
+ common/file_contexts      |  2 ++
+ common/profiler_daemon.te | 15 +++++++++++++++
+ 5 files changed, 28 insertions(+), 1 deletion(-)
+ create mode 100644 common/profiler_daemon.te
+
+diff --git a/Android.mk b/Android.mk
+index 4601d70..1e110ce 100755
+--- a/Android.mk
++++ b/Android.mk
+@@ -92,7 +92,8 @@ BOARD_SEPOLICY_UNION := \
+        mediaserver_test.te \
+        hbtp.te \
+        kernel.te \
+-       vold.te
++       vold.te \
++       profiler_daemon.te
+ 
+ # Compile sensor pilicy only for SSC targets
+ SSC_TARGET_LIST := apq8084
+diff --git a/common/app.te b/common/app.te
+index ac49f97..61f178d 100644
+--- a/common/app.te
++++ b/common/app.te
+@@ -7,3 +7,9 @@ unix_socket_connect(appdomain, dpmwrapper, dpmd)
+ unix_socket_connect(appdomain, qlogd, qlogd)
+ #Allow all apps to open and send ioctl to qdsp device
+ allow appdomain qdsp_device:chr_file r_file_perms;
++
++# access to profiler_daemon
++allow appdomain profiler_daemon:unix_stream_socket connectto;
++allow appdomain self:tcp_socket { bind create setopt listen write read getopt connect accept getattr };
++allow appdomain node:tcp_socket node_bind;
++allow appdomain node:udp_socket node_bind;
+diff --git a/common/device.te b/common/device.te
+index 081b8ad..fd3c3f6 100755
+--- a/common/device.te
++++ b/common/device.te
+@@ -91,3 +91,6 @@ type voice_device, dev_type;
+ 
+ #Define system health monitor devices
+ type system_health_monitor_device, dev_type;
++
++#Define epm_adc device
++type epm_device, dev_type;
+diff --git a/common/file_contexts b/common/file_contexts
+index 85c7efb..89768c7 100644
+--- a/common/file_contexts
++++ b/common/file_contexts
+@@ -60,6 +60,7 @@
+ /dev/coresight-tmc-etr                          u:object_r:qdss_device:s0
+ /dev/coresight-tmc-etr-stream                   u:object_r:qdss_device:s0
+ /dev/system_health_monitor                      u:object_r:system_health_monitor_device:s0
++/dev/epm_adc                                    u:object_r:epm_device:s0
+ 
+ ###################################
+ # Dev socket nodes
+@@ -165,6 +166,7 @@
+ /system/bin/sapd                                u:object_r:sapd_exec:s0
+ /system/bin/btsnoop                             u:object_r:btsnoop_exec:s0
+ /system/bin/dun-server                          u:object_r:dun-server_exec:s0
++/system/bin/profiler_daemon                     u:object_r:profiler_daemon_exec:s0
+ 
+ ###################################
+ # sysfs files
+diff --git a/common/profiler_daemon.te b/common/profiler_daemon.te
+new file mode 100644
+index 0000000..d48b569
+--- /dev/null
++++ b/common/profiler_daemon.te
+@@ -0,0 +1,15 @@
++type profiler_daemon, domain;
++type profiler_daemon_exec, exec_type, file_type;
++
++init_daemon_domain(profiler_daemon)
++
++# Allow profiler_daemon set cpu online
++allow profiler_daemon sysfs_cpu_online:file rw_file_perms;
++
++# Allow socket creation
++allow profiler_daemon self:socket create_socket_perms;
++
++# Allow communication with epm_adc
++allow profiler_daemon epm_device:chr_file rw_file_perms;
++
++allow profiler_daemon sysfs:file write;
+-- 
+1.8.2.1
+

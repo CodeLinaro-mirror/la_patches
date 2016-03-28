@@ -1,0 +1,127 @@
+From 996a71e4b9630481377f15a6901f6ec1a6781380 Mon Sep 17 00:00:00 2001
+From: Ramesh Bura <crbura@codeaurora.org>
+Date: Mon, 16 Nov 2015 18:34:37 +0530
+Subject: [PATCH 4/5] ttyHS4 uart and USB lilliput touch changes
+
+Change-Id: Ia16df36bdd19fdff391550eed697eca32e1e1ad3
+Signed-off-by: Ramesh Bura <crbura@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/msm8916.dtsi | 4 +++-
+ arch/arm64/configs/msm_defconfig    | 3 +++
+ drivers/hid/Kconfig                 | 7 +++++++
+ drivers/hid/hid-core.c              | 3 +++
+ drivers/hid/hid-ids.h               | 6 ++++++
+ drivers/hid/hid-multitouch.c        | 6 ++++++
+ 6 files changed, 28 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/qcom/msm8916.dtsi b/arch/arm/boot/dts/qcom/msm8916.dtsi
+index fe798da..2545c21 100644
+--- a/arch/arm/boot/dts/qcom/msm8916.dtsi
++++ b/arch/arm/boot/dts/qcom/msm8916.dtsi
+@@ -50,6 +50,7 @@
+ 		i2c5 = &i2c_5; /* I2C5 controller device */
+ 		i2c6 = &i2c_6; /* I2C6 NFC qup6 device */
+ 		i2c4 = &i2c_4; /* I2C4 controller device */
++                uart4 = &blsp1_uart1;
+ 	};
+ 
+ 	cpus {
+@@ -445,7 +446,8 @@
+ 		pinctrl-names = "sleep", "default";
+ 		pinctrl-0 = <&hsuart_sleep>;
+ 		pinctrl-1 = <&hsuart_active>;
+-		status = "disabled";
++		/*status = "disabled";*/
++		status = "ok";
+ 	};
+ 
+ 	blsp1_uart2: serial@78b0000 {
+diff --git a/arch/arm64/configs/msm_defconfig b/arch/arm64/configs/msm_defconfig
+index a1d36e4..192b310 100644
+--- a/arch/arm64/configs/msm_defconfig
++++ b/arch/arm64/configs/msm_defconfig
+@@ -362,12 +362,15 @@ CONFIG_SND=y
+ CONFIG_SND_USB_AUDIO=y
+ CONFIG_SND_SOC=y
+ CONFIG_SND_SOC_MSM8X16=y
++CONFIG_HIDRAW=y
+ CONFIG_UHID=y
+ CONFIG_HID_APPLE=y
+ CONFIG_HID_ELECOM=y
+ CONFIG_HID_MAGICMOUSE=y
+ CONFIG_HID_MICROSOFT=y
+ CONFIG_HID_MULTITOUCH=y
++CONFIG_HID_PID=y
++CONFIG_USB_HIDDEV=y
+ CONFIG_USB=y
+ CONFIG_USB_ANNOUNCE_NEW_DEVICES=y
+ CONFIG_USB_MON=y
+diff --git a/drivers/hid/Kconfig b/drivers/hid/Kconfig
+index d3d36f95..e556ef3 100644
+--- a/drivers/hid/Kconfig
++++ b/drivers/hid/Kconfig
+@@ -748,6 +748,13 @@ config HID_ZYDACRON
+ 	---help---
+ 	Support for Zydacron remote control.
+ 
++config USB_HID_LILLIPUT_MULTITOUCH
++        tristate "Lilliput Capcitive TouchScreen control support"
++        depends on USB_HID
++        default y
++        ---help---
++        Support for Lilliput Capcitive Touchscreen.
++
+ config HID_SENSOR_HUB
+ 	tristate "HID Sensors framework support"
+ 	depends on HID
+diff --git a/drivers/hid/hid-core.c b/drivers/hid/hid-core.c
+index 81d0e6e..58a64e4 100644
+--- a/drivers/hid/hid-core.c
++++ b/drivers/hid/hid-core.c
+@@ -1830,6 +1830,9 @@ static const struct hid_device_id hid_have_special_driver[] = {
+ 	{ HID_USB_DEVICE(USB_VENDOR_ID_ZEROPLUS, 0x0005) },
+ 	{ HID_USB_DEVICE(USB_VENDOR_ID_ZEROPLUS, 0x0030) },
+ 	{ HID_USB_DEVICE(USB_VENDOR_ID_ZYDACRON, USB_DEVICE_ID_ZYDACRON_REMOTE_CONTROL) },
++        #ifdef CONFIG_USB_HID_LILLIPUT_MULTITOUCH
++        { HID_USB_DEVICE(USB_VENDOR_ID_LILLIPUT, USB_PROD_ID_LILLIPUT) },
++        #endif
+ 
+ 	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_MICROSOFT, USB_DEVICE_ID_MS_PRESENTER_8K_BT) },
+ 	{ HID_BLUETOOTH_DEVICE(USB_VENDOR_ID_NINTENDO, USB_DEVICE_ID_NINTENDO_WIIMOTE) },
+diff --git a/drivers/hid/hid-ids.h b/drivers/hid/hid-ids.h
+index a1e431f..d07074c 100644
+--- a/drivers/hid/hid-ids.h
++++ b/drivers/hid/hid-ids.h
+@@ -915,6 +915,12 @@
+ #define USB_VENDOR_ID_PRIMAX	0x0461
+ #define USB_DEVICE_ID_PRIMAX_KEYBOARD	0x4e05
+ 
++#ifdef CONFIG_USB_HID_LILLIPUT_MULTITOUCH
++/*Lilliput Capacitive TouchScreen */
++#define USB_VENDOR_ID_LILLIPUT  0x1391
++#define USB_PROD_ID_LILLIPUT    0x2112
++#endif
++
+ #define USB_VENDOR_ID_SIS	0x0457
+ #define USB_DEVICE_ID_SIS_TS	0x1013
+ 
+diff --git a/drivers/hid/hid-multitouch.c b/drivers/hid/hid-multitouch.c
+index fb9ac12..00f667a 100644
+--- a/drivers/hid/hid-multitouch.c
++++ b/drivers/hid/hid-multitouch.c
+@@ -1118,6 +1118,12 @@ static const struct hid_device_id mt_devices[] = {
+ 	{  .driver_data = MT_CLS_NSMU,
+ 		MT_USB_DEVICE(USB_VENDOR_ID_CHUNGHWAT,
+ 			USB_DEVICE_ID_CHUNGHWAT_MULTITOUCH) },
++        #ifdef CONFIG_USB_HID_LILLIPUT_MULTITOUCH
++        /* Lilliput multitouch panels */
++        {  .driver_data = MT_CLS_DEFAULT,
++                HID_USB_DEVICE(USB_VENDOR_ID_LILLIPUT,
++                        USB_PROD_ID_LILLIPUT) },
++        #endif
+ 
+ 	/* CVTouch panels */
+ 	{ .driver_data = MT_CLS_NSMU,
+-- 
+1.8.2.1
+

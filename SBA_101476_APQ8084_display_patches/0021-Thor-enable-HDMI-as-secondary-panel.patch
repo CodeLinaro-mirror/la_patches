@@ -1,0 +1,44 @@
+From a4a538ab03bda0810a465c75aa591010365e131a Mon Sep 17 00:00:00 2001
+From: Mike Mager <mikemager@codeaurora.org>
+Date: Tue, 21 Oct 2014 14:41:53 -0700
+Subject: [PATCH] Thor: enable HDMI as secondary panel
+
+The HDMI panel incorrectly thought it was to use fb0. Move it to fb1
+and tell the driver it is no longer the primary panel. This fixes the
+issue of taking almost 2 minutes to boot.
+
+Change-Id: I9375b9fc32189ac598b35144601535324a2e89bb
+---
+ arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-720p.dtsi | 5 +++++
+ arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-svga.dtsi | 5 +++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-720p.dtsi b/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-720p.dtsi
+index 2d33b9e..695b1ee 100644
+--- a/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-720p.dtsi
++++ b/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-720p.dtsi
+@@ -27,3 +27,8 @@
+ &mdss_mdp {
+ 	qcom,mdss-pref-prim-intf = "dsi";
+ };
++
++&mdss_hdmi_tx {
++	qcom,primary_panel = <0>;
++	qcom,mdss-fb-map = <&mdss_fb1>;
++};
+diff --git a/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-svga.dtsi b/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-svga.dtsi
+index 3c31edf..dc75d94 100644
+--- a/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-svga.dtsi
++++ b/arch/arm/boot/dts/qcom/apq8084-display-sbc-thor-svga.dtsi
+@@ -27,3 +27,8 @@
+ &mdss_mdp {
+ 	qcom,mdss-pref-prim-intf = "dsi";
+ };
++
++&mdss_hdmi_tx {
++	qcom,primary_panel = <0>;
++	qcom,mdss-fb-map = <&mdss_fb1>;
++};
+-- 
+1.8.2.1
+

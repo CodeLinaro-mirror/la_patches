@@ -1,0 +1,97 @@
+From 88243f906a11ada04690e2ce7dae4ef5723b3ae1 Mon Sep 17 00:00:00 2001
+From: Rahul Sharma <sharah@codeaurora.org>
+Date: Thu, 9 Oct 2014 09:28:50 +0000
+Subject: [PATCH 4/5] init: restorecon_recursive speed boot time
+
+This change reduces the delay to 1.2 seconds
+when restoring security context for sys directory.
+
+-Avoid double stat call when using nftw().
+-Avoid the repeated calls to is_selinux_enabled().
+-Avoid calling lsetfilecon if the file is already
+properly labled.
+
+Change-Id: I0751c70a10728817ad6d189c51380f416bcef391
+---
+ init/util.c | 45 ++++++++++++++++++++++++++++++++++-----------
+ 1 file changed, 34 insertions(+), 11 deletions(-)
+
+diff --git a/init/util.c b/init/util.c
+index 1908b3a..27d1aeb 100644
+--- a/init/util.c
++++ b/init/util.c
+@@ -493,31 +493,50 @@ int make_dir(const char *path, mode_t mode)
+     return rc;
+ }
+ 
+-int restorecon(const char *pathname)
++static int restorecon_sb(const char *pathname, const struct stat *sb)
+ {
+     char *secontext = NULL;
+-    struct stat sb;
++    char *oldsecontext = NULL;
+     int i;
+ 
+-    if (is_selinux_enabled() <= 0 || !sehandle)
+-        return 0;
+-
+-    if (lstat(pathname, &sb) < 0)
+-        return -errno;
+-    if (selabel_lookup(sehandle, &secontext, pathname, sb.st_mode) < 0)
++    if (selabel_lookup(sehandle, &secontext, pathname, sb->st_mode) < 0)
+         return -errno;
+-    if (lsetfilecon(pathname, secontext) < 0) {
++
++    if (lgetfilecon(pathname, &oldsecontext) < 0) {
+         freecon(secontext);
+         return -errno;
+     }
++
++    if (strcmp(oldsecontext, secontext) != 0) {
++        if (lsetfilecon(pathname, secontext) < 0) {
++            freecon(oldsecontext);
++            freecon(secontext);
++            return -errno;
++        }
++    }
++    freecon(oldsecontext);
+     freecon(secontext);
+     return 0;
+ }
+ 
++int restorecon(const char *pathname)
++{
++    struct stat sb;
++
++    if (is_selinux_enabled() <= 0 || !sehandle)
++        return 0;
++
++    if (lstat(pathname, &sb) < 0)
++        return -errno;
++
++    return restorecon_sb(pathname, &sb);
++}
++
+ static int nftw_restorecon(const char* filename, const struct stat* statptr,
+-    int fileflags, struct FTW* pftw)
++      int fileflags __attribute__((unused)),
++	struct FTW* pftw __attribute__((unused)))
+ {
+-    restorecon(filename);
++      restorecon_sb(filename, statptr);
+     return 0;
+ }
+ 
+@@ -525,5 +544,9 @@ int restorecon_recursive(const char* pathname)
+ {
+     int fd_limit = 20;
+     int flags = FTW_DEPTH | FTW_MOUNT | FTW_PHYS;
++
++    if (is_selinux_enabled() <= 0 || !sehandle)
++	return 0;
++
+     return nftw(pathname, nftw_restorecon, fd_limit, flags);
+ }
+-- 
+1.8.2.1
+

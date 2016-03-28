@@ -1,0 +1,34 @@
+From 03f56282bea1af9a4194f1cdc9fdf1f18b7d08b6 Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Mon, 31 Aug 2015 18:34:26 -0700
+Subject: [PATCH] MPEG4Extractor.cpp: handle chunk_size > SIZE_MAX
+
+chunk_size is a uint64_t, so it can legitimately be bigger
+than SIZE_MAX, which would cause the subtraction to underflow.
+
+https://code.google.com/p/android/issues/detail?id=182251
+
+Bug: 23034759
+Change-Id: Ic1637fb26bf6edb0feb1bcf2876fd370db1ed547
+---
+ media/libstagefright/MPEG4Extractor.cpp | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/media/libstagefright/MPEG4Extractor.cpp b/media/libstagefright/MPEG4Extractor.cpp
+index 755e587..00bace1 100644
+--- a/media/libstagefright/MPEG4Extractor.cpp
++++ b/media/libstagefright/MPEG4Extractor.cpp
+@@ -2101,8 +2101,9 @@ status_t MPEG4Extractor::parseChunk(off64_t *offset, int depth) {
+                 size = 0;
+             }
+ 
+-            if (SIZE_MAX - chunk_size <= size)
++            if ((chunk_size > SIZE_MAX) || (SIZE_MAX - chunk_size <= size)) {
+                 return ERROR_MALFORMED;
++            }
+ 
+             uint8_t *buffer = new (std::nothrow) uint8_t[size + chunk_size];
+             if (buffer == NULL) {
+-- 
+1.9.1
+

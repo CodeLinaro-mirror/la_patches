@@ -1,0 +1,225 @@
+From 613cedb0bc5028c38e228635af353abdd794a9d9 Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Thu, 10 Sep 2015 16:57:51 -0700
+Subject: [PATCH] sched: Update max_capacity when an entire cluster is
+ hotplugged
+
+When an entire cluster is hotplugged, the scheduler's notion of
+max_capacity can get outdated. This introduces the following
+inefficiencies in behavior:
+
+* task_will_fit() does not return true on all tasks. Consequently
+  all big tasks go through fallback CPU selection logic skipping
+  C-state and power checks in select_best_cpu().
+
+* During boost, migration_needed() return true unnecessarily
+  causing an avoidable rerun of select_best_cpu().
+
+* An unnecessary kick is sent to all little CPUs when boost is set.
+
+* An opportunity for early bailout from nohz_kick_needed() is lost.
+
+Start handling CPUFREQ_REMOVE_POLICY in the policy notifier callback
+which indicates the last CPU in a cluster being hotplugged out. Also
+modify update_min_max_capacity() to only iterate through online CPUs
+instead of possible CPUs. While we can't guarantee the integrity of
+the cpu_online_mask in the notifier callback, the scheduler will fix
+up all state soon after any changes to the online mask.
+
+The change does have one side effect; early termination from the
+notifier callback when min_max_freq or max_possible_freq remain
+unchanged is no longer possible. This is because when the last CPU
+in a cluster is hot removed, only max_capacity is updated without
+affecting min_max_freq or max_possible_freq. Therefore, when the
+first CPU in the same cluster gets hot added at a later point
+max_capacity must once again be recomputed despite there being no
+change in min_max_freq or max_possible_freq.
+
+Change-Id: I9a1256b5c2cd6fcddd85b069faf5e2ace177e122
+Signed-off-by: Syed Rameez Mustafa <rameezmustafa@codeaurora.org>
+---
+ kernel/sched/core.c  | 72 +++++++++++++++++++++++++++++++++++++---------------
+ kernel/sched/fair.c  |  4 +--
+ kernel/sched/sched.h |  1 +
+ 3 files changed, 54 insertions(+), 23 deletions(-)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index d6cbdf2..c9a49f42 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -1209,7 +1209,8 @@ unsigned int min_max_freq = 1;
+ 
+ unsigned int max_capacity = 1024; /* max(rq->capacity) */
+ unsigned int min_capacity = 1024; /* min(rq->capacity) */
+-unsigned int max_load_scale_factor = 1024; /* max(rq->load_scale_factor) */
++unsigned int max_load_scale_factor = 1024; /* max possible load scale factor */
++unsigned int max_possible_capacity = 1024; /* max(rq->max_possible_capacity) */
+ 
+ /* Window size (in ns) */
+ __read_mostly unsigned int sched_ravg_window = 10000000;
+@@ -2266,25 +2267,33 @@ heavy_task_wakeup(struct task_struct *p, struct rq *rq, int event)
+ #endif	/* CONFIG_SCHED_FREQ_INPUT */
+ 
+ /* Keep track of max/min capacity possible across CPUs "currently" */
+-static void update_min_max_capacity(void)
++static void __update_min_max_capacity(void)
+ {
+ 	int i;
+ 	int max = 0, min = INT_MAX;
+-	int max_lsf = 0;
+ 
+-	for_each_possible_cpu(i) {
++	for_each_online_cpu(i) {
+ 		if (cpu_rq(i)->capacity > max)
+ 			max = cpu_rq(i)->capacity;
+ 		if (cpu_rq(i)->capacity < min)
+ 			min = cpu_rq(i)->capacity;
+-
+-		if (cpu_rq(i)->load_scale_factor > max_lsf)
+-			max_lsf = cpu_rq(i)->load_scale_factor;
+ 	}
+ 
+ 	max_capacity = max;
+ 	min_capacity = min;
+-	max_load_scale_factor = max_lsf;
++}
++
++static void update_min_max_capacity(void)
++{
++	int i;
++
++	for_each_possible_cpu(i)
++		raw_spin_lock(&cpu_rq(i)->lock);
++
++	__update_min_max_capacity();
++
++	for_each_possible_cpu(i)
++		raw_spin_unlock(&cpu_rq(i)->lock);
+ }
+ 
+ /*
+@@ -2361,15 +2370,21 @@ static int cpufreq_notifier_policy(struct notifier_block *nb,
+ 		unsigned long val, void *data)
+ {
+ 	struct cpufreq_policy *policy = (struct cpufreq_policy *)data;
+-	int i;
++	int i, update_max = 0;
++	u64 highest_mpc = 0, highest_mplsf = 0;
+ 	const struct cpumask *cpus = policy->related_cpus;
+ 	unsigned int orig_min_max_freq = min_max_freq;
+ 	unsigned int orig_max_possible_freq = max_possible_freq;
+ 	/* Initialized to policy->max in case policy->related_cpus is empty! */
+ 	unsigned int orig_max_freq = policy->max;
+ 
+-	if (val != CPUFREQ_NOTIFY)
++	if (val != CPUFREQ_NOTIFY && val != CPUFREQ_REMOVE_POLICY)
++		return 0;
++
++	if (val == CPUFREQ_REMOVE_POLICY) {
++		update_min_max_capacity();
+ 		return 0;
++	}
+ 
+ 	for_each_cpu(i, policy->related_cpus) {
+ 		cpumask_copy(&cpu_rq(i)->freq_domain_cpumask,
+@@ -2387,11 +2402,6 @@ static int cpufreq_notifier_policy(struct notifier_block *nb,
+ 	BUG_ON(!min_max_freq);
+ 	BUG_ON(!policy->max);
+ 
+-	if (orig_max_possible_freq == max_possible_freq &&
+-		orig_min_max_freq == min_max_freq &&
+-		orig_max_freq == policy->max)
+-			return 0;
+-
+ 	/*
+ 	 * A changed min_max_freq or max_possible_freq (possible during bootup)
+ 	 * needs to trigger re-computation of load_scale_factor and capacity for
+@@ -2416,8 +2426,10 @@ static int cpufreq_notifier_policy(struct notifier_block *nb,
+ 	 */
+ 
+ 	if (orig_min_max_freq != min_max_freq ||
+-		orig_max_possible_freq != max_possible_freq)
++		orig_max_possible_freq != max_possible_freq) {
+ 			cpus = cpu_possible_mask;
++			update_max = 1;
++	}
+ 
+ 	/*
+ 	 * Changed load_scale_factor can trigger reclassification of tasks as
+@@ -2427,16 +2439,34 @@ static int cpufreq_notifier_policy(struct notifier_block *nb,
+ 	pre_big_small_task_count_change(cpu_possible_mask);
+ 	for_each_cpu(i, cpus) {
+ 		struct rq *rq = cpu_rq(i);
+-		u64 max_possible_capacity;
+ 
+ 		rq->capacity = compute_capacity(i);
+-		max_possible_capacity = div_u64(((u64) rq->capacity) *
+-					rq->max_possible_freq, rq->max_freq);
+-		rq->max_possible_capacity = (int) max_possible_capacity;
+ 		rq->load_scale_factor = compute_load_scale_factor(i);
++
++		if (update_max) {
++			u64 mpc, mplsf;
++
++			mpc = div_u64(((u64) rq->capacity) *
++				rq->max_possible_freq, rq->max_freq);
++			rq->max_possible_capacity = (int) mpc;
++
++			mplsf = div_u64(((u64) rq->load_scale_factor) *
++				rq->max_possible_freq, rq->max_freq);
++
++			if (mpc > highest_mpc)
++				highest_mpc = mpc;
++
++			if (mplsf > highest_mplsf)
++				highest_mplsf = mplsf;
++		}
++	}
++
++	if (update_max) {
++		max_possible_capacity = highest_mpc;
++		max_load_scale_factor = highest_mplsf;
+ 	}
+ 
+-	update_min_max_capacity();
++	__update_min_max_capacity();
+ 	post_big_small_task_count_change(cpu_possible_mask);
+ 
+ 	return 0;
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index ef4bde9..5a6c131 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1732,7 +1732,7 @@ static int eligible_cpu(struct task_struct *p, int cpu, int sync)
+ 	if (mostly_idle_cpu_sync(cpu, sync))
+ 		return 1;
+ 
+-	if (rq->capacity != max_capacity)
++	if (rq->max_possible_capacity != max_possible_capacity)
+ 		return !spill_threshold_crossed(p, rq, cpu, sync);
+ 
+ 	return 0;
+@@ -2288,7 +2288,7 @@ unsigned int nr_eligible_big_tasks(int cpu)
+ 	int nr = rq->nr_running;
+ 	int nr_small = rq->hmp_stats.nr_small_tasks;
+ 
+-	if (rq->capacity != max_capacity)
++	if (rq->max_possible_capacity != max_possible_capacity)
+ 		return nr_big;
+ 
+ 	/* Consider all (except small) tasks on max_capacity cpu as big tasks */
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index 1dd63e0..43693f5 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -735,6 +735,7 @@ extern unsigned int min_possible_efficiency;
+ extern unsigned int max_capacity;
+ extern unsigned int min_capacity;
+ extern unsigned int max_load_scale_factor;
++extern unsigned int max_possible_capacity;
+ extern unsigned long capacity_scale_cpu_efficiency(int cpu);
+ extern unsigned long capacity_scale_cpu_freq(int cpu);
+ extern unsigned int sched_mostly_idle_load;
+-- 
+1.9.1
+

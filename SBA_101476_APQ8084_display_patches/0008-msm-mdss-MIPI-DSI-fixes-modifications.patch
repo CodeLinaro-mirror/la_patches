@@ -1,0 +1,195 @@
+From d06e8b1f9cc7e12013262016287b9cdc3bc39fa7 Mon Sep 17 00:00:00 2001
+From: Mike Mager <mikemager@codeaurora.org>
+Date: Tue, 16 Sep 2014 11:52:18 -0700
+Subject: [PATCH] msm: mdss: MIPI DSI fixes/modifications
+
+  - Add support for specifying more MIPI DSI panel parameters in devicetree
+  - Add support for 18-bit panels
+  - Remove assumption that all panels use RGB color order
+
+Change-Id: I539ec10137787353d6a860838538a8fa7239db79
+---
+ .../devicetree/bindings/fb/mdss-dsi-panel.txt        |  2 ++
+ .../arm/boot/dts/qcom/dsi-panel-sharp-qhd-video.dtsi |  2 +-
+ drivers/video/msm/mdss/mdss_dsi.h                    | 20 ++++++++++++--------
+ drivers/video/msm/mdss/mdss_dsi_host.c               |  2 --
+ drivers/video/msm/mdss/mdss_dsi_panel.c              | 13 ++++++++++++-
+ drivers/video/msm/mdss/msm_mdss_io_8974.c            | 15 +++++++++------
+ 6 files changed, 36 insertions(+), 18 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt b/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt
+index 6bba524..12f2fd0 100644
+--- a/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt
++++ b/Documentation/devicetree/bindings/fb/mdss-dsi-panel.txt
+@@ -213,6 +213,7 @@ Optional properties:
+ 					0x03 = default value.
+ - qcom,mdss-dsi-t-clk-pre:		Specifies the byte clock cycles before mode switch.
+ 					0x24 = default value.
++- qcom,mdss-dsi-force-clk-lane-hs:	Boolean that specifies whether clock is required during LP commands.
+ - qcom,mdss-dsi-stream:			Specifies the packet stream to be used.
+ 					0 = stream 0 (default)
+ 					1 = stream 1
+@@ -373,6 +374,7 @@ Example:
+ 		qcom,mdss-dsi-lane-map = <0>;
+ 		qcom,mdss-dsi-t-clk-post = <0x20>;
+ 		qcom,mdss-dsi-t-clk-pre = <0x2c>;
++		qcom,mdss-dsi-force-clk-lane-hs;
+ 		qcom,mdss-dsi-stream = <0>;
+ 		qcom,mdss-dsi-mdp-trigger = <0>;
+ 		qcom,mdss-dsi-dma-trigger = <0>;
+diff --git a/arch/arm/boot/dts/qcom/dsi-panel-sharp-qhd-video.dtsi b/arch/arm/boot/dts/qcom/dsi-panel-sharp-qhd-video.dtsi
+index d23e3de..212b436 100644
+--- a/arch/arm/boot/dts/qcom/dsi-panel-sharp-qhd-video.dtsi
++++ b/arch/arm/boot/dts/qcom/dsi-panel-sharp-qhd-video.dtsi
+@@ -38,7 +38,7 @@
+ 		qcom,mdss-dsi-v-top-border = <0>;
+ 		qcom,mdss-dsi-v-bottom-border = <0>;
+ 		qcom,mdss-dsi-bpp = <24>;
+-		qcom,mdss-dsi-color-order = "rgb_swap_bgr";
++		qcom,mdss-dsi-color-order = "rgb_swap_rgb";
+ 		qcom,mdss-dsi-underflow-color = <0xff>;
+ 		qcom,mdss-dsi-border-color = <0>;
+ 		qcom,mdss-dsi-on-command = [05 01 00 00 32 00 02 01 00
+diff --git a/drivers/video/msm/mdss/mdss_dsi.h b/drivers/video/msm/mdss/mdss_dsi.h
+index 48eeaf4..9dfaf5f 100644
+--- a/drivers/video/msm/mdss/mdss_dsi.h
++++ b/drivers/video/msm/mdss/mdss_dsi.h
+@@ -179,14 +179,18 @@ struct dsi_clk_mnd_table {
+ };
+ 
+ static const struct dsi_clk_mnd_table mnd_table[] = {
+-	{ 1, 2,  8, 1, 1, 0},
+-	{ 1, 3, 12, 1, 1, 0},
+-	{ 2, 2,  4, 1, 1, 0},
+-	{ 2, 3,  6, 1, 1, 0},
+-	{ 3, 2,  1, 3, 8, 4},
+-	{ 3, 3,  4, 1, 1, 0},
+-	{ 4, 2,  2, 1, 1, 0},
+-	{ 4, 3,  3, 1, 1, 0},
++	{ 1, 16,  8, 1, 1, 0},
++	{ 1, 18,  2, 2, 9, 6},
++	{ 1, 24, 12, 1, 1, 0},
++	{ 2, 16,  4, 1, 1, 0},
++	{ 2, 18,  1, 2, 9, 6},
++	{ 2, 24,  6, 1, 1, 0},
++	{ 3, 16,  1, 3, 8, 4},
++	{ 3, 18,  3, 1, 1, 0},
++	{ 3, 24,  4, 1, 1, 0},
++	{ 4, 16,  2, 1, 1, 0},
++	{ 4, 18,  1, 4, 9, 4},
++	{ 4, 24,  3, 1, 1, 0},
+ };
+ 
+ struct dsi_clk_desc {
+diff --git a/drivers/video/msm/mdss/mdss_dsi_host.c b/drivers/video/msm/mdss/mdss_dsi_host.c
+index 7f5edd8..70783f0 100644
+--- a/drivers/video/msm/mdss/mdss_dsi_host.c
++++ b/drivers/video/msm/mdss/mdss_dsi_host.c
+@@ -248,8 +248,6 @@ void mdss_dsi_host_init(struct mdss_panel_data *pdata)
+ 
+ 	pinfo = &pdata->panel_info.mipi;
+ 
+-	pinfo->rgb_swap = DSI_RGB_SWAP_RGB;
+-
+ 	if (pinfo->mode == DSI_VIDEO_MODE) {
+ 		data = 0;
+ 		if (pinfo->last_line_interleave_en)
+diff --git a/drivers/video/msm/mdss/mdss_dsi_panel.c b/drivers/video/msm/mdss/mdss_dsi_panel.c
+index 0261022..5a1da57 100644
+--- a/drivers/video/msm/mdss/mdss_dsi_panel.c
++++ b/drivers/video/msm/mdss/mdss_dsi_panel.c
+@@ -253,7 +253,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
+ 				panel_data);
+ 
+ 	if (!gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
+-		pr_debug("%s:%d, reset line not configured\n",
++		pr_debug("%s:%d, display enable line not configured\n",
+ 			   __func__, __LINE__);
+ 	}
+ 
+@@ -284,7 +284,11 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
+ 			}
+ 
+ 			if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
++#ifdef CONFIG_CRD_THOR_DISPLAY
++				gpio_set_value((ctrl_pdata->bklt_en_gpio), 0);
++#else
+ 				gpio_set_value((ctrl_pdata->bklt_en_gpio), 1);
++#endif
+ 		}
+ 
+ 		if (gpio_is_valid(ctrl_pdata->mode_gpio)) {
+@@ -301,7 +305,11 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
+ 		}
+ 	} else {
+ 		if (gpio_is_valid(ctrl_pdata->bklt_en_gpio)) {
++#ifdef CONFIG_CRD_THOR_DISPLAY
++			gpio_set_value((ctrl_pdata->bklt_en_gpio), 1);
++#else
+ 			gpio_set_value((ctrl_pdata->bklt_en_gpio), 0);
++#endif
+ 			gpio_free(ctrl_pdata->bklt_en_gpio);
+ 		}
+ 		if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
+@@ -1270,6 +1278,9 @@ static int mdss_panel_parse_dt(struct device_node *np,
+ 	pinfo->mipi.tx_eot_append = of_property_read_bool(np,
+ 		"qcom,mdss-dsi-tx-eot-append");
+ 
++	pinfo->mipi.force_clk_lane_hs = of_property_read_bool(np,
++		"qcom,mdss-dsi-force-clk-lane-hs");
++
+ 	rc = of_property_read_u32(np, "qcom,mdss-dsi-stream", &tmp);
+ 	pinfo->mipi.stream = (!rc ? tmp : 0);
+ 
+diff --git a/drivers/video/msm/mdss/msm_mdss_io_8974.c b/drivers/video/msm/mdss/msm_mdss_io_8974.c
+index d0e8349..74d74ab 100644
+--- a/drivers/video/msm/mdss/msm_mdss_io_8974.c
++++ b/drivers/video/msm/mdss/msm_mdss_io_8974.c
+@@ -312,14 +312,17 @@ int mdss_dsi_clk_div_config(struct mdss_panel_info *panel_info,
+ 	case DSI_CMD_DST_FORMAT_RGB888:
+ 	case DSI_VIDEO_DST_FORMAT_RGB888:
+ 	case DSI_VIDEO_DST_FORMAT_RGB666_LOOSE:
+-		bpp = 3;
++		bpp = 24;
++		break;
++	case DSI_VIDEO_DST_FORMAT_RGB666:
++		bpp = 18;
+ 		break;
+ 	case DSI_CMD_DST_FORMAT_RGB565:
+ 	case DSI_VIDEO_DST_FORMAT_RGB565:
+-		bpp = 2;
++		bpp = 16;
+ 		break;
+ 	default:
+-		bpp = 3;	/* Default format set to RGB888 */
++		bpp = 24;	/* Default format set to RGB888 */
+ 		break;
+ 	}
+ 
+@@ -335,12 +338,12 @@ int mdss_dsi_clk_div_config(struct mdss_panel_info *panel_info,
+ 		if (lanes > 0) {
+ 			panel_info->clk_rate =
+ 			((h_period * v_period *
+-			  frame_rate * bpp * 8)
++			  frame_rate * bpp)
+ 			   / lanes);
+ 		} else {
+ 			pr_err("%s: forcing mdss_dsi lanes to 1\n", __func__);
+ 			panel_info->clk_rate =
+-				(h_period * v_period * frame_rate * bpp * 8);
++				(h_period * v_period * frame_rate * bpp);
+ 		}
+ 	}
+ 	pll_divider_config.clk_rate = panel_info->clk_rate;
+@@ -410,7 +413,7 @@ int mdss_dsi_clk_div_config(struct mdss_panel_info *panel_info,
+ 		dsi_pclk.d = mnd_entry->pclk_d;
+ 	}
+ 	dsi_pclk_rate = (((pll_divider_config.clk_rate) * lanes)
+-				      / (8 * bpp));
++				      / bpp);
+ 
+ 	if ((dsi_pclk_rate < 3300000) || (dsi_pclk_rate > 250000000))
+ 		dsi_pclk_rate = 35000000;
+-- 
+1.8.2.1
+

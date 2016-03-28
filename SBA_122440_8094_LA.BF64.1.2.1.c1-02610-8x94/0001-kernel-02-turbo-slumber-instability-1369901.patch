@@ -1,0 +1,62 @@
+From e21f7ce0c980f7bcef45d4b3334d0128accaaac0 Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Mon, 31 Aug 2015 18:13:19 -0700
+Subject: [PATCH] msm: kgsl: Do not wake up at turbo
+
+Coming out of slumber at turbo is not stable on some parts,
+so set the pwrlevel to one level below the turbo.
+
+CRs-Fixed: 867058
+Change-Id: Ide1127c31e095dbefd4b76c8e7174942de9c1e2a
+Signed-off-by: Harshdeep Dhatt <hdhatt@codeaurora.org>
+---
+ drivers/gpu/msm/kgsl_pwrctrl.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/drivers/gpu/msm/kgsl_pwrctrl.c b/drivers/gpu/msm/kgsl_pwrctrl.c
+index f498c75..d4e48f7 100644
+--- a/drivers/gpu/msm/kgsl_pwrctrl.c
++++ b/drivers/gpu/msm/kgsl_pwrctrl.c
+@@ -32,6 +32,7 @@
+ #define KGSL_PWRFLAGS_CLK_ON   1
+ #define KGSL_PWRFLAGS_AXI_ON   2
+ #define KGSL_PWRFLAGS_IRQ_ON   3
++#define KGSL_PWRFLAGS_WAKEUP_PWRLEVEL  24
+ 
+ #define UPDATE_BUSY_VAL		1000000
+ 
+@@ -368,6 +369,14 @@ void kgsl_pwrctrl_pwrlevel_change(struct kgsl_device *device,
+ 					device->pwrscale.popp_level);
+ 
+ 	/*
++	 * When waking up from SLUMBER at turbo then set the pwrlevel
++	 * to one level below turbo
++	 */
++	if (new_level == 0 && test_bit(KGSL_PWRFLAGS_WAKEUP_PWRLEVEL,
++		&device->pwrctrl.ctrl_flags))
++		new_level = 1;
++
++	/*
+ 	 * If thermal cycling is required and the new level hits the
+ 	 * thermal limit, kick off the cycling.
+ 	 */
+@@ -1918,7 +1927,16 @@ _aware(struct kgsl_device *device)
+ 		del_timer_sync(&device->idle_timer);
+ 		break;
+ 	case KGSL_STATE_SLUMBER:
++		/*
++		 * Set this flag to avoid waking up at turbo
++		 * because wakeup at turbo is not stable
++		 * on some slow parts
++		 */
++		set_bit(KGSL_PWRFLAGS_WAKEUP_PWRLEVEL,
++				&device->pwrctrl.ctrl_flags);
+ 		status = kgsl_pwrctrl_enable(device);
++		clear_bit(KGSL_PWRFLAGS_WAKEUP_PWRLEVEL,
++				&device->pwrctrl.ctrl_flags);
+ 		break;
+ 	default:
+ 		status = -EINVAL;
+-- 
+1.9.1
+

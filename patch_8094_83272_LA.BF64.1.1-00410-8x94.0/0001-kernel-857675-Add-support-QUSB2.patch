@@ -1,0 +1,190 @@
+From d9e012d2e51fb0817ecff617583992d83898a229 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Thu, 4 Dec 2014 15:06:13 -0800
+Subject: [PATCH] usb: phy-msm-usb: Add support for QUSB2 PHY
+
+The msm_otg controller can be paired with the QUSB2 PHY. Add
+support for it by adding a new phy_type value in addition to
+the necessary sequences used to initialize it. The rest of
+communication between controller and PHY is over ULPI.
+
+Change-Id: I7523c8e85c0a8d4c874456b0314be365a302b7e5
+Signed-off-by: Jack Pham <jackp@codeaurora.org>
+Signed-off-by: Tanya Finkel <tfinkel@codeaurora.org>
+---
+ .../devicetree/bindings/usb/msm-hsusb.txt          |  2 +
+ drivers/usb/phy/phy-msm-usb.c                      | 79 +++++++++++++++++++++-
+ include/linux/usb/msm_hsusb.h                      |  2 +
+ 3 files changed, 81 insertions(+), 2 deletions(-)
+
+diff --git a/Documentation/devicetree/bindings/usb/msm-hsusb.txt b/Documentation/devicetree/bindings/usb/msm-hsusb.txt
+index a404acd..080366f 100644
+--- a/Documentation/devicetree/bindings/usb/msm-hsusb.txt
++++ b/Documentation/devicetree/bindings/usb/msm-hsusb.txt
+@@ -21,6 +21,7 @@ Required properties :
+ 	    1 - Chipidea PHY (obsolete)
+ 	    2 - Synopsis Pico PHY
+ 	    3 - Synopsis Femto PHY
++	    4 - QUSB ULPI PHY
+ - qcom,hsusb-otg-mode: Operational mode. Can be one of
+             1 - Peripheral only mode
+ 	    2 - Host only mode
+@@ -56,6 +57,7 @@ Required properties :
+ 		PHY POR signal. Required for overriding PHY parameters.
+ 	"phy_csr_clk": Required for accessing PHY CSR registers through
+ 		AHB2PHY interface.
++	"phy_ref_clk": Required when PHY have referance clock,
+ 	"xo": XO clock. The source clock that is used as a reference clock
+ 		to the PHY.
+ 	"bimc_clk", "snoc_clk", "pcnoc_clk": bus voting clocks. Used to
+diff --git a/drivers/usb/phy/phy-msm-usb.c b/drivers/usb/phy/phy-msm-usb.c
+index 9eba1c8..9078819 100644
+--- a/drivers/usb/phy/phy-msm-usb.c
++++ b/drivers/usb/phy/phy-msm-usb.c
+@@ -344,6 +344,12 @@ static int ulpi_read(struct usb_phy *phy, u32 reg)
+ 	struct msm_otg *motg = container_of(phy, struct msm_otg, phy);
+ 	int cnt = 0;
+ 
++	if (motg->pdata->phy_type == QUSB_ULPI_PHY && reg > 0x3F) {
++		pr_debug("%s: ULPI vendor-specific reg 0x%02x not supported\n",
++			__func__, reg);
++		return 0;
++	}
++
+ 	/* initiate read operation */
+ 	writel(ULPI_RUN | ULPI_READ | ULPI_ADDR(reg),
+ 	       USB_ULPI_VIEWPORT);
+@@ -371,6 +377,12 @@ static int ulpi_write(struct usb_phy *phy, u32 val, u32 reg)
+ 	struct msm_otg *motg = container_of(phy, struct msm_otg, phy);
+ 	int cnt = 0;
+ 
++	if (motg->pdata->phy_type == QUSB_ULPI_PHY && reg > 0x3F) {
++		pr_debug("%s: ULPI vendor-specific reg 0x%02x not supported\n",
++			__func__, reg);
++		return 0;
++	}
++
+ 	/* initiate write operation */
+ 	writel(ULPI_RUN | ULPI_WRITE |
+ 	       ULPI_ADDR(reg) | ULPI_DATA(val),
+@@ -565,10 +577,13 @@ static int msm_otg_link_reset(struct msm_otg *motg)
+ 	return 0;
+ }
+ 
++#define QUSB2PHY_PORT_POWERDOWN		0xB4
++#define QUSB2PHY_PORT_UTMI_CTRL2	0xC4
++
+ static void msm_usb_phy_reset(struct msm_otg *motg)
+ {
+ 	u32 val;
+-	int ret;
++	int ret, *seq;
+ 
+ 	switch (motg->pdata->phy_type) {
+ 	case SNPS_PICO_PHY:
+@@ -589,6 +604,45 @@ static void msm_usb_phy_reset(struct msm_otg *motg)
+ 		val |= PHY_POR_DEASSERT;
+ 		writel_relaxed(val, motg->usb_phy_ctrl_reg);
+ 		break;
++	case QUSB_ULPI_PHY:
++		ret = clk_reset(motg->phy_reset_clk, CLK_RESET_ASSERT);
++		if (ret) {
++			pr_err("phy_reset_clk assert failed %d\n", ret);
++			break;
++		}
++
++		/* need to delay 10us for PHY to reset */
++		usleep(10);
++
++		ret = clk_reset(motg->phy_reset_clk, CLK_RESET_DEASSERT);
++		if (ret) {
++			pr_err("phy_reset_clk de-assert failed %d\n", ret);
++			break;
++		}
++
++		/* Ensure that RESET operation is completed. */
++		mb();
++
++		writel_relaxed(0x23,
++				motg->phy_csr_regs + QUSB2PHY_PORT_POWERDOWN);
++		writel_relaxed(0x0,
++				motg->phy_csr_regs + QUSB2PHY_PORT_UTMI_CTRL2);
++
++		/* Program tuning parameters for PHY */
++		seq = motg->pdata->phy_init_seq;
++		if (seq) {
++			while (seq[0] >= 0) {
++				writel_relaxed(seq[1],
++						motg->phy_csr_regs + seq[0]);
++				seq += 2;
++			}
++		}
++
++		/* ensure above writes are completed before re-enabling PHY */
++		wmb();
++		writel_relaxed(0x22,
++				motg->phy_csr_regs + QUSB2PHY_PORT_POWERDOWN);
++		break;
+ 	case SNPS_FEMTO_PHY:
+ 		if (!motg->phy_por_clk) {
+ 			pr_err("phy_por_clk missing\n");
+@@ -4964,6 +5018,26 @@ static int msm_otg_probe(struct platform_device *pdev)
+ 		pdata = pdev->dev.platform_data;
+ 	}
+ 
++	if (pdata->phy_type == QUSB_ULPI_PHY) {
++		if (of_property_match_string(pdev->dev.of_node,
++					"clock-names", "phy_ref_clk") >= 0) {
++			motg->phy_ref_clk = devm_clk_get(&pdev->dev,
++						"phy_ref_clk");
++			if (IS_ERR(motg->phy_ref_clk)) {
++				ret = PTR_ERR(motg->phy_ref_clk);
++				goto disable_phy_csr_clk;
++			} else {
++				ret = clk_prepare_enable(motg->phy_ref_clk);
++				if (ret) {
++					dev_err(&pdev->dev,
++						"fail to enable phy ref clk %d\n",
++						ret);
++					goto disable_phy_csr_clk;
++				}
++			}
++		}
++	}
++
+ 	motg->phy.otg = devm_kzalloc(&pdev->dev, sizeof(struct usb_otg),
+ 							GFP_KERNEL);
+ 	if (!motg->phy.otg) {
+@@ -5062,7 +5136,8 @@ static int msm_otg_probe(struct platform_device *pdev)
+ 	 * The link does not have any PHY specific registers.
+ 	 * Hence set motg->usb_phy_ctrl_reg to.
+ 	 */
+-	if (motg->pdata->phy_type == SNPS_FEMTO_PHY) {
++	if (motg->pdata->phy_type == SNPS_FEMTO_PHY ||
++		pdata->phy_type == QUSB_ULPI_PHY) {
+ 		res = platform_get_resource_byname(pdev,
+ 				IORESOURCE_MEM, "phy_csr");
+ 		if (!res) {
+diff --git a/include/linux/usb/msm_hsusb.h b/include/linux/usb/msm_hsusb.h
+index c298b0d..ce3f7f8 100644
+--- a/include/linux/usb/msm_hsusb.h
++++ b/include/linux/usb/msm_hsusb.h
+@@ -102,6 +102,7 @@ enum msm_usb_phy_type {
+ 	CI_PHY,			/* not supported */
+ 	SNPS_PICO_PHY,
+ 	SNPS_FEMTO_PHY,
++	QUSB_ULPI_PHY,
+ };
+ 
+ #define IDEV_CHG_MAX	1500
+@@ -419,6 +420,7 @@ struct msm_otg {
+ 	struct clk *phy_por_clk;
+ 	struct clk *phy_csr_clk;
+ 	struct clk *bus_clks[USB_NUM_BUS_CLOCKS];
++	struct clk *phy_ref_clk;
+ 	long core_clk_rate;
+ 	struct resource *io_res;
+ 	void __iomem *regs;
+-- 
+1.8.2.1
+

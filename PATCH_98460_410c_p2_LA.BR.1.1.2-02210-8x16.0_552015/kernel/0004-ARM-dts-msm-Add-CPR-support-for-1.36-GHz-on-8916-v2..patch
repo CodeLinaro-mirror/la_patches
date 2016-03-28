@@ -1,0 +1,66 @@
+From 4e1e65301295d7807748f110c0d73e2af9779b67 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:29:26 -0700
+Subject: [PATCH 04/22] ARM: dts: msm: Add CPR support for 1.36 GHz on 8916
+ v2.0
+
+8916 v2.0 supports a FMAX of 1.3632 GHz. Modify the CPR
+configuration to support this frequency. Use a
+combination of speed-bin and pvs-version to identity
+the various FMAX parts.
+
+Change-Id: Id92efefc8479023a98829a25761b2a4e58872b9e
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/msm8916-regulator.dtsi | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/boot/dts/qcom/msm8916-regulator.dtsi b/arch/arm/boot/dts/qcom/msm8916-regulator.dtsi
+index 464425f..c456002 100644
+--- a/arch/arm/boot/dts/qcom/msm8916-regulator.dtsi
++++ b/arch/arm/boot/dts/qcom/msm8916-regulator.dtsi
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
++/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 and
+@@ -48,7 +48,7 @@
+ 		regulator-name = "apc_corner";
+ 		qcom,cpr-fuse-corners = <3>;
+ 		regulator-min-microvolt = <1>;
+-		regulator-max-microvolt = <8>;
++		regulator-max-microvolt = <9>;
+ 
+ 		qcom,cpr-voltage-ceiling = <1050000 1150000 1350000>;
+ 		qcom,cpr-voltage-floor = <1050000 1050000 1162500>;
+@@ -85,7 +85,7 @@
+ 					<27 0 6 0>;
+ 		qcom,cpr-init-voltage-ref = <1050000 1150000 1350000>;
+ 		qcom,cpr-init-voltage-step = <10000>;
+-		qcom,cpr-corner-map = <1 1 2 2 3 3 3 3>;
++		qcom,cpr-corner-map = <1 1 2 2 3 3 3 3 3>;
+ 		qcom,cpr-corner-frequency-map =
+ 					<1 200000000>,
+ 					<2 400000000>,
+@@ -94,11 +94,14 @@
+ 					<5 998400000>,
+ 					<6 1094400000>,
+ 					<7 1152000000>,
+-					<8 1209600000>;
+-		qcom,speed-bin-fuse-sel = <0 55 2 0>;
++					<8 1209600000>,
++					<9 1363200000>;
++		qcom,speed-bin-fuse-sel = <1 34 3 0>;
++		qcom,pvs-version-fuse-sel = <0 55 2 0>;
+ 		qcom,cpr-speed-bin-max-corners =
+ 					<0 0 2 4 8>,
+-					<1 0 2 4 7>;
++					<0 1 2 4 7>,
++					<2 0 2 4 9>;
+ 		qcom,cpr-quot-adjust-scaling-factor-max = <650>;
+ 		qcom,cpr-enable;
+ 	};
+-- 
+1.8.2.1
+

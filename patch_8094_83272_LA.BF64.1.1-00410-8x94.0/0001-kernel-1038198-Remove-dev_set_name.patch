@@ -1,0 +1,40 @@
+From fb84d33af1e0a9f0c426ced303bb390066b95140 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Thu, 4 Dec 2014 15:21:34 -0800
+Subject: [PATCH] ASoC: msm: Remove usage of dev_set_name in audio drivers for
+ DB8094
+
+dev_set_name is used in platform and cpu dai drivers to satisfy the
+needs of the ALSA SoC framework. ASoC framework does make use of
+platform and cpu dai names to check whether they are registered to
+it or not for sound card instantiation. However, the framework has
+an alternative way to compare the device's of_nodes against dai_link's
+of_nodes to know whether the platform/cpu dai is registered or not.
+Make changes in the driver to retrieve of_nodes and then assign to
+dai_link's of_node so that we can get rid of using dev_set_name in
+the drivers.
+
+Inserted support for Dragon Board 8094 platform
+
+Change-Id: Ife4401a63f6f76676839e47860705c79f09bd034
+Signed-off-by: Tanya Finkel <tfinkel@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+index 12496ff..ce0388d 100644
+--- a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
++++ b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+@@ -555,6 +555,8 @@
+ 		qcom,cdc-micbias2-headset-only;
+ 		qcom,mbhc-audio-jack-type = "6-pole-jack";
+ 		qcom,hdmi-audio-rx;
++		asoc-codec = <&stub_codec>, <&hdmi_audio>;
++		asoc-codec-names = "msm-stub-codec.1", "msm-hdmi-audio-codec-rx";
+ 	};
+ 
+ 	usb_detect {
+-- 
+1.8.2.1
+

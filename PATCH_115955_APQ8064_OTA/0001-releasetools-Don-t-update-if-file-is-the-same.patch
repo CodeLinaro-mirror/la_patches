@@ -1,0 +1,41 @@
+From 57b888940b5070f7851c66aeb294ce0e4b8780f5 Mon Sep 17 00:00:00 2001
+From: Pavel Nedev <pnedev@codeaurora.org>
+Date: Tue, 10 Sep 2013 17:38:35 +0300
+Subject: [PATCH] releasetools: Don't update if file is the same.
+
+If during incremental OTA package preparation the file is not changed
+at all do not include it in the update package.
+
+Change-Id: I0a0b2ad5578e640d36fefbd5b7f002a0f3f24d2c
+---
+ releasetools.py | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/releasetools.py b/releasetools.py
+index 1fbe720..8127d8b 100755
+--- a/releasetools.py
++++ b/releasetools.py
+@@ -137,12 +137,18 @@ def OTA_VerifyEnd(info, api_version, target_zip, source_zip=None):
+     if src_files is not None:
+       sf = src_files.get(fn, None)
+ 
+-    full = sf is None or fn.endswith('.enc') or tf.sha1 == sf.sha1
++    full = sf is None or fn.endswith('.enc')
+     if not full:
++      # no difference - skip this file
++      if tf.sha1 == sf.sha1:
++        continue
+       d = common.Difference(tf, sf)
+       _, _, d = d.ComputePatch()
++      # no difference - skip this file
++      if d is None:
++        continue
+       # if patch is almost as big as the file - don't bother patching
+-      full = d is None or len(d) > tf.size * common.OPTIONS.patch_threshold
++      full = len(d) > tf.size * common.OPTIONS.patch_threshold
+       if not full:
+         f = "patch/firmware-update/" + fn + ".p"
+         common.ZipWriteStr(info.output_zip, f, d)
+-- 
+1.9.1
+

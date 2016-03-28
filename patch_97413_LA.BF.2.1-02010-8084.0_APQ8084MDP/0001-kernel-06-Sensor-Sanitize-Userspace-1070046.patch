@@ -1,0 +1,63 @@
+From 0833e2d62a5c11c167a590e2126f2ba246b4a3a5 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Tue, 24 Mar 2015 13:20:26 -0700
+Subject: [PATCH] msm: camera: sensor: sanitizing user space pointer
+
+Sanitizing user space pointer
+using copy_from_user to retrieve the
+usespace information.
+
+Change-Id: I5e0830fbe8a06769e115a2bf906a9a93b63158cd
+Signed-off-by: Rajesh Bondugula <rajeshb@codeaurora.org>
+---
+ .../platform/msm/camera_v2/sensor/msm_sensor_driver.c      | 14 ++++++++++++++
+ include/media/msm_cam_sensor.h                             |  1 +
+ 2 files changed, 15 insertions(+)
+
+diff --git a/drivers/media/platform/msm/camera_v2/sensor/msm_sensor_driver.c b/drivers/media/platform/msm/camera_v2/sensor/msm_sensor_driver.c
+index 6ce87a9..143ede9 100644
+--- a/drivers/media/platform/msm/camera_v2/sensor/msm_sensor_driver.c
++++ b/drivers/media/platform/msm/camera_v2/sensor/msm_sensor_driver.c
+@@ -397,6 +397,14 @@ int32_t msm_sensor_driver_probe(void *setting)
+ 	}
+ 
+ 	size = slave_info->power_setting_array.size;
++
++	/* Validate size */
++	if (size > MAX_POWER_CONFIG) {
++		pr_err("failed: invalid number of power_up_setting %d\n", size);
++		rc = -EINVAL;
++		goto FREE_SLAVE_INFO;
++	}
++
+ 	/* Allocate memory for power up setting */
+ 	power_setting = kzalloc(sizeof(*power_setting) * size, GFP_KERNEL);
+ 	if (!power_setting) {
+@@ -423,6 +431,12 @@ int32_t msm_sensor_driver_probe(void *setting)
+ 	size_down = slave_info->power_setting_array.size_down;
+ 	if (!size_down)
+ 		size_down = size;
++	/* Validate size_down */
++	if (size_down > MAX_POWER_CONFIG) {
++		pr_err("failed: invalid size_down %d", size_down);
++		rc = -EINVAL;
++		goto FREE_POWER_SETTING;
++	}
+ 	/* Allocate memory for power down setting */
+ 	power_down_setting =
+ 		kzalloc(sizeof(*power_setting) * size_down, GFP_KERNEL);
+diff --git a/include/media/msm_cam_sensor.h b/include/media/msm_cam_sensor.h
+index 7a74b1c..c857b80 100644
+--- a/include/media/msm_cam_sensor.h
++++ b/include/media/msm_cam_sensor.h
+@@ -54,6 +54,7 @@
+ #define MAX_NUMBER_OF_STEPS 47
+ 
+ #define MAX_LED_TRIGGERS 3
++#define MAX_POWER_CONFIG 12
+ 
+ enum sensor_stats_type {
+ 	YRGB,
+-- 
+1.8.2.1
+

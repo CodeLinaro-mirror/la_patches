@@ -1,0 +1,49 @@
+From d4854e695c39780bc6579ce6ab40daa10620ff8c Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitriK@codeaurora.org>
+Date: Wed, 18 Feb 2015 14:45:33 -0800
+Subject: [PATCH] packages-apps-SnapdragonCamera-03-1080p_camcorder
+
+Change-Id: I4ff34c264a70fd59d80e2ca0699b5d43ec7a62d0
+---
+ res/values/arrays.xml  | 4 ++--
+ res/values/strings.xml | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/res/values/arrays.xml b/res/values/arrays.xml
+index 750a795..602a9c6 100644
+--- a/res/values/arrays.xml
++++ b/res/values/arrays.xml
+@@ -38,7 +38,7 @@
+         <!-- The integer value of CamcorderProfile.QUALITY_2160P -->
+         <item>8</item>
+         <!-- The integer value of CamcorderProfile.QUALITY_1080P -->
+-        <item>6</item>
++        <item>@string/pref_video_quality_default</item>
+         <!-- The integer value of CamcorderProfile.QUALITY_720P -->
+         <item>5</item>
+         <!-- The integer value of CamcorderProfile.QUALITY_480P -->
+@@ -52,7 +52,7 @@
+         <!-- The integer value of CamcorderProfile.QUALITY_WQVGA -->
+         <item>11</item>
+         <!-- The integer value of CamcorderProfile.QUALITY_CIF -->
+-        <item>@string/pref_video_quality_default</item>
++        <item>3</item>
+         <!-- The integer value of CamcorderProfile.QUALITY_QVGA -->
+         <item>7</item>
+         <!-- The integer value of CamcorderProfile.QUALITY_QCIF -->
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index f3c265a..b4078ae 100644
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -239,7 +239,7 @@
+     <!-- The Video quality settings in preference [CHAR LIMIT=21] -->
+     <string name="pref_video_quality_title">Video quality</string>
+     <!-- The default quality value is 3 (CIF) -->
+-    <string name="pref_video_quality_default" translatable="false">3</string>
++    <string name="pref_video_quality_default" translatable="false">6</string>
+     <!-- Video quality setting entry.
+     Videos will be recorded in 4k DCI quality. [CHAR LIMIT=24] -->
+     <string name="pref_video_quality_entry_4kdci" translatable="false">
+-- 
+1.8.2.1
+

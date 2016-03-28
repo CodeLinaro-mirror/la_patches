@@ -1,0 +1,73 @@
+From 97c22c452cc7b236aeec6e705569edb7a210baf7 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:25:43 -0700
+Subject: [PATCH 01/22] clk: qcom: clock-a7: Add support to read various efuse
+ registers
+
+Some targets may support multiple efuse registers to decide upon the speed
+bin for selecting the correct speed bin table. Add support for the
+same.
+
+Change-Id: I3abb830770bf7dd2898b93b9ebb2d2b2160e7b94
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ drivers/clk/qcom/clock-a7.c | 34 ++++++++++++++++++++++++----------
+ 1 file changed, 24 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/clk/qcom/clock-a7.c b/drivers/clk/qcom/clock-a7.c
+index 2887e5c..d993afd 100644
+--- a/drivers/clk/qcom/clock-a7.c
++++ b/drivers/clk/qcom/clock-a7.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
++ * Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 and
+@@ -173,19 +173,33 @@ static void get_speed_bin_b(struct platform_device *pdev, int *bin,
+ 	*bin = 0;
+ 	*version = 0;
+ 
+-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "efuse");
+-	if (!res) {
+-		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+-								"efuse1");
+-		if (!res) {
+-			dev_info(&pdev->dev,
+-				"No speed/PVS binning available. Defaulting to 0!\n");
++	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "efuse1");
++	if (res) {
++		base = devm_ioremap(&pdev->dev, res->start, resource_size(res));
++		if (base) {
++			pte_efuse = readl_relaxed(base);
++			devm_iounmap(&pdev->dev, base);
++
++			*version = (pte_efuse >> 18) & 0x3;
++			if (!(*version)) {
++				*bin = (pte_efuse >> 23) & 0x3;
++				dev_info(&pdev->dev, "Speed bin: %d PVS Version: %d\n",
++						*bin, *version);
++				return;
++			}
++		} else {
++			dev_warn(&pdev->dev,
++				"Unable to read efuse1 data. Defaulting to 0!\n");
+ 			return;
+ 		}
+-		shift = 23;
+-		mask  = 0x3;
+ 	}
+ 
++	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "efuse");
++	if (!res) {
++		dev_info(&pdev->dev,
++				"No speed/PVS binning available. Defaulting to 0!\n");
++		return;
++	}
+ 	base = devm_ioremap(&pdev->dev, res->start, resource_size(res));
+ 	if (!base) {
+ 		dev_warn(&pdev->dev,
+-- 
+1.8.2.1
+

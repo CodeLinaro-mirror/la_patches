@@ -1,0 +1,49 @@
+From c44ea898c042e553180c6f3941fe2380b64bb6ba Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Fri, 27 Mar 2015 18:31:56 -0700
+Subject: [PATCH] packages-apps-SnapdragonCamera-04-Disables-H265
+
+Change-Id: Ieb5879415e277cef7f8f7df8509b45c72e4362bf
+---
+ res/values/qcomarrays.xml  | 4 ++--
+ res/values/qcomstrings.xml | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/res/values/qcomarrays.xml b/res/values/qcomarrays.xml
+index 9a2bd8f..b4e8810 100644
+--- a/res/values/qcomarrays.xml
++++ b/res/values/qcomarrays.xml
+@@ -487,7 +487,7 @@
+         <item>@string/pref_camera_videoencoder_entry_0</item>
+         <!--        <item>@string/pref_camera_videoencoder_entry_1</item> -->
+         <item>@string/pref_camera_videoencoder_entry_2</item>
+-        <item>@string/pref_camera_videoencoder_entry_3</item>
++        <!-- <item>@string/pref_camera_videoencoder_entry_3</item> -->
+ 
+     </string-array>
+ 
+@@ -495,7 +495,7 @@
+         <item>m4v</item>
+         <!-- <item>h263</item> -->
+         <item>h264</item>
+-        <item>h265</item>
++        <!--<item>h265</item> -->
+ 
+     </string-array>
+ 
+diff --git a/res/values/qcomstrings.xml b/res/values/qcomstrings.xml
+index 4bc02c5..5453a5e 100644
+--- a/res/values/qcomstrings.xml
++++ b/res/values/qcomstrings.xml
+@@ -70,7 +70,7 @@
+     <string name="pref_camera_videoencoder_entry_0">MPEG4</string>
+     <!--<string name="pref_camera_videoencoder_entry_1">H263</string> -->
+     <string name="pref_camera_videoencoder_entry_2">H264</string>
+-    <string name="pref_camera_videoencoder_entry_3">H265</string>
++    <!-- <string name="pref_camera_videoencoder_entry_3">H265</string> -->
+ 
+     <!-- Default video encoder setting. A numerical value. -->
+     <string name="pref_camera_videoencoder_default" translatable="false">h264</string>
+-- 
+1.8.2.1
+

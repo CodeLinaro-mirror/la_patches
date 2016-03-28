@@ -1,0 +1,34 @@
+From 7831966ea341e4819be8cfa829330b54dcb555de Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Mon, 2 Feb 2015 13:43:15 -0800
+Subject: [PATCH] kernel-04-Disable-blue-LED-after-boot
+
+Change-Id: I80dc15dbcd3bd5bec1d7eaf98de6f76d052cdcdd
+---
+ arch/arm/boot/dts/qcom/msm8994-liquid.dtsi | 10 ----------
+ 1 file changed, 10 deletions(-)
+
+diff --git a/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi b/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi
+index ec12da6..88b214b 100644
+--- a/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi
++++ b/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi
+@@ -867,16 +867,6 @@
+ 			};
+ 		};
+        };
+-
+-       qcom,pmi8994@3 {
+-              qcom,leds@d000 {
+-                     qcom,rgb_2 {
+-                            status = "ok";
+-                            qcom,default-state = "on";
+-                            qcom,turn-off-delay-ms = <5000>;
+-                     };
+-              };
+-       };
+ };
+ 
+ &spi_epm {
+-- 
+1.8.2.1
+

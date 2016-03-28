@@ -1,0 +1,30 @@
+From 3f4dd092e9c46fd1d405952ffeb52affd60b8526 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 19:31:35 -0700
+Subject: [PATCH 06/22] ARM: dts: msm: Add support for both MSM and APQ for
+ SBC8016
+
+Add support SBC8016 boot with both APQ and MSM board versions.
+
+Change-Id: Ib03dddd5ab38f96dc585464916d0759274121a60
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/apq8016-sbc.dts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8016-sbc.dts b/arch/arm/boot/dts/qcom/apq8016-sbc.dts
+index 27387fe..70c7efc 100644
+--- a/arch/arm/boot/dts/qcom/apq8016-sbc.dts
++++ b/arch/arm/boot/dts/qcom/apq8016-sbc.dts
+@@ -19,7 +19,7 @@
+ / {
+ 	model = "Qualcomm Technologies, Inc. APQ 8016 SBC";
+ 	compatible = "qcom,apq8016", "qcom,sbc";
+-	qcom,msm-id = <247 0>;
++	qcom,msm-id = <206 0>, <247 0>;
+ 	qcom,board-id = <24 0>;
+ 
+ };
+-- 
+1.8.2.1
+

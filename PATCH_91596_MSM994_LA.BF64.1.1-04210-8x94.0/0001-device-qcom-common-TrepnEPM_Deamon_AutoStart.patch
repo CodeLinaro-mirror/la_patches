@@ -1,0 +1,31 @@
+From f5bf3aee0c6aaf3037653bf24b80e10a8b469b52 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Tue, 17 Feb 2015 13:21:09 -0800
+Subject: [PATCH] device-qcom-common-TrepnEPM
+
+Change-Id: I5a570fc05aab1f60f74f2c54be79635ed03ef8cf
+---
+ rootdir/etc/init.qcom.sh | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/rootdir/etc/init.qcom.sh b/rootdir/etc/init.qcom.sh
+index 4b4fef6..7bddd7a 100644
+--- a/rootdir/etc/init.qcom.sh
++++ b/rootdir/etc/init.qcom.sh
+@@ -239,6 +239,13 @@ case "$target" in
+         ;;
+     "msm8994")
+         start_msm_irqbalance
++        platformvalue=`cat /sys/devices/soc0/hw_platform`
++        case "$platformvalue" in
++          "Fluid")
++            start profiler_daemon;;
++          "Liquid")
++            start profiler_daemon;;
++        esac
+         ;;
+     "msm8909")
+         start_vm_bms
+-- 
+1.8.2.1
+

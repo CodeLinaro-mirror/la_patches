@@ -1,0 +1,32 @@
+From 948eec807064498269f12a56974cec3793f4bc12 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Mon, 9 Mar 2015 18:17:25 -0700
+Subject: [PATCH] platform: apq8084: add hdmi pixel clocks
+
+Add HDMI CEA and VESA timings pixel clocks to the clock table.
+
+Change-Id: I98f5ac88986aafcfc3829e6b86a049f44811ea24
+---
+ platform/apq8084/apq8084-clock.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/platform/apq8084/apq8084-clock.c b/platform/apq8084/apq8084-clock.c
+index f01aa7e..43f8b77 100644
+--- a/platform/apq8084/apq8084-clock.c
++++ b/platform/apq8084/apq8084-clock.c
+@@ -728,8 +728,10 @@ static struct branch_clk mdss_hdmi_clk = {
+ };
+ 
+ static struct clk_freq_tbl ftbl_mdss_extpclk_clk[] = {
+-	F_MDSS(148500000, hdmipll, 1, 0, 0),
+-	F_END
++        F_MDSS( 74250000, hdmipll, 1, 0, 0),
++        F_MDSS( 25200000, hdmipll, 1, 0, 0),
++        F_MDSS(148500000, hdmipll, 1, 0, 0),
++        F_END
+ };
+ 
+ static struct rcg_clk extpclk_clk_src = {
+-- 
+1.8.2.1
+

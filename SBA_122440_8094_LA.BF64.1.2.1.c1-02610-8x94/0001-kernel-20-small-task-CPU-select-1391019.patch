@@ -1,0 +1,57 @@
+From 7a5fce6a4c47fde4d7dfd18bf3b55d2eea110d2f Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Thu, 10 Sep 2015 17:26:30 -0700
+Subject: [PATCH] sched: fix bug in small task CPU selection
+
+The maximum capacity CPU is a fallback option for small tasks
+and selected only when all the allowed lower capacity CPUs
+are overloaded. When the first such fallback CPU is encountered
+during the search, its cluster cpumask is computed and removed
+from the search.
+
+cpumask_and(&fb_search_cpu, &search_cpu, &rq->freq_domain_cpumask);
+cpumask_andnot(&search_cpu, &search_cpu, &rq->freq_domain_cpumask);
+
+The iterator CPU is cleared from the search_cpu mask before this,
+due to which it is not set in fb_search_cpu mask. Later, this mask is
+used to construct a search mask for iterating over the lower capacity
+CPUs to find the busy CPU.
+
+cpumask_and(&search_cpu, tsk_cpus_allowed(p), cpu_online_mask);
+cpumask_andnot(&search_cpu, &search_cpu, &fb_search_cpu);
+
+The search_cpu mask has now a maximum capacity CPU due to the above
+mentioned bug and may get selected instead of a lower capacity CPU
+that can accommodate this small task under spill threshold.
+
+Change-Id: Id330af66542907e24dfe60a6424b195aa8623cea
+Signed-off-by: Pavankumar Kondeti <pkondeti@codeaurora.org>
+---
+ kernel/sched/fair.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 1917859..b3f30a0 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1826,8 +1826,6 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
+ 	do {
+ 		rq = cpu_rq(i);
+ 
+-		cpumask_clear_cpu(i, &search_cpu);
+-
+ 		trace_sched_cpu_load(rq, idle_cpu(i),
+ 				     mostly_idle_cpu_sync(i,
+ 						  cpu_load_sync(i, sync), sync),
+@@ -1845,6 +1843,8 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
+ 			continue;
+ 		}
+ 
++		cpumask_clear_cpu(i, &search_cpu);
++
+ 		if (sched_cpu_high_irqload(i))
+ 			continue;
+ 
+-- 
+1.9.1
+

@@ -1,0 +1,27 @@
+From 766b9004d0c0f341b5529f11fae6d3c9b9119b02 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 26 Aug 2015 11:41:13 -0700
+Subject: [PATCH] 
+ system-netd-02-Disables-set-softAP-function-overriding-QCA-cards-1333748
+
+Change-Id: Ide95cd11b70188f8858336d2c2d2af6c59479538
+---
+ server/QsoftapCmd.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/server/QsoftapCmd.cpp b/server/QsoftapCmd.cpp
+index dab2820..7cc6bf9 100644
+--- a/server/QsoftapCmd.cpp
++++ b/server/QsoftapCmd.cpp
+@@ -136,7 +136,7 @@ int CommandListener::QsoftapCmd::runCommand(SocketClient *cli,
+             cli->sendMsg(ResponseCode::CommandOkay, qcCmdBuf, false);
+             return 0;
+         }
+-    } else if (!strcmp(argv[1], "set")) {
++    } else if (0) {
+         /* When the WLAN is AR6004, use the Android native
+            SoftapController command. */
+         property_get("wlan.driver.ath", ath6kl_supported, 0);
+-- 
+1.8.2.1
+

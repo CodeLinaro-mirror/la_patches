@@ -1,0 +1,29 @@
+From 0124afa9325e5b432480d7995e8da920b5f8533d Mon Sep 17 00:00:00 2001
+From: Ilia Lin <ilialin@codeaurora.org>
+Date: Tue, 28 Oct 2014 10:31:33 +0200
+Subject: [PATCH 04/11] ARM: dts: msm: Add camera support to APQ8094 V2
+ Dragonboard
+
+Add camera device tree support to APQ8094 V2 Dragonboard
+
+Change-Id: Icf348019fcbbfbfbdf1d56e2d8ccf4d708b7628f
+Signed-off-by: Ilia Lin <ilialin@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/apq8094-v2-dragonboard.dts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8094-v2-dragonboard.dts b/arch/arm/boot/dts/qcom/apq8094-v2-dragonboard.dts
+index b50bbc6..2c593b4 100644
+--- a/arch/arm/boot/dts/qcom/apq8094-v2-dragonboard.dts
++++ b/arch/arm/boot/dts/qcom/apq8094-v2-dragonboard.dts
+@@ -15,6 +15,7 @@
+ 
+ #include "apq8094-v2.dtsi"
+ #include "apq8094-dragonboard.dtsi"
++#include "apq8094-camera-sensor-dragonboard.dtsi"
+ 
+ / {
+ 	model = "Qualcomm Technologies, Inc. APQ8094 Dragonboard";
+-- 
+1.8.2.1
+

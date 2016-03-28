@@ -1,0 +1,31 @@
+From 493761fdb83cc0aabd02988b53478a8ba8f0ddfc Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 26 Aug 2015 10:57:54 -0700
+Subject: [PATCH] 
+ device-qcom-common-02-Tweak-TCP-for-MultiGigabit-network-1052236
+
+Change-Id: Ib004b5edf79be4c7cb48b853723df2f75b885c67
+---
+ rootdir/etc/init.qcom.rc | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/rootdir/etc/init.qcom.rc b/rootdir/etc/init.qcom.rc
+index 10e8a98..7fb4400 100644
+--- a/rootdir/etc/init.qcom.rc
++++ b/rootdir/etc/init.qcom.rc
+@@ -109,8 +109,10 @@ on boot
+ 
+ #   Define TCP buffer sizes for various networks
+ #   ReadMin, ReadInitial, ReadMax, WriteMin, WriteInitial, WriteMax,
+-    setprop net.tcp.buffersize.wifi    524288,2097152,4194304,262144,524288,1048576
+-
++    setprop net.tcp.buffersize.wifi    4096,16384,16777216,4096,87380,16777216
++#   Set override the default value in init.rc. The default causes too slow start
++#   This matches kernel default.
++    setprop net.tcp.default_init_rwnd 10
+ 
+     setprop ro.telephony.call_ring.multiple false
+ 
+-- 
+1.8.2.1
+

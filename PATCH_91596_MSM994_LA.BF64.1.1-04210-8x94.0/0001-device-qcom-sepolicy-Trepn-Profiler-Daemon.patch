@@ -1,0 +1,110 @@
+From 2cc71068120edb25d79f987c50e984d44076d42b Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Thu, 19 Feb 2015 18:33:00 -0800
+Subject: [PATCH] device-qcom-sepolicy-Trepn-Profiler-Daemon
+
+Change-Id: I90cc32ac81309e1ef849ae2539cf67e46db94298
+---
+ Android.mk                |  4 +++-
+ common/device.te          |  3 +++
+ common/file_contexts      |  2 ++
+ common/profiler_daemon.te | 15 +++++++++++++++
+ common/seapp_contexts     |  1 +
+ common/trepn.te           |  8 ++++++++
+ 6 files changed, 32 insertions(+), 1 deletion(-)
+ create mode 100644 common/profiler_daemon.te
+ create mode 100644 common/trepn.te
+
+diff --git a/Android.mk b/Android.mk
+index f429177..24e9e1c 100755
+--- a/Android.mk
++++ b/Android.mk
+@@ -94,7 +94,9 @@ BOARD_SEPOLICY_UNION := \
+        kernel.te \
+        vold.te \
+        energyawareness.te \
+-       usf.te
++       usf.te \
++       profiler_daemon.te \
++	   trepn.te
+ 
+ # Compile sensor pilicy only for SSC targets
+ SSC_TARGET_LIST := apq8084
+diff --git a/common/device.te b/common/device.te
+index 5384b97..403755c 100755
+--- a/common/device.te
++++ b/common/device.te
+@@ -94,3 +94,6 @@ type pta_device, dev_type;
+ 
+ #Define usf device
+ type usf_device, dev_type;
++
++#Define epm_adc device
++type epm_device, dev_type;
+diff --git a/common/file_contexts b/common/file_contexts
+index 8d5b21d..4ddf7f7 100644
+--- a/common/file_contexts
++++ b/common/file_contexts
+@@ -58,6 +58,7 @@
+ /dev/voice_svc                                  u:object_r:voice_device:s0
+ /dev/system_health_monitor                      u:object_r:system_health_monitor_device:s0
+ /dev/pta                                        u:object_r:pta_device:s0
++/dev/epm_adc                                    u:object_r:epm_device:s0
+ 
+ ###################################
+ # Dev socket nodes
+@@ -171,6 +172,7 @@
+ /system/bin/usf_sw_calib                        u:object_r:usf_exec:s0
+ /system/bin/usf_pairing                         u:object_r:usf_exec:s0
+ /system/bin/usf_tester                          u:object_r:usf_exec:s0
++/system/bin/profiler_daemon                     u:object_r:profiler_daemon_exec:s0
+ 
+ ###################################
+ # sysfs files
+diff --git a/common/profiler_daemon.te b/common/profiler_daemon.te
+new file mode 100644
+index 0000000..d48b569
+--- /dev/null
++++ b/common/profiler_daemon.te
+@@ -0,0 +1,15 @@
++type profiler_daemon, domain;
++type profiler_daemon_exec, exec_type, file_type;
++
++init_daemon_domain(profiler_daemon)
++
++# Allow profiler_daemon set cpu online
++allow profiler_daemon sysfs_cpu_online:file rw_file_perms;
++
++# Allow socket creation
++allow profiler_daemon self:socket create_socket_perms;
++
++# Allow communication with epm_adc
++allow profiler_daemon epm_device:chr_file rw_file_perms;
++
++allow profiler_daemon sysfs:file write;
+diff --git a/common/seapp_contexts b/common/seapp_contexts
+index a75ef41..c54aa4f 100644
+--- a/common/seapp_contexts
++++ b/common/seapp_contexts
+@@ -2,3 +2,4 @@
+ user=gps domain=location_app type=location_app_data_file
+ user=system seinfo=platform name=com.qualcomm.services.location domain=location_app type=location_app_data_file
+ user=system seinfo=platform name=com.qualcomm.location.XT domain=location_app type=location_app_data_file
++user=_app seinfo=default domain=trepn
+diff --git a/common/trepn.te b/common/trepn.te
+new file mode 100644
+index 0000000..6cf9ea9
+--- /dev/null
++++ b/common/trepn.te
+@@ -0,0 +1,8 @@
++type trepn, domain;
++
++app_domain(trepn);
++
++allow trepn profiler_daemon:unix_stream_socket connectto;
++allow trepn self:tcp_socket { bind create setopt listen write read getopt connect accept getattr };
++allow trepn node:tcp_socket node_bind;
++allow trepn node:udp_socket node_bind;
+-- 
+1.8.2.1
+

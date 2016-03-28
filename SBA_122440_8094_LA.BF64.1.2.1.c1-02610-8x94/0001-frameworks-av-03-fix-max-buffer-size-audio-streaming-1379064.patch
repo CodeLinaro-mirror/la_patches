@@ -1,0 +1,35 @@
+From b4eed4b2b64830d1d6da4c7536e0c98b215314fd Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Mon, 31 Aug 2015 18:36:46 -0700
+Subject: [PATCH] nuplayer: Fix max buffer size for audio only streaming
+ playback
+
+Currently, audio only streaming playback with very low frame size
+faces underrun in compressed playback. This causes underruns while
+playing initial frames. By increasing the max buffer accumulation
+limit in Generic source, the underrun is avoided.
+
+Change-Id: I37949f65b9a08d0776f2346d665399be2ecd0265
+CRs-Fixed: 875129
+---
+ media/libmediaplayerservice/nuplayer/GenericSource.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/media/libmediaplayerservice/nuplayer/GenericSource.cpp b/media/libmediaplayerservice/nuplayer/GenericSource.cpp
+index 1ed005b..dbda4ad 100644
+--- a/media/libmediaplayerservice/nuplayer/GenericSource.cpp
++++ b/media/libmediaplayerservice/nuplayer/GenericSource.cpp
+@@ -1543,7 +1543,9 @@ void NuPlayer::GenericSource::readBuffer(
+             break;
+         case MEDIA_TRACK_TYPE_AUDIO:
+             track = &mAudioTrack;
+-            if (mIsWidevine || (mHttpSource != NULL)) {
++            if (mHttpSource != NULL && getTrackCount() == 1) {
++                maxBuffers = 16;
++            } else if (mIsWidevine || (mHttpSource != NULL)) {
+                 maxBuffers = 8;
+             } else {
+                 maxBuffers = 64;
+-- 
+1.9.1
+

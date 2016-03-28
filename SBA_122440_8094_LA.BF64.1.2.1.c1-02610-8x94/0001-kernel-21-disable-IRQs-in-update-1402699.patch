@@ -1,0 +1,41 @@
+From 7e461fd14e54c80fc817baee5118bc245ec4299b Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Mon, 14 Sep 2015 15:01:01 -0700
+Subject: [PATCH] sched: disable IRQs in update_min_max_capacity
+
+IRQs must be disabled while locking runqueues since an
+interrupt may cause a runqueue lock to be acquired.
+
+CRs-fixed: 828598
+Change-Id: Id66f2e25ed067fc4af028482db8c3abd3d10c20f
+Signed-off-by: Steve Muckle <smuckle@codeaurora.org>
+---
+ kernel/sched/core.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 6ea6cb4..bc0440ef 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -2391,8 +2391,10 @@ static void __update_min_max_capacity(void)
+ 
+ static void update_min_max_capacity(void)
+ {
++	unsigned long flags;
+ 	int i;
+ 
++	local_irq_save(flags);
+ 	for_each_possible_cpu(i)
+ 		raw_spin_lock(&cpu_rq(i)->lock);
+ 
+@@ -2400,6 +2402,7 @@ static void update_min_max_capacity(void)
+ 
+ 	for_each_possible_cpu(i)
+ 		raw_spin_unlock(&cpu_rq(i)->lock);
++	local_irq_restore(flags);
+ }
+ 
+ /*
+-- 
+1.9.1
+

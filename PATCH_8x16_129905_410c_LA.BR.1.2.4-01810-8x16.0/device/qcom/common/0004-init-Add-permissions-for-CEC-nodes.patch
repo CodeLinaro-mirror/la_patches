@@ -1,0 +1,39 @@
+From fd718b2e21557dca33d65abfdc6db0239772bb0d Mon Sep 17 00:00:00 2001
+From: Naseer Ahmed <naseer@codeaurora.org>
+Date: Wed, 23 Jul 2014 18:13:12 -0400
+Subject: [PATCH 4/5] init: Add permissions for CEC nodes
+
+Add necessary permissions to the cec nodes of HDMI so that it
+can be accessed by related modules.
+
+Change-Id: I220fd52e33690ee6d4de39f121464571c7ce91e0
+---
+ init/init_msm.c | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/init/init_msm.c b/init/init_msm.c
+index 0d50b7f..9b4f9c9 100644
+--- a/init/init_msm.c
++++ b/init/init_msm.c
+@@ -250,6 +250,18 @@ void set_display_node_perms()
+         snprintf(tmp, sizeof(tmp), "%sfb%d/hdcp/tp", sys_fb_path, hdmiFbNum);
+         setPerms(tmp, 0664);
+         setOwners(tmp, AID_SYSTEM, AID_SYSTEM);
++        snprintf(tmp, sizeof(tmp), "%sfb%d/cec/enable", sys_fb_path, hdmiFbNum);
++        setPerms(tmp, 0664);
++        setOwners(tmp, AID_SYSTEM, AID_SYSTEM);
++        snprintf(tmp, sizeof(tmp), "%sfb%d/cec/logical_addr", sys_fb_path, hdmiFbNum);
++        setPerms(tmp, 0664);
++        setOwners(tmp, AID_SYSTEM, AID_SYSTEM);
++        snprintf(tmp, sizeof(tmp), "%sfb%d/cec/rd_msg", sys_fb_path, hdmiFbNum);
++        setPerms(tmp, 0664);
++        setOwners(tmp, AID_SYSTEM, AID_SYSTEM);
++        snprintf(tmp, sizeof(tmp), "%sfb%d/cec/wr_msg", sys_fb_path, hdmiFbNum);
++        setPerms(tmp, 0600);
++        setOwners(tmp, AID_SYSTEM, AID_SYSTEM);
+         snprintf(tmp, sizeof(tmp), "%sfb%d", dev_fb_path, hdmiFbNum);
+         symlink(tmp, DEV_GFX_HDMI);
+     }
+-- 
+1.8.2.1
+

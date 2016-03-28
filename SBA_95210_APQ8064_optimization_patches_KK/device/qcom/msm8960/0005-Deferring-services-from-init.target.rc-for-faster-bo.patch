@@ -1,0 +1,95 @@
+From d47faaef060460aabea31693852c08a6197ae2d9 Mon Sep 17 00:00:00 2001
+From: Padmini Vijayakumar <padvij@codeaurora.org>
+Date: Thu, 30 Oct 2014 06:38:51 +0000
+Subject: [PATCH 5/5] Deferring services from init.target.rc for faster boot
+
+Change-Id: I03c226b1846b823e05ad5d24f1860ecfc51628c7
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+
+Conflicts:
+	init.target.rc
+---
+ init.target.rc | 29 ++++++++++++++---------------
+ 1 file changed, 14 insertions(+), 15 deletions(-)
+
+diff --git a/init.target.rc b/init.target.rc
+index e082c47..98594fd 100644
+--- a/init.target.rc
++++ b/init.target.rc
+@@ -77,6 +77,7 @@ service gsiff_daemon /system/bin/gsiff_daemon
+     class late_start
+     user system
+     group gps qcom_oncrpc net_raw
++    disabled
+ 
+ service thermald /system/bin/thermald
+    class main
+@@ -118,13 +119,13 @@ service qrngd /system/bin/qrngd -f
+    class main
+    user root
+    group root
+-	disabled
++   disabled
+ 
+ service qseecomd /system/bin/qseecomd
+    class late_start
+    user system
+    group system
+-	disabled
++   disabled
+ 
+ # Start kickstart if mdm is detected
+ on property:ro.baseband=mdm
+@@ -183,7 +184,7 @@ service time_daemon /system/bin/time_daemon
+    class late_start
+    user root
+    group root
+-	disabled
++   disabled
+ 
+ service imsqmidaemon /system/bin/imsqmidaemon
+     class main
+@@ -192,10 +193,6 @@ service imsqmidaemon /system/bin/imsqmidaemon
+     group ims radio net_raw log qcom_diag
+     disabled
+ 
+-on boot
+-    start imsqmidaemon
+-
+-
+ # imsdatadaemon starts with root and UID will be downgraded to SYSTEM.
+ service imsdatadaemon /system/bin/imsdatadaemon
+     class main
+@@ -209,7 +206,7 @@ service wcnss-service /system/bin/wcnss_service
+     user system
+     group system wifi
+     oneshot
+-	 disabled
++    disabled
+ 
+ #on property:sys.ims.QMI_DAEMON_STATUS=1
+ #    start imsdatadaemon
+@@ -223,11 +220,13 @@ service ims_rtp_daemon /system/bin/ims_rtp_daemon
+ 
+ #on property:sys.ims.DATA_DAEMON_STATUS=1
+ #    start ims_rtp_daemon
++
+ on property:sys.boot_completed=1
+-	 start qrngd
+-	 start qseecomd
+-	 start imsqmidaemon
+-	 start imsdatadaemon
+-	 start ims_rtp_daemon
+-	 start wcnss-service
+-	 start usf-post-boot
++    start gsiff_daemon
++    start qrngd
++    start qseecomd
++    start imsqmidaemon
++    start imsdatadaemon
++    start ims_rtp_daemon
++    start wcnss-service
++    start usf-post-boot
+-- 
+1.8.2.1
+

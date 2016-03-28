@@ -1,0 +1,68 @@
+From 5c2e58cf7239e8881ee2f892818ed2fe1591340d Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 20:03:13 -0700
+Subject: [PATCH 2/2] target: msm8916: Enable boot LED indication
+
+By turning on a LED in apq8016 SBC devices we get a notification
+that the boot process has started. The LED will be turned-off when HLOS
+display takes over.
+
+Change-Id: I8c0fa084a56344c2ae200442158daca6018c449d
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ platform/msm8916/include/platform/iomap.h |  2 ++
+ target/msm8916/init.c                     | 18 ++++++++++++++++++
+ 2 files changed, 20 insertions(+)
+
+diff --git a/platform/msm8916/include/platform/iomap.h b/platform/msm8916/include/platform/iomap.h
+index a720d0f..73b462e 100644
+--- a/platform/msm8916/include/platform/iomap.h
++++ b/platform/msm8916/include/platform/iomap.h
+@@ -252,6 +252,8 @@
+ #define VIDEO_MODE_CTRL             0x010
+ #define HS_TIMER_CTRL               0x0BC
+ 
++#define GPIO4_BASE                  0xC300
++
+ #define TCSR_TZ_WONCE               0x193D000
+ #define TCSR_BOOT_MISC_DETECT	    0x193D100
+ #endif
+diff --git a/target/msm8916/init.c b/target/msm8916/init.c
+index 766c4f6..f3f3854 100644
+--- a/target/msm8916/init.c
++++ b/target/msm8916/init.c
+@@ -185,6 +185,20 @@ uint32_t is_user_force_reset(void)
+ }
+ #endif
+ 
++int boot_led_ctrl()
++{
++	struct pm8x41_mpp mpp;
++
++	mpp.base = GPIO4_BASE;
++	mpp.vin = MPP_VIN2;
++	mpp.mode = MPP_HIGH;
++
++	pm8x41_config_output_mpp(&mpp);
++	pm8x41_enable_mpp(&mpp, MPP_ENABLE);
++
++	return 0;
++}
++
+ void target_init(void)
+ {
+ 	uint32_t base_addr;
+@@ -214,6 +228,10 @@ void target_init(void)
+ 
+ 	if (target_use_signed_kernel())
+ 		target_crypto_init_params();
++
++	/* Turn-on LED for boot process indication */
++	if (board_hardware_id() == HW_PLATFORM_SBC)
++		boot_led_ctrl();
+ }
+ 
+ void target_serialno(unsigned char *buf)
+-- 
+1.8.2.1
+

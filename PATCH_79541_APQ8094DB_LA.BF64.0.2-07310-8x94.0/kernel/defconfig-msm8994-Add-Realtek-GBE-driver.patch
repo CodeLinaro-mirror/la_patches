@@ -1,0 +1,29 @@
+From e2e7dbae3a2266b43ec199138652532c60f40b39 Mon Sep 17 00:00:00 2001
+From: Ilia Lin <ilialin@codeaurora.org>
+Date: Thu, 23 Oct 2014 14:18:59 +0300
+Subject: [PATCH 10/11] defconfig: msm8994: Add Realtek GBE driver
+
+Add Realtek GBE driver compilation
+
+Change-Id: I98da263968fb2bd4cb74ac3998ad9c169766845c
+Signed-off-by: Ilia Lin <ilialin@codeaurora.org>
+---
+ arch/arm64/configs/msm8994_defconfig | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/arch/arm64/configs/msm8994_defconfig b/arch/arm64/configs/msm8994_defconfig
+index 0be1d63..19d6a09 100644
+--- a/arch/arm64/configs/msm8994_defconfig
++++ b/arch/arm64/configs/msm8994_defconfig
+@@ -248,6 +248,8 @@ CONFIG_CNSS_MAC_BUG=y
+ CONFIG_CLD_LL_CORE=y
+ CONFIG_ATH_CARDS=y
+ CONFIG_WIL6210=m
++CONFIG_NET_VENDOR_REALTEK=y
++CONFIG_R8169=y
+ CONFIG_INPUT_EVDEV=y
+ CONFIG_INPUT_EVBUG=m
+ CONFIG_KEYBOARD_GPIO=y
+-- 
+1.8.2.1
+

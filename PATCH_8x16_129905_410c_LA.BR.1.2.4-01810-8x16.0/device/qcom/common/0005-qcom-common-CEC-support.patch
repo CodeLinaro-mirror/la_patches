@@ -1,0 +1,37 @@
+From 61633cef406914a64ccdc3b27319886f2a191b66 Mon Sep 17 00:00:00 2001
+From: Naseer Ahmed <naseer@codeaurora.org>
+Date: Mon, 23 Feb 2015 20:44:10 -0500
+Subject: [PATCH 5/5] qcom: common: CEC support
+
+Enable CEC module to be compiled for msm8916.
+
+Change-Id: If8039aa49e817443d04c34c45b57facd5a3ee867
+---
+ base.mk | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/base.mk b/base.mk
+index e280991..2be0a9e 100644
+--- a/base.mk
++++ b/base.mk
+@@ -418,6 +418,9 @@ LIBHWCOMPOSER += hwcomposer.msm7627_surf
+ LIBHWCOMPOSER += hwcomposer.msm7627_6x
+ LIBHWCOMPOSER += hwcomposer.msm7627a
+ 
++#CEC HAL
++LIBHDMICEC   :=  hdmi_cec.msm8916
++
+ #LIBAUDIOPARAM -- Exposing AudioParameter as dynamic library for SRS TruMedia to work
+ LIBAUDIOPARAM := libaudioparameter
+ 
+@@ -691,6 +694,7 @@ PRODUCT_PACKAGES += $(LIBAUDIORESAMPLER)
+ PRODUCT_PACKAGES += $(LIBOPENCOREHW)
+ PRODUCT_PACKAGES += $(LIBOVERLAY)
+ PRODUCT_PACKAGES += $(LIBHWCOMPOSER)
++PRODUCT_PACKAGES += $(LIBHDMICEC)
+ PRODUCT_PACKAGES += $(LIBGENLOCK)
+ PRODUCT_PACKAGES += $(LIBPERFLOCK)
+ PRODUCT_PACKAGES += $(LIBQCOMUI)
+-- 
+1.8.2.1
+

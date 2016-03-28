@@ -1,0 +1,48 @@
+From 9cb91bbf0e2e48ebcc0d27304ca2bf5a15fc331d Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Thu, 4 Dec 2014 15:24:40 -0800
+Subject: [PATCH] init.qcom.usb: Set USB composition for DB8094 peripheral
+ mode.
+
+For DB8094 the usb peripheral connected to port 1 CI
+that support only USB2.
+
+Change-Id: Ia6becd299de02737be2dac21af85fbbe92240213
+---
+ rootdir/etc/init.qcom.usb.sh | 13 ++++++++++++-
+ 1 file changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/rootdir/etc/init.qcom.usb.sh b/rootdir/etc/init.qcom.usb.sh
+index e52c59b..53dac5e 100644
+--- a/rootdir/etc/init.qcom.usb.sh
++++ b/rootdir/etc/init.qcom.usb.sh
+@@ -30,6 +30,13 @@
+ chown -h root.system /sys/devices/platform/msm_hsusb/gadget/wakeup
+ chmod -h 220 /sys/devices/platform/msm_hsusb/gadget/wakeup
+ 
++# Set platform variables
++if [ -f /sys/devices/soc0/hw_platform ]; then
++    soc_hwplatform=`cat /sys/devices/soc0/hw_platform` 2> /dev/null
++else
++    soc_hwplatform=`cat /sys/devices/system/soc/soc0/hw_platform` 2> /dev/null
++fi
++
+ #
+ # Allow persistent usb charging disabling
+ # User needs to set usb charging disabled in persist.usb.chgdisabled
+@@ -122,7 +129,11 @@ case "$usb_config" in
+                             setprop persist.sys.usb.config diag,serial_smd,rmnet_bam,adb
+                         ;;
+                         "msm8994")
+-                            setprop persist.sys.usb.config diag,serial_smd,serial_tty,rmnet_ipa,mass_storage,adb
++                            if [ "$soc_hwplatform" == "Dragon" ]; then
++                               setprop persist.sys.usb.config diag,adb
++                            else
++                               setprop persist.sys.usb.config diag,serial_smd,serial_tty,rmnet_ipa,mass_storage,adb
++                            fi
+                         ;;
+                         "msm8909")
+                             setprop persist.sys.usb.config diag,serial_smd,rmnet_qti_bam,adb
+-- 
+1.8.2.1
+

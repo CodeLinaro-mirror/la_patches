@@ -1,0 +1,43 @@
+From b925043578cd74d55fcb0320b20a6d15a6e2ff93 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Fri, 6 Mar 2015 14:50:57 -0800
+Subject: [PATCH] usb: dwc3-msm: Ignore multiple VBUS notifications
+
+VBUS notifications arrive externally. There is a possibility that
+they can arrive spuriously with the same value, which can cause
+the resume_work function to get queued multiple times back-to-back.
+This can result in the runtime PM counters getting out of sync,
+For instance in the case of cable plug-in, if resume_work is called
+multiple times, pm_runtime_get() is called multiply resulting in
+runaway usage_counter increase. Upon cable disconnect, there would
+be a mismatch in the number of times pm_runtime_put() is called
+which leaves the device in a non-suspended state.
+
+Prevent this by queuing the work function only when VBUS state
+changes.
+
+CRs-fixed: 794646
+Change-Id: Ie7ac27c32e81f3c149ad7f2a64d8c8ebd0073617
+Signed-off-by: Jack Pham <jackp@codeaurora.org>
+Signed-off-by: Azhar Shaikh <azhars@codeaurora.org>
+---
+ drivers/usb/dwc3/dwc3-msm.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/drivers/usb/dwc3/dwc3-msm.c b/drivers/usb/dwc3/dwc3-msm.c
+index 63d51dc..58ec9d1 100644
+--- a/drivers/usb/dwc3/dwc3-msm.c
++++ b/drivers/usb/dwc3/dwc3-msm.c
+@@ -1797,6 +1797,9 @@ static int dwc3_msm_power_set_property_usb(struct power_supply *psy,
+ 		dev_dbg(mdwc->dev, "%s: notify xceiv event\n", __func__);
+ 		if (mdwc->otg_xceiv && !mdwc->ext_inuse &&
+ 		    (mdwc->ext_xceiv.otg_capability || !init)) {
++			if (mdwc->ext_xceiv.bsv == val->intval)
++				break;
++
+ 			mdwc->ext_xceiv.bsv = val->intval;
+ 			/*
+ 			 * Set debouncing delay to 120ms. Otherwise battery
+-- 
+1.8.2.1
+

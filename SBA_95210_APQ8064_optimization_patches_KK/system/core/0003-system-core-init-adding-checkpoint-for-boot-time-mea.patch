@@ -1,0 +1,45 @@
+From 431a84b5285441f5bfd7a1af85799500c0a76755 Mon Sep 17 00:00:00 2001
+From: Steven Veigas <sveiga@codeaurora.org>
+Date: Wed, 18 Feb 2015 07:13:31 +0000
+Subject: [PATCH 3/5] system: core: init: adding checkpoint for boot time
+ measurement
+
+Marker is added at start of init, for boot time measurement
+
+Change-Id: Idd53f86477d676ee51488449cf634a17b94a8d00
+---
+ init/init.c | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/init/init.c b/init/init.c
+index ea6f904..524b72c 100644
+--- a/init/init.c
++++ b/init/init.c
+@@ -965,6 +965,15 @@ static void selinux_initialize(void)
+     security_setenforce(is_enforcing);
+ }
+ 
++void place_marker(char *name)
++{
++    int fd=open("/proc/bootkpi/marker_entry", O_RDWR);
++    if (fd > 0) {
++        write(fd, name, strlen(name));
++        close(fd);
++    }
++}
++
+ int main(int argc, char **argv)
+ {
+     int fd_count = 0;
+@@ -978,6 +987,8 @@ int main(int argc, char **argv)
+     bool is_charger = false;
+     bool is_ffbm = false;
+ 
++    place_marker("init[user]-start");
++
+     if (!strcmp(basename(argv[0]), "ueventd"))
+         return ueventd_main(argc, argv);
+ 
+-- 
+1.8.2.1
+

@@ -1,0 +1,24 @@
+From 591cfc20996ef3e9ab25965c9fa814cd7def5904 Mon Sep 17 00:00:00 2001
+From: Eugene Kolinko <ekolinko@codeaurora.org>
+Date: Fri, 20 Feb 2015 11:00:34 -0800
+Subject: [PATCH] Enable EPM driver in performance mode.
+
+Change-Id: I371bf741e5826382242503d7cb6c7e3460a0a1b3
+
+:100644 100644 7887bbd... f4db9d2... M	arch/arm64/configs/msm8994-perf_defconfig
+
+diff --git a/arch/arm64/configs/msm8994-perf_defconfig b/arch/arm64/configs/msm8994-perf_defconfig
+index 7887bbd..f4db9d2 100644
+--- a/arch/arm64/configs/msm8994-perf_defconfig
++++ b/arch/arm64/configs/msm8994-perf_defconfig
+@@ -301,6 +301,7 @@ CONFIG_MSM_DLOAD_MODE=y
+ CONFIG_MSM_PM=y
+ CONFIG_APSS_CORE_EA=y
+ CONFIG_SENSORS_QPNP_ADC_VOLTAGE=y
++CONFIG_SENSORS_EPM_ADC=y
+ CONFIG_THERMAL=y
+ CONFIG_THERMAL_TSENS8974=y
+ CONFIG_THERMAL_MONITOR=y
+-- 
+1.8.2.1
+

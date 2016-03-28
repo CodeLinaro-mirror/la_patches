@@ -1,0 +1,231 @@
+From 1215093f8ee595306eda9ea2877d7b212ab0e5b6 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Fri, 20 Mar 2015 17:10:46 -0700
+Subject: [PATCH] msm: display: hdmi: keep cec on when hdmi is off
+
+Use sysfs node for CEC enable bit 1 as CEC wakeup feature setting.
+When this is enabled, make sure CEC works even when hdmi is turned off
+by keeping HPD and CEC block on. Enable wakeup irq so that sytem can wakeup
+in xo-shutdown case.
+
+Change-Id: Ie2b66b2c9a6a7997b00c47a75cdc703a7bb816ca
+Signed-off-by: Ken Zhang <kenz@codeaurora.org>
+---
+ drivers/video/msm/mdss/mdss.h          |  2 ++
+ drivers/video/msm/mdss/mdss_hdmi_cec.c | 18 +++++++++++++++++-
+ drivers/video/msm/mdss/mdss_hdmi_cec.h |  1 +
+ drivers/video/msm/mdss/mdss_hdmi_tx.c  | 27 +++++++++++++++------------
+ drivers/video/msm/mdss/mdss_hdmi_tx.h  |  3 +++
+ drivers/video/msm/mdss/mdss_mdp.c      | 17 +++++++++++++++++
+ include/linux/mdss_io_util.h           |  1 +
+ 7 files changed, 56 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/video/msm/mdss/mdss.h b/drivers/video/msm/mdss/mdss.h
+index 68ed8be..b8c3512 100644
+--- a/drivers/video/msm/mdss/mdss.h
++++ b/drivers/video/msm/mdss/mdss.h
+@@ -128,6 +128,7 @@ struct mdss_data_type {
+ 	u32 irq_mask;
+ 	u32 irq_ena;
+ 	u32 irq_buzy;
++	bool irq_wakeup_en;
+ 	u32 has_bwc;
+ 	u32 has_decimation;
+ 	u32 wfd_mode;
+@@ -238,6 +239,7 @@ void mdss_disable_irq_nosync(struct mdss_hw *hw);
+ void mdss_bus_bandwidth_ctrl(int enable);
+ int mdss_iommu_ctrl(int enable);
+ int mdss_bus_scale_set_quota(int client, u64 ab_quota, u64 ib_quota);
++void mdss_enable_irq_wake(bool enable);
+ 
+ static inline struct ion_client *mdss_get_ionclient(void)
+ {
+diff --git a/drivers/video/msm/mdss/mdss_hdmi_cec.c b/drivers/video/msm/mdss/mdss_hdmi_cec.c
+index 4857250..b1a80c2 100644
+--- a/drivers/video/msm/mdss/mdss_hdmi_cec.c
++++ b/drivers/video/msm/mdss/mdss_hdmi_cec.c
+@@ -46,6 +46,7 @@ struct hdmi_cec_ctrl {
+ 	bool cec_enabled;
+ 	bool compliance_response_enabled;
+ 	bool cec_engine_configed;
++	bool cec_wakeup_en;
+ 
+ 	u8 cec_logical_addr;
+ 	u32 cec_msg_wr_status;
+@@ -518,7 +519,9 @@ static ssize_t hdmi_wta_cec_enable(struct device *dev,
+ 		DEV_ERR("%s: kstrtoint failed.\n", __func__);
+ 		return -EPERM;
+ 	}
+-	cec_en = (val == 1) ? true : false;
++	cec_en = (val & 0x1) ? true : false;
++	/* bit 1 is used for wakeup feature */
++	cec_ctrl->cec_wakeup_en = ((val & 0x3) == 0x3) ? true : false;
+ 
+ 	spin_lock_irqsave(&cec_ctrl->lock, flags);
+ 	if (cec_ctrl->cec_enabled == cec_en) {
+@@ -786,6 +789,16 @@ static struct attribute_group hdmi_cec_fs_attr_group = {
+ 	.attrs = hdmi_cec_fs_attrs,
+ };
+ 
++bool is_hdmi_cec_wakeup_en(void *input)
++{
++	struct hdmi_cec_ctrl *cec_ctrl = (struct hdmi_cec_ctrl *)input;
++	if (!cec_ctrl) {
++		DEV_ERR("%s: Invalid input\n", __func__);
++		return 0;
++	}
++	return cec_ctrl->cec_wakeup_en;
++} /* is_hdmi_cec_wakeup_en */
++
+ int hdmi_cec_isr(void *input)
+ {
+ 	int rc = 0;
+@@ -854,6 +867,9 @@ int hdmi_cec_deconfig(void *input)
+ 		return -EPERM;
+ 	}
+ 
++	if (cec_ctrl->cec_wakeup_en)
++		return 0;
++
+ 	hdmi_cec_disable(cec_ctrl);
+ 
+ 	spin_lock_irqsave(&cec_ctrl->lock, flags);
+diff --git a/drivers/video/msm/mdss/mdss_hdmi_cec.h b/drivers/video/msm/mdss/mdss_hdmi_cec.h
+index a554507..0386e05 100644
+--- a/drivers/video/msm/mdss/mdss_hdmi_cec.h
++++ b/drivers/video/msm/mdss/mdss_hdmi_cec.h
+@@ -26,4 +26,5 @@ int hdmi_cec_config(void *cec_ctrl);
+ int hdmi_cec_isr(void *cec_ctrl);
+ void hdmi_cec_deinit(void *cec_ctrl);
+ void *hdmi_cec_init(struct hdmi_cec_init_data *init_data);
++bool is_hdmi_cec_wakeup_en(void *cec_ctrl);
+ #endif /* __MDSS_HDMI_CEC_H__ */
+diff --git a/drivers/video/msm/mdss/mdss_hdmi_tx.c b/drivers/video/msm/mdss/mdss_hdmi_tx.c
+index f9f7ae3..64e490f 100644
+--- a/drivers/video/msm/mdss/mdss_hdmi_tx.c
++++ b/drivers/video/msm/mdss/mdss_hdmi_tx.c
+@@ -1914,13 +1914,7 @@ static int hdmi_tx_enable_power(struct hdmi_tx_ctrl *hdmi_ctrl,
+ 		goto error;
+ 	}
+ 
+-	if (enable) {
+-		if (hdmi_ctrl->panel_data.panel_info.cont_splash_enabled) {
+-			DEV_DBG("%s: %s already eanbled by splash\n",
+-				__func__, hdmi_pm_name(module));
+-			return 0;
+-		}
+-
++	if (enable && !power_data->enable) {
+ 		rc = msm_dss_enable_vreg(power_data->vreg_config,
+ 			power_data->num_vreg, 1);
+ 		if (rc) {
+@@ -1952,13 +1946,17 @@ static int hdmi_tx_enable_power(struct hdmi_tx_ctrl *hdmi_ctrl,
+ 				__func__, hdmi_tx_pm_name(module), rc);
+ 			goto disable_gpio;
+ 		}
+-	} else {
++		power_data->enable = true;
++	} else if (!enable && power_data->enable &&
++		(!IS_CEC_WAKEUP_EN(hdmi_ctrl) ||
++		((module != HDMI_TX_HPD_PM) && (module != HDMI_TX_CEC_PM)))) {
+ 		msm_dss_enable_clk(power_data->clk_config,
+ 			power_data->num_clk, 0);
+ 		msm_dss_enable_gpio(power_data->gpio_config,
+ 			power_data->num_gpio, 0);
+ 		msm_dss_enable_vreg(power_data->vreg_config,
+ 			power_data->num_vreg, 0);
++		power_data->enable = false;
+ 	}
+ 
+ 	return rc;
+@@ -2840,9 +2838,12 @@ static void hdmi_tx_hpd_off(struct hdmi_tx_ctrl *hdmi_ctrl)
+ 	/* Turn off HPD interrupts */
+ 	DSS_REG_W(io, HDMI_HPD_INT_CTRL, 0);
+ 
+-	mdss_disable_irq(&hdmi_tx_hw);
+-
+-	hdmi_tx_set_mode(hdmi_ctrl, false);
++	if (IS_CEC_WAKEUP_EN(hdmi_ctrl)) {
++		mdss_enable_irq_wake(true);
++	} else {
++		mdss_disable_irq(&hdmi_tx_hw);
++		hdmi_tx_set_mode(hdmi_ctrl, false);
++	}
+ 
+ 	if (hdmi_ctrl->hpd_state) {
+ 		rc = hdmi_tx_enable_power(hdmi_ctrl, HDMI_TX_DDC_PM, 0);
+@@ -2855,7 +2856,6 @@ static void hdmi_tx_hpd_off(struct hdmi_tx_ctrl *hdmi_ctrl)
+ 	if (rc)
+ 		DEV_INFO("%s: Failed to disable hpd power. Error=%d\n",
+ 			__func__, rc);
+-
+ 	spin_lock_irqsave(&hdmi_ctrl->hpd_state_lock, flags);
+ 	hdmi_ctrl->hpd_state = false;
+ 	spin_unlock_irqrestore(&hdmi_ctrl->hpd_state_lock, flags);
+@@ -2902,6 +2902,9 @@ static int hdmi_tx_hpd_on(struct hdmi_tx_ctrl *hdmi_ctrl)
+ 
+ 		DSS_REG_W(io, HDMI_USEC_REFTIMER, 0x0001001B);
+ 
++		if (IS_CEC_WAKEUP_EN(hdmi_ctrl))
++			mdss_enable_irq_wake(false);
++
+ 		mdss_enable_irq(&hdmi_tx_hw);
+ 
+ 		hdmi_ctrl->hpd_initialized = true;
+diff --git a/drivers/video/msm/mdss/mdss_hdmi_tx.h b/drivers/video/msm/mdss/mdss_hdmi_tx.h
+index 1b10bcb..fb676ed 100644
+--- a/drivers/video/msm/mdss/mdss_hdmi_tx.h
++++ b/drivers/video/msm/mdss/mdss_hdmi_tx.h
+@@ -101,6 +101,9 @@ struct hdmi_tx_ctrl {
+ 
+ 	void *codec_data;
+ 	u32 (*play_short_silent_audio) (void *codec_data);
++	bool power_enabled[HDMI_TX_MAX_PM];
+ };
+ 
++#define IS_CEC_WAKEUP_EN(ctrl) \
++	is_hdmi_cec_wakeup_en((ctrl)->feature_data[HDMI_TX_FEAT_CEC])
+ #endif /* __MDSS_HDMI_TX_H__ */
+diff --git a/drivers/video/msm/mdss/mdss_mdp.c b/drivers/video/msm/mdss/mdss_mdp.c
+index 7b6b3c6..c5f4b19 100644
+--- a/drivers/video/msm/mdss/mdss_mdp.c
++++ b/drivers/video/msm/mdss/mdss_mdp.c
+@@ -313,6 +313,23 @@ void mdss_enable_irq(struct mdss_hw *hw)
+ }
+ EXPORT_SYMBOL(mdss_enable_irq);
+ 
++void mdss_enable_irq_wake(bool enable)
++{
++	unsigned long irq_flags;
++
++	spin_lock_irqsave(&mdss_lock, irq_flags);
++	if (enable && !mdss_res->irq_wakeup_en && mdss_res->irq_mask) {
++		enable_irq_wake(mdss_res->irq);
++		mdss_res->irq_wakeup_en = true;
++	} else if (!enable && mdss_res->irq_wakeup_en) {
++		disable_irq_wake(mdss_res->irq);
++		mdss_res->irq_wakeup_en = false;
++	}
++	spin_unlock_irqrestore(&mdss_lock, irq_flags);
++	pr_debug("%s en=%d mask=%x irq_wakeup_en=%d", __func__,
++		enable, mdss_res->irq_mask, mdss_res->irq_wakeup_en);
++}
++
+ void mdss_disable_irq(struct mdss_hw *hw)
+ {
+ 	unsigned long irq_flags;
+diff --git a/include/linux/mdss_io_util.h b/include/linux/mdss_io_util.h
+index 6ad21e8..45614fa 100644
+--- a/include/linux/mdss_io_util.h
++++ b/include/linux/mdss_io_util.h
+@@ -86,6 +86,7 @@ struct dss_module_power {
+ 	struct dss_gpio *gpio_config;
+ 	unsigned num_clk;
+ 	struct dss_clk *clk_config;
++	bool enable;
+ };
+ 
+ int msm_dss_ioremap_byname(struct platform_device *pdev,
+-- 
+1.8.2.1
+

@@ -1,0 +1,30 @@
+From 538b3756bb790627be7783959b7cbb093ca05d50 Mon Sep 17 00:00:00 2001
+From: Steven Veigas <sveiga@codeaurora.org>
+Date: Tue, 17 Feb 2015 12:23:27 +0000
+Subject: [PATCH 02/10] msm: Boot marker at the end of kernel bootup
+
+For boot time measurement, adding a marker at the end of
+kernel bootup
+
+Change-Id: Ibaabdca031a6d9a3b22362485bb64c10fb2625a8
+Signed-off-by: Steven Veigas <sveiga@codeaurora.org>
+---
+ init/main.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/init/main.c b/init/main.c
+index e273bae..f64636e 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -859,6 +859,8 @@ static noinline int init_post(void)
+ 
+ 	current->signal->flags |= SIGNAL_UNKILLABLE;
+ 
++	place_marker("Linux_Kernel - End");
++
+ 	if (ramdisk_execute_command) {
+ 		run_init_process(ramdisk_execute_command);
+ 		printk(KERN_WARNING "Failed to execute %s\n",
+-- 
+1.8.2.1
+

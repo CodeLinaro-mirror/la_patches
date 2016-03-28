@@ -1,0 +1,89 @@
+From b93cbdd940c2c613ebee76ef7b61d73207dff38e Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Thu, 10 Sep 2015 16:52:23 -0700
+Subject: [PATCH] sched: avoid CPUs with high irq activity for non-small tasks
+
+The irq-aware scheduler is to achieve better performance by avoiding task
+placement to the CPUs which have high irq activity.  However current
+scheduler places tasks to the CPUs which are loaded by irq activity
+preferably as opposed to what it is meant to be when the task is non-small.
+This is suboptimal for both power and performance.
+Fix task placement algorithm to avoid CPUs with significant irq activities.
+
+Change-Id: Ifa5a6ac186241bd58fa614e93e3d873a5f5ad4ca
+Signed-off-by: Joonwoo Park <joonwoop@codeaurora.org>
+---
+ kernel/sched/fair.c | 22 +++++++++++++++-------
+ 1 file changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/kernel/sched/fair.c b/kernel/sched/fair.c
+index 6fe56ba..ef4bde9 100644
+--- a/kernel/sched/fair.c
++++ b/kernel/sched/fair.c
+@@ -1606,8 +1606,7 @@ static int mostly_idle_cpu_sync(int cpu, int sync)
+ 		nr_running--;
+ 
+ 	return load <= rq->mostly_idle_load &&
+-		nr_running <= rq->mostly_idle_nr_run &&
+-		!sched_cpu_high_irqload(cpu);
++		nr_running <= rq->mostly_idle_nr_run;
+ }
+ 
+ static int boost_refcount;
+@@ -1727,6 +1726,9 @@ static int eligible_cpu(struct task_struct *p, int cpu, int sync)
+ {
+ 	struct rq *rq = cpu_rq(cpu);
+ 
++	if (sched_cpu_high_irqload(cpu))
++		return 0;
++
+ 	if (mostly_idle_cpu_sync(cpu, sync))
+ 		return 1;
+ 
+@@ -1852,7 +1854,7 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
+ 	 */
+ 	if (!cpu_rq(min_cost_cpu)->cstate &&
+ 	    mostly_idle_cpu_sync(min_cost_cpu, sync) &&
+-	    min_cost_cpu == prev_cpu)
++	    !sched_cpu_high_irqload(min_cost_cpu) && min_cost_cpu == prev_cpu)
+ 		return min_cost_cpu;
+ 
+ 	for_each_cpu(i, &search_cpus) {
+@@ -1878,7 +1880,8 @@ static int best_small_task_cpu(struct task_struct *p, int sync)
+ 			continue;
+ 		}
+ 
+-		if (mostly_idle_cpu_sync(i, sync)) {
++		if (mostly_idle_cpu_sync(i, sync) &&
++		    !sched_cpu_high_irqload(i)) {
+ 			if (best_mi_cpu == -1 || i == prev_cpu)
+ 				best_mi_cpu = i;
+ 			continue;
+@@ -2053,7 +2056,8 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
+ 		 * where the task will fit.
+ 		 */
+ 		if (!task_will_fit(p, i)) {
+-			if (mostly_idle_cpu_sync(i, sync)) {
++			if (mostly_idle_cpu_sync(i, sync) &&
++			    !sched_cpu_high_irqload(i)) {
+ 				load = cpu_load_sync(i, sync);
+ 				if (load < min_fallback_load ||
+ 				    (load == min_fallback_load &&
+@@ -2155,8 +2159,12 @@ static int select_best_cpu(struct task_struct *p, int target, int reason,
+ 		}
+ 	}
+ 
+-	if (min_cstate_cpu >= 0 && (prefer_idle > 0 ||
+-		!(best_cpu >= 0 && mostly_idle_cpu_sync(best_cpu, sync))))
++	/*
++	 * Don't need to check !sched_cpu_high_irqload(best_cpu) because
++	 * best_cpu cannot have high irq load.
++	 */
++	if (min_cstate_cpu >= 0 && (prefer_idle > 0 || best_cpu < 0 ||
++				    !mostly_idle_cpu_sync(best_cpu, sync)))
+ 		best_cpu = min_cstate_cpu;
+ done:
+ 	if (best_cpu < 0) {
+-- 
+1.9.1
+

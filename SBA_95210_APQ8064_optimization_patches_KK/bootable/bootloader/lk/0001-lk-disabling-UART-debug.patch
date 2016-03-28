@@ -1,0 +1,27 @@
+From 6ae559a38d1fdde4094376299b5514460bf1734b Mon Sep 17 00:00:00 2001
+From: Steven Veigas <sveiga@codeaurora.org>
+Date: Tue, 11 Nov 2014 10:32:39 +0000
+Subject: [PATCH 1/2] lk: disabling UART debug
+
+disabling UART debug option to improve the boot time
+
+Change-Id: Iacdeb1c0190cfc8a5ab4e639b64a7751ff23a83c
+---
+ project/msm8960.mk | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/project/msm8960.mk b/project/msm8960.mk
+index cdb928e..6c85102 100644
+--- a/project/msm8960.mk
++++ b/project/msm8960.mk
+@@ -9,6 +9,6 @@ MODULES += app/aboot
+ DEBUG := 1
+ 
+ #DEFINES += WITH_DEBUG_DCC=1
+-DEFINES += WITH_DEBUG_UART=1
++#DEFINES += WITH_DEBUG_UART=1
+ #DEFINES += WITH_DEBUG_FBCON=1
+ ENABLE_THUMB := false
+-- 
+1.8.2.1
+

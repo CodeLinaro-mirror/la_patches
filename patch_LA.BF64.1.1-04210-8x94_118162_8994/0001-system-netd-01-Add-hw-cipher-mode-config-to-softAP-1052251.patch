@@ -1,0 +1,78 @@
+From 89523535d74e1545c6962120817a0541d0e14588 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 26 Aug 2015 11:39:23 -0700
+Subject: [PATCH] system-netd-01-Add-hw-cipher-mode-config-to-softAP-1052251
+
+Change-Id: I1531119bb54e72d94281f1909472d3d4d17e2c1b
+---
+ server/SoftapController.cpp | 27 +++++++++++++++++++++++----
+ 1 file changed, 23 insertions(+), 4 deletions(-)
+
+diff --git a/server/SoftapController.cpp b/server/SoftapController.cpp
+index 07c77b0..d45b215 100644
+--- a/server/SoftapController.cpp
++++ b/server/SoftapController.cpp
+@@ -110,6 +110,8 @@ bool SoftapController::isSoftapStarted() {
+  *  argv[5] - Channel
+  *  argv[6] - Security
+  *  argv[7] - Key
++ *  argv[8] - [optional] hw_mode (valid values a,b,g,ad). Default g.
++ *  argv[9] - [optional] cipher mode. Default for 11ad - GCMP, CCMP for the rest.
+  */
+ int SoftapController::setSoftap(int argc, char *argv[]) {
+     char psk_str[2*SHA256_DIGEST_LENGTH+1];
+@@ -119,12 +121,29 @@ int SoftapController::setSoftap(int argc, char *argv[]) {
+     int channel = AP_CHANNEL_DEFAULT;
+     char *wbuf = NULL;
+     char *fbuf = NULL;
++    char hw_mode[3];
++    char cipher[5];
+ 
+     if (argc < 5) {
+         ALOGE("Softap set is missing arguments. Please use:");
+         ALOGE("softap <wlan iface> <SSID> <hidden/broadcast> <channel> <wpa2?-psk|open> <passphrase>");
+         return ResponseCode::CommandSyntaxError;
+     }
++    snprintf(cipher, sizeof(cipher), "CCMP");
++    if(argc > 8){
++        snprintf(hw_mode, sizeof(hw_mode), "%s",argv[8]);
++        //for 11ad use GCMP cipher suite by default
++        if(0 == strcasecmp(hw_mode, "ad")){
++            snprintf(cipher,sizeof(cipher),"GCMP");
++        }
++    }
++    else
++        snprintf(hw_mode, sizeof(hw_mode), "g");
++
++    ALOGD("Softap hw_mode=%s chosen cipher=%s requested cipher=%s", hw_mode, cipher, (argc > 9 ? argv[9] : "NONE"));
++    if(argc>9){
++        snprintf(cipher, sizeof(cipher), "%s", argv[9]);
++    }
+ 
+     if (!strcasecmp(argv[4], "hidden"))
+         hidden = 1;
+@@ -136,9 +155,9 @@ int SoftapController::setSoftap(int argc, char *argv[]) {
+     }
+ 
+     asprintf(&wbuf, "interface=%s\ndriver=nl80211\nctrl_interface="
+-            "/data/misc/wifi/hostapd\nssid=%s\nchannel=%d\nieee80211n=1\n"
+-            "hw_mode=g\nignore_broadcast_ssid=%d\nwowlan_triggers=any\n",
+-            argv[2], argv[3], channel, hidden);
++                "/data/misc/wifi/hostapd\nssid=%s\nchannel=%d\nieee80211n=1\n"
++            "hw_mode=%s\nignore_broadcast_ssid=%d\nwowlan_triggers=any\n",
++                argv[2], argv[3], channel, hw_mode, hidden);
+ 
+     if (argc > 7) {
+         if (!strcmp(argv[6], "wpa-psk")) {
+@@ -146,7 +165,7 @@ int SoftapController::setSoftap(int argc, char *argv[]) {
+             asprintf(&fbuf, "%swpa=3\nwpa_pairwise=TKIP CCMP\nwpa_psk=%s\n", wbuf, psk_str);
+         } else if (!strcmp(argv[6], "wpa2-psk")) {
+             generatePsk(argv[3], argv[7], psk_str);
+-            asprintf(&fbuf, "%swpa=2\nrsn_pairwise=CCMP\nwpa_psk=%s\n", wbuf, psk_str);
++            asprintf(&fbuf, "%swpa=2\nwpa_key_mgmt=WPA-PSK\nwpa_psk=%s\nwpa_pairwise=%s\nrsn_pairwise=%s", wbuf, psk_str, cipher, cipher);
+         } else if (!strcmp(argv[6], "open")) {
+             asprintf(&fbuf, "%s", wbuf);
+         }
+-- 
+1.8.2.1
+

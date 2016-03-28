@@ -1,0 +1,70 @@
+From ed8ad1a3638aaeb0fc58446afd6ee0e96052579b Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 18 Feb 2015 14:48:13 -0800
+Subject: [PATCH] packages-apps-SnapdragonCamera-04-disables-H263
+
+Change-Id: I812e64080066f8db55f79da2b2fa400ca5f5b210
+---
+ res/values/qcomarrays.xml  | 14 ++++++++++++--
+ res/values/qcomstrings.xml |  9 +++++++--
+ 2 files changed, 19 insertions(+), 4 deletions(-)
+
+diff --git a/res/values/qcomarrays.xml b/res/values/qcomarrays.xml
+index 0b1037e..6b0f8d5 100644
+--- a/res/values/qcomarrays.xml
++++ b/res/values/qcomarrays.xml
+@@ -484,17 +484,27 @@
+      </string-array>
+     <!-- Camera Preferences Video Encoder dialog box entries -->
+     <string-array name="pref_camera_videoencoder_entries" translatable="false">
++<!--        <item>@string/pref_camera_videoencoder_entry_0</item>
++        <item>@string/pref_camera_videoencoder_entry_1</item>
++        <item>@string/pref_camera_videoencoder_entry_2</item>
++        <item>@string/pref_camera_videoencoder_entry_3</item> -->
++
+         <item>@string/pref_camera_videoencoder_entry_0</item>
+         <item>@string/pref_camera_videoencoder_entry_1</item>
+         <item>@string/pref_camera_videoencoder_entry_2</item>
+-        <item>@string/pref_camera_videoencoder_entry_3</item>
++
+     </string-array>
+ 
+     <string-array name="pref_camera_videoencoder_entryvalues" translatable="false">
+-        <item>m4v</item>
++<!--        <item>m4v</item>
+         <item>h263</item>
+         <item>h264</item>
++        <item>h265</item> -->
++
++        <item>m4v</item>
++        <item>h264</item>
+         <item>h265</item>
++
+     </string-array>
+ 
+     <!-- Camera Preferences Audio Encoder dialog box entries -->
+diff --git a/res/values/qcomstrings.xml b/res/values/qcomstrings.xml
+index d38e3c2..40861e9 100644
+--- a/res/values/qcomstrings.xml
++++ b/res/values/qcomstrings.xml
+@@ -67,10 +67,15 @@
+     <string name="pref_camera_videoencoder_title">Video Encoder</string>
+ 
+     <!-- Settings screen, Video encoder dialog radio button choices -->
+-    <string name="pref_camera_videoencoder_entry_0">MPEG4</string>
++<!--    <string name="pref_camera_videoencoder_entry_0">MPEG4</string>
+     <string name="pref_camera_videoencoder_entry_1">H263</string>
+     <string name="pref_camera_videoencoder_entry_2">H264</string>
+-    <string name="pref_camera_videoencoder_entry_3">H265</string>
++    <string name="pref_camera_videoencoder_entry_3">H265</string> -->
++
++    <!-- Settings screen, Video encoder dialog radio button choices -->
++    <string name="pref_camera_videoencoder_entry_0">MPEG4</string>
++    <string name="pref_camera_videoencoder_entry_1">H264</string>
++    <string name="pref_camera_videoencoder_entry_2">H265</string>
+ 
+     <!-- Default video encoder setting. A numerical value. -->
+     <string name="pref_camera_videoencoder_default" translatable="false">h264</string>
+-- 
+1.8.2.1
+

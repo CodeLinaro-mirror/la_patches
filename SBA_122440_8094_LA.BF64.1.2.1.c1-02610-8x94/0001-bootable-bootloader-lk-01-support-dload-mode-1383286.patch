@@ -1,0 +1,78 @@
+From b13fd504d3d0d036ed92755886595706cffec92c Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Mon, 31 Aug 2015 17:00:17 -0700
+Subject: [PATCH] platform/target: msm8994: Add support for dload mode
+
+Enter download mode when vol+ and vol- keys are pressed together during
+boot up.
+
+Change-Id: Id8db03cf2764d74209cccdf41f404fdffa86800f
+---
+ platform/msm8994/include/platform/iomap.h |  6 ++++++
+ platform/msm_shared/rules.mk              |  3 ++-
+ target/msm8994/init.c                     | 14 +++++++++++++-
+ 3 files changed, 21 insertions(+), 2 deletions(-)
+
+diff --git a/platform/msm8994/include/platform/iomap.h b/platform/msm8994/include/platform/iomap.h
+index bb9709f..a7d82f7 100644
+--- a/platform/msm8994/include/platform/iomap.h
++++ b/platform/msm8994/include/platform/iomap.h
+@@ -40,6 +40,12 @@
+ #define RESTART_REASON_ADDR         (MSM_SHARED_IMEM_BASE + 0x65C)
+ #define RESTART_REASON_ADDR2        (MSM_SHARED_IMEM_BASE2 + 0x65C)
+ 
++#define DLOAD_MODE_ADDR              (MSM_SHARED_IMEM_BASE + 0x0)
++#define EMERGENCY_DLOAD_MODE_ADDR    (MSM_SHARED_IMEM_BASE + 0xFE0)
++#define DLOAD_MODE_ADDR_V2           (MSM_SHARED_IMEM_BASE2 + 0x0)
++#define EMERGENCY_DLOAD_MODE_ADDR_V2 (MSM_SHARED_IMEM_BASE2 + 0xFE0)
++
++
+ #define BS_INFO_OFFSET              (0x6B0)
+ #define BS_INFO_ADDR                (MSM_SHARED_IMEM_BASE + BS_INFO_OFFSET)
+ #define BS_INFO_ADDR2               (MSM_SHARED_IMEM_BASE2 + BS_INFO_OFFSET)
+diff --git a/platform/msm_shared/rules.mk b/platform/msm_shared/rules.mk
+index 4929951..62001ff 100755
+--- a/platform/msm_shared/rules.mk
++++ b/platform/msm_shared/rules.mk
+@@ -449,7 +449,8 @@ DEFINES += DISPLAY_TYPE_MDSS=1
+ 			$(LOCAL_DIR)/mipi_dsi.o \
+ 			$(LOCAL_DIR)/mipi_dsi_phy.o \
+ 			$(LOCAL_DIR)/mipi_dsi_autopll.o \
+-			$(LOCAL_DIR)/mipi_dsi_autopll_20nm.o
++			$(LOCAL_DIR)/mipi_dsi_autopll_20nm.o \
++			$(LOCAL_DIR)/dload_util.o
+ endif
+ 
+ ifeq ($(PLATFORM),msm8909)
+diff --git a/target/msm8994/init.c b/target/msm8994/init.c
+index 824bdc1..9d8c4e5 100644
+--- a/target/msm8994/init.c
++++ b/target/msm8994/init.c
+@@ -456,7 +456,7 @@ void reboot_device(unsigned reboot_reason)
+ 	/* Write the reboot reason */
+ 	writel(reboot_reason, restart_reason_addr);
+ 
+-	if(reboot_reason == FASTBOOT_MODE)
++	if(reboot_reason == FASTBOOT_MODE || reboot_reason == DLOAD)
+ 		reset_type = PON_PSHOLD_WARM_RESET;
+ 	else
+ 		reset_type = PON_PSHOLD_HARD_RESET;
+@@ -578,3 +578,15 @@ uint32_t target_ddr_cfg_val()
+ {
+ 	return DDR_CFG_DLY_VAL;
+ }
++
++int set_download_mode(enum dload_mode mode)
++{
++	if (platform_is_msm8994())
++		dload_util_write_cookie(mode == NORMAL_DLOAD ?
++			DLOAD_MODE_ADDR : EMERGENCY_DLOAD_MODE_ADDR, mode);
++	else
++		dload_util_write_cookie(mode == NORMAL_DLOAD ?
++			DLOAD_MODE_ADDR_V2 : EMERGENCY_DLOAD_MODE_ADDR_V2, mode);
++
++	return 0;
++}
+-- 
+1.9.1
+

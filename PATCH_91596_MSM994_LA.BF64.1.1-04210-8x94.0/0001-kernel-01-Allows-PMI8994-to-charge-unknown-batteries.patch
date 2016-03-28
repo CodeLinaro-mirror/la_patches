@@ -1,0 +1,29 @@
+From e5bf9fe65052bfeeb711d6151115c23205214740 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Mon, 2 Feb 2015 13:37:14 -0800
+Subject: [PATCH] kernel-Allows-PMI8994-to-charge-unknown-batteries
+
+Change-Id: I310737970bea583cc72a72e43fca130ae072a0b6
+---
+ arch/arm/boot/dts/qcom/msm8994-liquid.dtsi | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi b/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi
+index ef7e3a1..95dec29 100644
+--- a/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi
++++ b/arch/arm/boot/dts/qcom/msm8994-liquid.dtsi
+@@ -534,6 +534,11 @@
+ 	qcom,use-otp-profile;
+ };
+ 
++&pmi8994_charger {
++	qcom,dc-psy-type = "Wipower";
++	qcom,charge-unknown-battery;
++};
++
+ &slim_msm {
+ 	tomtom_codec {
+ 		qcom,cdc-micbias1-ext-cap;
+-- 
+1.8.2.1
+

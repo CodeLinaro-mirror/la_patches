@@ -1,0 +1,140 @@
+From fa3828d4a955e90eb5f7ebce030ed0b3d09256c1 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Fri, 6 Mar 2015 11:58:13 -0800
+Subject: [PATCH] packages-apps-SoundRecorder-Menu
+
+Change-Id: Ibb74f211abd6d54aefc4a27d779c65cfc408c794
+---
+ AndroidManifest.xml                              |  3 +-
+ res/values/integers.xml                          | 18 +++++++++
+ src/com/android/soundrecorder/SoundRecorder.java | 49 +++++++++++++++++++++++-
+ 3 files changed, 67 insertions(+), 3 deletions(-)
+ create mode 100644 res/values/integers.xml
+
+diff --git a/AndroidManifest.xml b/AndroidManifest.xml
+index 828a0cb..42870be 100644
+--- a/AndroidManifest.xml
++++ b/AndroidManifest.xml
+@@ -29,8 +29,7 @@
+         <activity android:name="SoundRecorder"
+                 android:configChanges="orientation|screenSize|keyboardHidden"
+                 android:screenOrientation="unspecified"
+-                android:clearTaskOnLaunch="true"
+-                android:theme="@style/Theme.SoundRecorder">
++                android:clearTaskOnLaunch="true" >
+             <intent-filter>
+                 <action android:name="android.intent.action.MAIN" />
+                 <category android:name="android.intent.category.DEFAULT" />
+diff --git a/res/values/integers.xml b/res/values/integers.xml
+new file mode 100644
+index 0000000..6ce10b1
+--- /dev/null
++++ b/res/values/integers.xml
+@@ -0,0 +1,18 @@
++<?xml version="1.0" encoding="utf-8"?>
++<!-- Copyright (C) 2011 The Android Open Source Project
++
++     Licensed under the Apache License, Version 2.0 (the "License");
++     you may not use this file except in compliance with the License.
++     You may obtain a copy of the License at
++
++          http://www.apache.org/licenses/LICENSE-2.0
++
++     Unless required by applicable law or agreed to in writing, software
++     distributed under the License is distributed on an "AS IS" BASIS,
++     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++     See the License for the specific language governing permissions and
++     limitations under the License.
++-->
++<resources>
++     <item type="id" name="showKeyboard" />
++</resources>
+diff --git a/src/com/android/soundrecorder/SoundRecorder.java b/src/com/android/soundrecorder/SoundRecorder.java
+index 9262fa4..b76d669 100644
+--- a/src/com/android/soundrecorder/SoundRecorder.java
++++ b/src/com/android/soundrecorder/SoundRecorder.java
+@@ -19,7 +19,7 @@ package com.android.soundrecorder;
+ import java.io.File;
+ import java.text.SimpleDateFormat;
+ import java.util.Date;
+-
++import android.app.ActionBar;
+ import android.app.Activity;
+ import android.app.AlertDialog;
+ import android.content.ContentResolver;
+@@ -42,11 +42,17 @@ import android.os.Handler;
+ import android.os.Message;
+ import android.os.PowerManager;
+ import android.os.StatFs;
++import android.os.Build;
+ import android.os.PowerManager.WakeLock;
+ import android.provider.MediaStore;
+ import android.util.Log;
+ import android.view.KeyEvent;
++import android.view.MenuItem;
+ import android.view.View;
++import android.view.Menu;
++import android.view.Window;
++import android.view.MenuInflater;
++import android.view.ViewConfiguration;
+ import android.widget.Button;
+ import android.widget.ImageButton;
+ import android.widget.ImageView;
+@@ -60,6 +66,23 @@ import android.media.AudioManager;
+ import android.view.inputmethod.InputMethodManager;
+ import android.os.SystemProperties;
+ 
++class CheckHardwareMenuKey {
++
++    public static boolean hasPermanentMenuKey(Context context) {
++       if (ViewConfiguration.get(context).hasPermanentMenuKey())
++                return true;
++       return false;
++    }
++}
++
++class AddActionMenu {
++
++    public static boolean addActionBarMenu(Menu menu) {
++       MenuItem menu0 = menu.add(0, R.id.showKeyboard, 0, "Launch  Keypad");
++       menu0.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS);
++       return true;
++    }
++}
+ /**
+  * Calculates remaining recording time based on available disk space and
+  * optionally a maximum recording file size.
+@@ -577,6 +600,30 @@ public class SoundRecorder extends Activity
+         }
+     }
+ 
++     @Override
++    public boolean onOptionsItemSelected(MenuItem item) {
++        switch (item.getItemId())
++        {
++           case R.id.showKeyboard:
++              InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
++              imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, 0);
++              return true;
++          default:
++            return super.onOptionsItemSelected(item);
++        }
++   }
++
++    @Override
++    public boolean onCreateOptionsMenu(Menu menu) {
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
++            if (CheckHardwareMenuKey.hasPermanentMenuKey(getApplicationContext()) == false) {
++                AddActionMenu.addActionBarMenu(menu);
++            }
++        }
++
++        return true;
++    }
++
+     /*
+      *Handle the "menu" hardware key.
+      */
+-- 
+1.8.2.1
+

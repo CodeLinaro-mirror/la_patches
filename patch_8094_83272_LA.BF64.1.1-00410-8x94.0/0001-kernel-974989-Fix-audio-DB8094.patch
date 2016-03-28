@@ -1,0 +1,96 @@
+From 0cdfbddb18095598f2b9112e4d1cf6c13987e190 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Thu, 4 Dec 2014 15:15:33 -0800
+Subject: [PATCH] ARM: dts: msm: Fix audio devices for DB8094
+
+Fix the microphones configuration and jack configuration. Also
+disabled the TSPP which have collision with one of the audio jacks.
+
+Change-Id: I8a499f15611d4c34672931581b4aa6a310da8fe3
+Signed-off-by: Tanya Finkel <tfinkel@codeaurora.org>
+---
+ arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi | 29 ++++++++++++++++++++-----
+ arch/arm/boot/dts/qcom/msm8994-pinctrl.dtsi     |  4 ++--
+ 2 files changed, 26 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+index 3fb035d..c57aaa3 100644
+--- a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
++++ b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+@@ -57,6 +57,10 @@
+ 	};
+ };
+ 
++&tspp {
++	status = "disabled";
++};
++
+ &tlmm_pinmux{
+ 	spi_0 {
+ 		status = "disabled";
+@@ -507,6 +511,8 @@
+ 			"RX_BIAS", "MCLK",
+ 			"LDO_H", "MCLK",
+ 			"AIF4 MAD", "MCLK",
++			"AMIC1", "MIC BIAS1 External",
++			"MIC BIAS1 External", "Analog Mic4",
+ 			"AMIC2", "MIC BIAS2 External",
+ 			"MIC BIAS2 External", "Headset Mic",
+ 			"AMIC3", "MIC BIAS2 External",
+@@ -517,10 +523,10 @@
+ 			"MIC BIAS3 External", "Analog Mic7",
+ 			"AMIC6", "MIC BIAS4 External",
+ 			"MIC BIAS4 External", "Analog Mic8",
+-			"DMIC1", "MIC BIAS1 External",
+-			"MIC BIAS1 External", "Digital Mic1",
+-			"DMIC2", "MIC BIAS1 External",
+-			"MIC BIAS1 External", "Digital Mic2",
++			"DMIC1", "MIC BIAS3 External",
++			"MIC BIAS3 External", "Digital Mic1",
++			"DMIC2", "MIC BIAS3 External",
++			"MIC BIAS3 External", "Digital Mic2",
+ 			"DMIC3", "MIC BIAS4 External",
+ 			"MIC BIAS4 External", "Digital Mic3",
+ 			"DMIC4", "MIC BIAS4 External",
+@@ -530,8 +536,21 @@
+ 			"DMIC6", "MIC BIAS3 External",
+ 			"MIC BIAS3 External", "Digital Mic6";
+ 
++		pinctrl-names = "mi2s-sleep",
++				"mi2s-active",
++				"auxpcm-sleep",
++				"auxpcm-active",
++				"audio-ext-speakers";
++
++		pinctrl-0 = <&pri_mi2s_sleep>, <&pri_mi2s_sd0_sleep>;
++		pinctrl-1 = <&pri_mi2s_active>, <&pri_mi2s_sd0_active>;
++		pinctrl-2 = <&sec_aux_pcm_sleep>, <&sec_aux_pcm_din_sleep>;
++		pinctrl-3 = <&sec_aux_pcm_active>, <&sec_aux_pcm_din_active>;
++		pinctrl-4 = <&audio_ext_speakers>;
++
+ 		qcom,ext-spk-rear-panel-irq = <&pm8994_gpios 13 0x1>;
+-		qcom,ext-spk-front-panel-irq = <&pm8994_gpios 11 0x1>;
++		qcom,ext-spk-front-panel-irq = <&msm_gpio 96 0>;
++		qcom,ext-mic-front-panel-irq = <&pm8994_gpios 11 0x1>;
+ 		qcom,cdc-micbias2-headset-only;
+ 		qcom,mbhc-audio-jack-type = "6-pole-jack";
+ 		qcom,hdmi-audio-rx;
+diff --git a/arch/arm/boot/dts/qcom/msm8994-pinctrl.dtsi b/arch/arm/boot/dts/qcom/msm8994-pinctrl.dtsi
+index 20b876e..255e8de 100644
+--- a/arch/arm/boot/dts/qcom/msm8994-pinctrl.dtsi
++++ b/arch/arm/boot/dts/qcom/msm8994-pinctrl.dtsi
+@@ -232,9 +232,9 @@
+ 		audio_ext_devices {
+ 			qcom,pins = <&gp 96>;
+ 			qcom,num-grp-pins = <1>;
+-			label = "audio-ext-mic";
++			label = "audio-ext-speakers";
+ 			/* default state */
+-			audio_ext_mic: audio_ext_mic {
++			audio_ext_speakers: audio_ext_speakers {
+ 				drive-strength = <2>;
+ 				bias-pull-up;
+ 			};
+-- 
+1.8.2.1
+

@@ -1,0 +1,28 @@
+From 0169af0793a13d6e596d0586e0ee40733c1a8c16 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Thu, 29 Oct 2015 14:52:30 -0700
+Subject: [PATCH 3/4] project: msm8960: enabled Device tree support
+
+project specific device tree supported change.
+
+Change-Id: Ic55b006d6dfc263dc7f3ad9342bea48a9aa79fa2
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ project/msm8960.mk | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/project/msm8960.mk b/project/msm8960.mk
+index 73375d8..bc1ed2e 100644
+--- a/project/msm8960.mk
++++ b/project/msm8960.mk
+@@ -12,6 +12,7 @@ else
+ DEBUG := 1
+ endif
+ 
++DEFINES += DEVICE_TREE=1
+ #DEFINES += WITH_DEBUG_DCC=1
+ DEFINES += WITH_DEBUG_UART=1
+ #DEFINES += WITH_DEBUG_FBCON=1
+-- 
+1.8.2.1
+

@@ -1,0 +1,113 @@
+From fa76f1396b25b65f6f2948b2edf3a4986466b5d2 Mon Sep 17 00:00:00 2001
+From: Amarendra Shukla <amaren@codeaurora.org>
+Date: Fri, 9 Jan 2015 10:20:18 +0000
+Subject: [PATCH 05/10] msm: added support for splash screen  marker
+
+Boot time measurement marker at splash screen
+
+Change-Id: I595c5137af94de76d9878b679246b315a649563f
+Signed-off-by: Amarendra Shukla <amaren@codeaurora.org>
+---
+ arch/arm/mach-msm/board-8064.c         | 23 +++++++++++++++++++++--
+ arch/arm/mach-msm/include/mach/board.h |  1 +
+ init/main.c                            | 10 ++++++++++
+ 3 files changed, 32 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-msm/board-8064.c b/arch/arm/mach-msm/board-8064.c
+index 5d7d9d9..8cb0b80 100644
+--- a/arch/arm/mach-msm/board-8064.c
++++ b/arch/arm/mach-msm/board-8064.c
+@@ -3460,6 +3460,9 @@ int init_marker_proc_fs(void)
+ 	static struct proc_dir_entry *proc_write_entry;
+ 	static struct proc_dir_entry *proc_read_entry;
+ 
++	struct boot_marker *new_boot_marker;
++	unsigned long int timer_value;
++
+ 	proc_parent = proc_mkdir("bootkpi", NULL);
+ 	if (!proc_parent) {
+ 		pr_err("Error creating proc entry\n");
+@@ -3470,7 +3473,7 @@ int init_marker_proc_fs(void)
+ 						proc_parent,
+ 						print_boot_markers, NULL);
+ 	if (!proc_write_entry) {
+-		pr_err("Error creating proc entry\n");
++		pr_err("Error creating proc write entry\n");
+ 		return -ENOMEM;
+ 	}
+ 
+@@ -3479,14 +3482,30 @@ int init_marker_proc_fs(void)
+ 	* reading a init marker keyword
+ 	*/
+ 	proc_read_entry = create_proc_entry("marker_entry", 0666, proc_parent);
+-	if (proc_read_entry == NULL)
++	if (!proc_read_entry) {
++		pr_err("Error creating proc read entry\n");
+ 		return -ENOMEM;
++	}
+ 
+ 	proc_read_entry->read_proc = NULL;
+ 	proc_read_entry->write_proc = proc_write_response;
+ 
+ 	INIT_LIST_HEAD(&boot_marker_list.list);
+ 
++	if (strcmp(lk_splash_val, "0") == 0) {
++		pr_info("no splash screen marker value from LK\n");
++	} else {
++		new_boot_marker = kmalloc(sizeof(*new_boot_marker),
++							 GFP_KERNEL);
++		strlcpy(new_boot_marker->marker_name, "Splash Screen",
++			sizeof(new_boot_marker->marker_name));
++		if (kstrtol(lk_splash_val, 10, &timer_value))
++			return -EINVAL;
++		new_boot_marker->timer_value = timer_value;
++		INIT_LIST_HEAD(&new_boot_marker->list);
++		list_add_tail(&(new_boot_marker->list),
++				&(boot_marker_list.list));
++	}
+ 	return 0;
+ }
+ 
+diff --git a/arch/arm/mach-msm/include/mach/board.h b/arch/arm/mach-msm/include/mach/board.h
+index 12d5066f..54528e3 100644
+--- a/arch/arm/mach-msm/include/mach/board.h
++++ b/arch/arm/mach-msm/include/mach/board.h
+@@ -35,6 +35,7 @@
+ 
+ int init_marker_proc_fs(void);
+ void place_marker(char *name);
++extern char lk_splash_val[];
+ #else
+ void place_marker(char *name);
+ #endif
+diff --git a/init/main.c b/init/main.c
+index 7a0e414..e085d54 100644
+--- a/init/main.c
++++ b/init/main.c
+@@ -393,6 +393,12 @@ static noinline void __init_refok rest_init(void)
+ 	cpu_idle();
+ }
+ 
++/* Splash screen Boot marker value from LK */
++#ifdef CONFIG_BOOT_TIME_MARKER
++#define MAX_SS_LK_MARKER_SIZE 16
++char lk_splash_val[MAX_SS_LK_MARKER_SIZE] = "0";
++#endif
++
+ /* Check for early params. */
+ static int __init do_early_param(char *param, char *val)
+ {
+@@ -407,6 +413,10 @@ static int __init do_early_param(char *param, char *val)
+ 				printk(KERN_WARNING
+ 				       "Malformed early option '%s'\n", param);
+ 		}
++#ifdef CONFIG_BOOT_TIME_MARKER
++		if (strcmp(param, "LK_splash") == 0)
++			strlcpy(lk_splash_val, val, sizeof(lk_splash_val));
++#endif
+ 	}
+ 	/* We accept everything at this stage. */
+ 	return 0;
+-- 
+1.8.2.1
+

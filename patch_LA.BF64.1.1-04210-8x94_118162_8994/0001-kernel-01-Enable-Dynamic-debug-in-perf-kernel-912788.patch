@@ -1,0 +1,25 @@
+From 38b09da6a653304ad5adde4252132bf2be551122 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 26 Aug 2015 11:23:43 -0700
+Subject: [PATCH] kernel-01-Enable-Dynamic-debug-in-perf-kernel-912788
+
+Change-Id: I39c6b4d68a949a9d29d068e6cdcd81d0cad95de7
+---
+ arch/arm64/configs/msm8994-perf_defconfig | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/configs/msm8994-perf_defconfig b/arch/arm64/configs/msm8994-perf_defconfig
+index 7887bbd..c29f9a1 100644
+--- a/arch/arm64/configs/msm8994-perf_defconfig
++++ b/arch/arm64/configs/msm8994-perf_defconfig
+@@ -160,6 +160,7 @@ CONFIG_IP_NF_TARGET_NETMAP=y
+ CONFIG_IP_NF_TARGET_REDIRECT=y
+ CONFIG_IP_NF_MANGLE=y
+ CONFIG_IP_NF_RAW=y
++CONFIG_DYNAMIC_DEBUG=y
+ CONFIG_IP_NF_SECURITY=y
+ CONFIG_IP_NF_ARPTABLES=y
+ CONFIG_IP_NF_ARPFILTER=y
+-- 
+1.8.2.1
+

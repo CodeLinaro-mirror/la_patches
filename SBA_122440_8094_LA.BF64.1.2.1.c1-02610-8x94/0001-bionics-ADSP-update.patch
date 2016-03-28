@@ -1,0 +1,27 @@
+From 5c521d2b3feb4644c44cce7e8e028f1fa0eae1a7 Mon Sep 17 00:00:00 2001
+From: Robert Lai <c_rlai@codeaurora.org>
+Date: Thu, 24 Sep 2015 14:19:46 -0700
+Subject: [PATCH] Temporary disable DL_WARNs for unused DT_*
+
+Bug: 17552334
+Change-Id: I2f7b5e4b4d1db96e812a7f86adc929e113d4c11a
+---
+ linker/linker.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/linker/linker.cpp b/linker/linker.cpp
+index 54867dc..dad5cff 100644
+--- a/linker/linker.cpp
++++ b/linker/linker.cpp
+@@ -2142,7 +2142,7 @@ bool soinfo::PrelinkImage() {
+ 
+       default:
+         if (!relocating_linker) {
+-          DL_WARN("%s: unused DT entry: type %p arg %p", name,
++          DEBUG("%s: unused DT entry: type %p arg %p", name,
+               reinterpret_cast<void*>(d->d_tag), reinterpret_cast<void*>(d->d_un.d_val));
+         }
+         break;
+-- 
+1.9.1
+

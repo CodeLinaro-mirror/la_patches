@@ -1,0 +1,253 @@
+From c8ea5150fe536b55800ace72cff32272f2d64510 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Mon, 2 Feb 2015 14:01:09 -0800
+Subject: [PATCH] packages-apps-SnapdragonCamera-02-cam-bitrate-fps
+
+Change-Id: I1dda959c401fff4e4d703b11262ad80055b2c8e9
+---
+ res/values/arrays.xml                      | 40 +++++++++++++++++++++++++++
+ res/values/qcomstrings.xml                 | 29 ++++++++++++++++++++
+ res/values/strings.xml                     | 11 ++++++++
+ res/xml/video_preferences.xml              | 12 +++++++++
+ src/com/android/camera/CameraSettings.java |  3 +++
+ src/com/android/camera/VideoMenu.java      |  4 ++-
+ src/com/android/camera/VideoModule.java    | 43 +++++++++++++++++++++++++++---
+ 7 files changed, 138 insertions(+), 4 deletions(-)
+
+diff --git a/res/values/arrays.xml b/res/values/arrays.xml
+index 71b4afc..750a795 100644
+--- a/res/values/arrays.xml
++++ b/res/values/arrays.xml
+@@ -619,4 +619,44 @@
+         <item>270</item>
+     </string-array>
+ 
++        <!-- VideoCamera Preferences video UHD fps entry-->
++    <string-array name="pref_camera_video_fps_entries" translatable="false">
++        <item>@string/pref_camera_video_fps_entry_18</item>
++        <item>@string/pref_camera_video_fps_entry_24</item>
++        <item>@string/pref_camera_video_fps_entry_30</item>
++    </string-array>
++
++    <string-array name="pref_camera_video_fps_labels" translatable="false">
++        <item>@string/pref_camera_video_fps_label_18</item>
++        <item>@string/pref_camera_video_fps_label_24</item>
++        <item>@string/pref_camera_video_fps_label_30</item>
++    </string-array>
++
++    <string-array name="pref_camera_video_fps_entryvalues" translatable="false">
++        <item>18</item>
++        <item>24</item>
++        <item>30</item>
++    </string-array>
++
++        <!-- VideoCamera Preferences video UHD Bit rate entry-->
++    <string-array name="pref_camera_video_bitrate_entries" translatable="false">
++        <item>@string/pref_camera_video_bitrate_entry_20</item>
++        <item>@string/pref_camera_video_bitrate_entry_40</item>
++        <item>@string/pref_camera_video_bitrate_entry_80</item>
++        <item>@string/pref_camera_video_bitrate_entry_100</item>
++        </string-array>
++
++    <string-array name="pref_camera_video_bitrate_labels" translatable="false">
++        <item>@string/pref_camera_video_bitrate_label_20</item>
++        <item>@string/pref_camera_video_bitrate_label_40</item>
++        <item>@string/pref_camera_video_bitrate_label_80</item>
++        <item>@string/pref_camera_video_bitrate_label_100</item>
++        </string-array>
++
++    <string-array name="pref_camera_video_bitrate_entryvalues" translatable="false">
++        <item>20</item>
++        <item>40</item>
++        <item>80</item>
++        <item>100</item>
++        </string-array>
+ </resources>
+diff --git a/res/values/qcomstrings.xml b/res/values/qcomstrings.xml
+index c72f9bb..d38e3c2 100644
+--- a/res/values/qcomstrings.xml
++++ b/res/values/qcomstrings.xml
+@@ -850,6 +850,35 @@
+     <string name="pref_camera_video_rotation_entry_180">180</string>
+     <string name="pref_camera_video_rotation_entry_270">270</string>
+ 
++    <!--Default video 4k UHD fps setting-->
++    <string name="pref_camera_video_fps_default" translatable="false">30</string>
++
++    <!--Settings screen, video 4k UHD FPS title-->
++    <string name="pref_camera_video_fps_title">4kUHD FPS</string>
++
++    <!--Menu, video 4kUHD fps label-->
++    <string name="pref_camera_video_fps_label">4kUHD FPS</string>
++
++    <!-- Settings screen, Video fps 4k UHD choices -->
++    <string name="pref_camera_video_fps_entry_18">18</string>
++    <string name="pref_camera_video_fps_entry_24">24</string>
++    <string name="pref_camera_video_fps_entry_30">30</string>
++
++    <!--Default video 4k UHD BitRate setting-->
++    <string name="pref_camera_video_bitrate_default" translatable="false">100</string>
++
++    <!--Settings screen, video 4k UHD BitRate title-->
++    <string name="pref_camera_video_bitrate_title">4kUHD BitRate</string>
++
++    <!--Menu, video 4k UHD BitRate label-->
++    <string name="pref_camera_video_bitrate_label">4kUHD BitRate</string>
++
++    <!-- Settings screen, Video 4k UHD BitRate choices -->
++    <string name="pref_camera_video_bitrate_entry_20">20</string>
++    <string name="pref_camera_video_bitrate_entry_40">40</string>
++    <string name="pref_camera_video_bitrate_entry_80">80</string>
++    <string name="pref_camera_video_bitrate_entry_100">100</string>
++
+     <!-- Continous shot enable message -->
+     <string name="longshot_enable_message">
+             Advance features are not supported in continuous shot mode</string>
+diff --git a/res/values/strings.xml b/res/values/strings.xml
+index e091605..f3c265a 100644
+--- a/res/values/strings.xml
++++ b/res/values/strings.xml
+@@ -712,4 +712,15 @@ CHAR LIMIT = NONE] -->
+     <string name="pref_camera_video_rotation_label_90">90</string>
+     <string name="pref_camera_video_rotation_label_180">180</string>
+     <string name="pref_camera_video_rotation_label_270">270</string>
++
++    <!-- Menu, Video UHD fps labels [CHAR LIMIT=50] -->
++    <string name="pref_camera_video_fps_label_18">18</string>
++    <string name="pref_camera_video_fps_label_24">24</string>
++    <string name="pref_camera_video_fps_label_30">30</string>
++
++    <!-- Menu, Video UHD BitRate labels [CHAR LIMIT=50] -->
++    <string name="pref_camera_video_bitrate_label_20">20</string>
++    <string name="pref_camera_video_bitrate_label_40">40</string>
++    <string name="pref_camera_video_bitrate_label_80">80</string>
++    <string name="pref_camera_video_bitrate_label_100">100</string>
+  </resources>
+diff --git a/res/xml/video_preferences.xml b/res/xml/video_preferences.xml
+index 362607c..cc8999f 100644
+--- a/res/xml/video_preferences.xml
++++ b/res/xml/video_preferences.xml
+@@ -156,4 +156,16 @@
+             camera:title="@string/pref_camera_video_rotation_title"
+             camera:entries="@array/pref_camera_video_rotation_entries"
+             camera:entryValues="@array/pref_camera_video_rotation_entryvalues" />
++    <ListPreference
++            camera:key="pref_camera_video_fps_key"
++            camera:defaultValue="@string/pref_camera_video_fps_default"
++            camera:title="@string/pref_camera_video_fps_title"
++            camera:entries="@array/pref_camera_video_fps_entries"
++            camera:entryValues="@array/pref_camera_video_fps_entryvalues" />
++    <ListPreference
++            camera:key="pref_camera_video_bitrate_key"
++            camera:defaultValue="@string/pref_camera_video_bitrate_default"
++            camera:title="@string/pref_camera_video_bitrate_title"
++            camera:entries="@array/pref_camera_video_bitrate_entries"
++            camera:entryValues="@array/pref_camera_video_bitrate_entryvalues" />
+ </PreferenceGroup>
+diff --git a/src/com/android/camera/CameraSettings.java b/src/com/android/camera/CameraSettings.java
+index 1081242..78a61f5 100644
+--- a/src/com/android/camera/CameraSettings.java
++++ b/src/com/android/camera/CameraSettings.java
+@@ -224,6 +224,9 @@ public class CameraSettings {
+     public static final String KEY_QC_SUPPORTED_MANUAL_EXPOSURE_MODES = "manual-exposure-modes";
+     public static final String KEY_QC_SUPPORTED_MANUAL_WB_MODES = "manual-wb-modes";
+ 
++    public static final String KEY_VIDEO_FPS = "pref_camera_video_fps_key";
++    public static final String KEY_VIDEO_BITRATE = "pref_camera_video_bitrate_key";
++
+     public static final String EXPOSURE_DEFAULT_VALUE = "0";
+ 
+     public static final int CURRENT_VERSION = 5;
+diff --git a/src/com/android/camera/VideoMenu.java b/src/com/android/camera/VideoMenu.java
+index 08cb384..63a7c20 100644
+--- a/src/com/android/camera/VideoMenu.java
++++ b/src/com/android/camera/VideoMenu.java
+@@ -75,7 +75,9 @@ public class VideoMenu extends PieController
+                 CameraSettings.KEY_AUDIO_ENCODER,
+                 CameraSettings.KEY_VIDEO_DURATION,
+                 CameraSettings.KEY_RECORD_LOCATION,
+-                CameraSettings.KEY_CAMERA_SAVEPATH
++                CameraSettings.KEY_CAMERA_SAVEPATH,
++                CameraSettings.KEY_VIDEO_BITRATE,
++                CameraSettings.KEY_VIDEO_FPS
+         };
+ 
+        //settings popup
+diff --git a/src/com/android/camera/VideoModule.java b/src/com/android/camera/VideoModule.java
+index 6f35040..beb7350 100644
+--- a/src/com/android/camera/VideoModule.java
++++ b/src/com/android/camera/VideoModule.java
+@@ -196,6 +196,10 @@ public class VideoModule implements CameraModule,
+     // The preview window is on focus
+     private boolean mPreviewFocused = false;
+ 
++    //SDP preferences
++    int mVideoBitrate = 100000000;
++    int mVideoFramerate = 30;
++
+     private final MediaSaveService.OnMediaSavedListener mOnVideoSavedListener =
+             new MediaSaveService.OnMediaSavedListener() {
+                 @Override
+@@ -707,6 +711,20 @@ public class VideoModule implements CameraModule,
+     public void onShutterButtonLongClick() {}
+ 
+     private void qcomReadVideoPreferences() {
++        String videoBitrate = mPreferences.getString(
++                CameraSettings.KEY_VIDEO_BITRATE,
++                mActivity.getString(R.string.pref_camera_video_bitrate_default));
++        Log.v(TAG, "4kUHD Video Bitrate read from preferences = " +videoBitrate);
++        mVideoBitrate = Integer.parseInt(videoBitrate)*1000000;
++         Log.v(TAG, "4kUHD Video Bitrate selected = " +mVideoBitrate);
++
++         String videoFramerate = mPreferences.getString(
++                 CameraSettings.KEY_VIDEO_FPS,
++                 mActivity.getString(R.string.pref_camera_video_fps_default));
++         Log.v(TAG, "4kUHD Video Framerate read from preferences = " +videoFramerate);
++         mVideoFramerate = Integer.parseInt(videoFramerate);
++          Log.v(TAG, "4kUHD Video Framerate selected = " +mVideoFramerate);
++
+         String videoEncoder = mPreferences.getString(
+                CameraSettings.KEY_VIDEO_ENCODER,
+                mActivity.getString(R.string.pref_camera_videoencoder_default));
+@@ -1342,6 +1360,17 @@ public class VideoModule implements CameraModule,
+         if (mCaptureTimeLapse) {
+             double fps = 1000 / (double) mTimeBetweenTimeLapseFrameCaptureMs;
+             setCaptureRate(mMediaRecorder, fps);
++            Log.v(TAG,"initializeRecorder Not setting custom bit and frame rates as TimeLapse is enabled ");
++        }else{
++            if (mProfile.quality == CamcorderProfile.QUALITY_2160P){
++                mMediaRecorder.setVideoEncodingBitRate(mVideoBitrate);
++                mMediaRecorder.setVideoFrameRate(mVideoFramerate);
++                Log.v(TAG,"initializeRecorder Custom UHD Framerate "+mVideoFramerate +" Bitrate "+mVideoBitrate);
++            }else{
++                mMediaRecorder.setVideoEncodingBitRate(mProfile.videoBitRate);
++                mMediaRecorder.setVideoFrameRate(mProfile.videoFrameRate);
++                Log.v(TAG,"initializeRecorder default Framerate "+mProfile.videoFrameRate +" Bitrate "+mProfile.videoBitRate);
++            }
+         }
+ 
+         setRecordLocation();
+@@ -2259,9 +2288,17 @@ public class VideoModule implements CameraModule,
+         mParameters.set("video-size", mProfile.videoFrameWidth+"x"+mProfile.videoFrameHeight);
+         int[] fpsRange = CameraUtil.getMaxPreviewFpsRange(mParameters);
+         if (fpsRange.length > 0) {
+-            mParameters.setPreviewFpsRange(
+-                    fpsRange[Parameters.PREVIEW_FPS_MIN_INDEX],
+-                    fpsRange[Parameters.PREVIEW_FPS_MAX_INDEX]);
++            if (mProfile.quality == CamcorderProfile.QUALITY_2160P){
++                mParameters.setPreviewFpsRange(
++                        mVideoFramerate*1000,
++                        mVideoFramerate*1000);
++                Log.v(TAG,"UHD detected set preview FPS to custom FPS from "+(mVideoFramerate*1000) + " to "+ (mVideoFramerate*1000));
++            }else{
++                mParameters.setPreviewFpsRange(
++                        fpsRange[Parameters.PREVIEW_FPS_MIN_INDEX],
++                        fpsRange[Parameters.PREVIEW_FPS_MAX_INDEX]);
++                Log.v(TAG,"set preview FPS from "+fpsRange[Parameters.PREVIEW_FPS_MIN_INDEX] + " to "+ fpsRange[Parameters.PREVIEW_FPS_MAX_INDEX]);
++            }
+         } else {
+             mParameters.setPreviewFrameRate(mProfile.videoFrameRate);
+         }
+-- 
+1.8.2.1
+

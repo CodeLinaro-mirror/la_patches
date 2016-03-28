@@ -1,0 +1,28 @@
+From 0878a7b247d5abfd5c4a4854132604fb781c9cc2 Mon Sep 17 00:00:00 2001
+From: Sathish Ambley <sathishambley@codeaurora.org>
+Date: Tue, 6 Oct 2015 11:41:55 -0700
+Subject: [PATCH] msm8916: Enable adsprpcd daemon
+
+Enable adsprpcd daemon.
+
+Change-Id: Id565742fab653efcabd56bdff73b4a403e866f5f
+---
+ init.target.rc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/init.target.rc b/init.target.rc
+index a6e2b0d..72dbbfe 100755
+--- a/init.target.rc
++++ b/init.target.rc
+@@ -226,3 +226,8 @@ service dts_configurator /system/bin/dts_configurator
+    user system
+    group system
+    oneshot
++
++service adsprpcd /system/bin/adsprpcd
++   class main
++   user media
++   group media
+-- 
+1.8.2.1
+

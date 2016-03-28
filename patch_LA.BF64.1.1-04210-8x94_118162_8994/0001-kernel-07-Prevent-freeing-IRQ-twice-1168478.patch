@@ -1,0 +1,29 @@
+From 304c2a62f36093a58d404ebaf3d216f4cc68da87 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 26 Aug 2015 11:31:41 -0700
+Subject: [PATCH] kernel-07-Prevent-freeing-IRQ-twice-1168478
+
+Change-Id: I65410a074640412ccb4521890debac509d25d7f9
+---
+ sound/soc/msm/msm8994.c | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/sound/soc/msm/msm8994.c b/sound/soc/msm/msm8994.c
+index 1a30842..609d1b4 100644
+--- a/sound/soc/msm/msm8994.c
++++ b/sound/soc/msm/msm8994.c
+@@ -386,8 +386,11 @@ static int msm8994_liquid_dock_notify_handler(struct notifier_block *this,
+ 				NULL, "state");
+ 	} else {
+ 		if (msm8994_liquid_dock_dev->plug_irq)
++		{
+ 			free_irq(msm8994_liquid_dock_dev->plug_irq,
+ 				 msm8994_liquid_dock_dev);
++			msm8994_liquid_dock_dev->plug_irq = 0;
++		}
+ 
+ 		if (msm8994_liquid_dock_dev->plug_gpio)
+ 			gpio_free(msm8994_liquid_dock_dev->plug_gpio);
+-- 
+1.8.2.1
+

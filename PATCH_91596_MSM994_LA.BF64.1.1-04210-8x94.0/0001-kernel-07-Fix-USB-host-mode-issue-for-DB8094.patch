@@ -1,0 +1,45 @@
+From 0a43cad4f4bfbeaa9855e794ebaac98e03703b97 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Thu, 5 Feb 2015 11:56:09 -0800
+Subject: [PATCH] kernel-02-Fix-USB-host-mode-issue-for-DB8094
+
+Change-Id: Iecf1a777a7a89299eb8aa5b444bbd7c3c0840a02
+---
+ arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+index 905e953..9025f2b 100644
+--- a/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
++++ b/arch/arm/boot/dts/qcom/apq8094-dragonboard.dtsi
+@@ -280,7 +280,6 @@
+ 			 0x0 1 &intc 0 180 0>;
+ 	interrupt-names = "hs_phy_irq", "pwr_event_irq";
+ 	qcom,charging-disabled;
+-	vbus_dwc3-supply = <&vph_pwr_vreg>;
+ 	/delete-property/ qcom,otg-capability;
+ 	qcom,ext-hub-reset-gpio =  <&pm8994_gpios 1 0>;
+ 	dwc3@f9200000 {
+@@ -592,8 +591,18 @@
+ 	/delete-property/ vdd-wlan-xtal-supply;
+ };
+ 
++&usb_otg_switch{
++	status= "disabled";
++};
++
+ &pmi8994_charger {
+-	status = "disabled";
++	qcom,charging-disabled;
++	regulator-name = "pmi8994_otg_vreg";
++	/delete-property/ otg-parent-supply;
++
++	smbcharger_charger_otg {
++		parent-supply = <&pmi8994_boost_5v>;
++	};
+ };
+ 
+ &rpm_bus {
+-- 
+1.8.2.1
+

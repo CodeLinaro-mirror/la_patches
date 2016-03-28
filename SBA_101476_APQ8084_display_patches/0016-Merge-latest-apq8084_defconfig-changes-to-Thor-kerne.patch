@@ -1,0 +1,93 @@
+From 12e597da645a351b76c4ac7339e8637cba55d6b1 Mon Sep 17 00:00:00 2001
+From: Mike Mager <mikemager@codeaurora.org>
+Date: Tue, 16 Sep 2014 14:21:46 -0700
+Subject: [PATCH] Merge latest apq8084_defconfig changes to Thor kernel config
+ files
+
+Change-Id: I155329f99aa422ac14b09077f10186a51939bbc8
+---
+ arch/arm/configs/apq8084_thor_720p_100_defconfig  | 2 ++
+ arch/arm/configs/apq8084_thor_720p_defconfig      | 2 ++
+ arch/arm/configs/apq8084_thor_hdmi_720p_defconfig | 2 ++
+ arch/arm/configs/apq8084_thor_svga_100_defconfig  | 2 ++
+ arch/arm/configs/apq8084_thor_svga_defconfig      | 2 ++
+ 5 files changed, 10 insertions(+)
+
+diff --git a/arch/arm/configs/apq8084_thor_720p_100_defconfig b/arch/arm/configs/apq8084_thor_720p_100_defconfig
+index 77959ca..2bf16d1 100644
+--- a/arch/arm/configs/apq8084_thor_720p_100_defconfig
++++ b/arch/arm/configs/apq8084_thor_720p_100_defconfig
+@@ -599,8 +599,10 @@ CONFIG_PRINTK_TIME=y
+ CONFIG_MAGIC_SYSRQ=y
+ CONFIG_PAGE_OWNER=y
+ CONFIG_LOCKUP_DETECTOR=y
++CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y
+ # CONFIG_DETECT_HUNG_TASK is not set
+ # CONFIG_SYSRQ_SCHED_DEBUG is not set
++CONFIG_PANIC_ON_RT_THROTTLING=y
+ CONFIG_SCHEDSTATS=y
+ CONFIG_TIMER_STATS=y
+ CONFIG_DEBUG_KMEMLEAK=y
+diff --git a/arch/arm/configs/apq8084_thor_720p_defconfig b/arch/arm/configs/apq8084_thor_720p_defconfig
+index f86832d..05f0a1c 100644
+--- a/arch/arm/configs/apq8084_thor_720p_defconfig
++++ b/arch/arm/configs/apq8084_thor_720p_defconfig
+@@ -599,8 +599,10 @@ CONFIG_PRINTK_TIME=y
+ CONFIG_MAGIC_SYSRQ=y
+ CONFIG_PAGE_OWNER=y
+ CONFIG_LOCKUP_DETECTOR=y
++CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y
+ # CONFIG_DETECT_HUNG_TASK is not set
+ # CONFIG_SYSRQ_SCHED_DEBUG is not set
++CONFIG_PANIC_ON_RT_THROTTLING=y
+ CONFIG_SCHEDSTATS=y
+ CONFIG_TIMER_STATS=y
+ CONFIG_DEBUG_KMEMLEAK=y
+diff --git a/arch/arm/configs/apq8084_thor_hdmi_720p_defconfig b/arch/arm/configs/apq8084_thor_hdmi_720p_defconfig
+index 6c11e30..cbe1f35 100644
+--- a/arch/arm/configs/apq8084_thor_hdmi_720p_defconfig
++++ b/arch/arm/configs/apq8084_thor_hdmi_720p_defconfig
+@@ -599,8 +599,10 @@ CONFIG_PRINTK_TIME=y
+ CONFIG_MAGIC_SYSRQ=y
+ CONFIG_PAGE_OWNER=y
+ CONFIG_LOCKUP_DETECTOR=y
++CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y
+ # CONFIG_DETECT_HUNG_TASK is not set
+ # CONFIG_SYSRQ_SCHED_DEBUG is not set
++CONFIG_PANIC_ON_RT_THROTTLING=y
+ CONFIG_SCHEDSTATS=y
+ CONFIG_TIMER_STATS=y
+ CONFIG_DEBUG_KMEMLEAK=y
+diff --git a/arch/arm/configs/apq8084_thor_svga_100_defconfig b/arch/arm/configs/apq8084_thor_svga_100_defconfig
+index 8a69255..18714ca 100644
+--- a/arch/arm/configs/apq8084_thor_svga_100_defconfig
++++ b/arch/arm/configs/apq8084_thor_svga_100_defconfig
+@@ -599,8 +599,10 @@ CONFIG_PRINTK_TIME=y
+ CONFIG_MAGIC_SYSRQ=y
+ CONFIG_PAGE_OWNER=y
+ CONFIG_LOCKUP_DETECTOR=y
++CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y
+ # CONFIG_DETECT_HUNG_TASK is not set
+ # CONFIG_SYSRQ_SCHED_DEBUG is not set
++CONFIG_PANIC_ON_RT_THROTTLING=y
+ CONFIG_SCHEDSTATS=y
+ CONFIG_TIMER_STATS=y
+ CONFIG_DEBUG_KMEMLEAK=y
+diff --git a/arch/arm/configs/apq8084_thor_svga_defconfig b/arch/arm/configs/apq8084_thor_svga_defconfig
+index 38c78f5..6d9339d 100644
+--- a/arch/arm/configs/apq8084_thor_svga_defconfig
++++ b/arch/arm/configs/apq8084_thor_svga_defconfig
+@@ -599,8 +599,10 @@ CONFIG_PRINTK_TIME=y
+ CONFIG_MAGIC_SYSRQ=y
+ CONFIG_PAGE_OWNER=y
+ CONFIG_LOCKUP_DETECTOR=y
++CONFIG_BOOTPARAM_SOFTLOCKUP_PANIC=y
+ # CONFIG_DETECT_HUNG_TASK is not set
+ # CONFIG_SYSRQ_SCHED_DEBUG is not set
++CONFIG_PANIC_ON_RT_THROTTLING=y
+ CONFIG_SCHEDSTATS=y
+ CONFIG_TIMER_STATS=y
+ CONFIG_DEBUG_KMEMLEAK=y
+-- 
+1.8.2.1
+

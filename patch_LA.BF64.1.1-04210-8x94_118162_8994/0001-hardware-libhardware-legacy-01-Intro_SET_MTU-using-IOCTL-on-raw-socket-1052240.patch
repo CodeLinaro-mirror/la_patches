@@ -1,0 +1,91 @@
+From 18983f701c8c63e29a9d3affa78ce0b1e18bbe03 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Wed, 26 Aug 2015 11:18:01 -0700
+Subject: [PATCH] 
+ hardware-libhardware_legacy-01-Intro_SET_MTU-using-IOCTL-on-raw-socket-1052240
+
+Change-Id: I10373b0e2a8242e059f11e12ed2b6ae0c95b3635
+---
+ wifi/wifi.c | 44 ++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 42 insertions(+), 2 deletions(-)
+
+diff --git a/wifi/wifi.c b/wifi/wifi.c
+index c61ef94..d3f545f 100644
+--- a/wifi/wifi.c
++++ b/wifi/wifi.c
+@@ -20,6 +20,10 @@
+ #include <string.h>
+ #include <dirent.h>
+ #include <sys/socket.h>
++#include <sys/socket.h>
++#include <sys/ioctl.h>
++#include <linux/if.h>
++#include <linux/sockios.h>
+ #include <unistd.h>
+ #include <poll.h>
+ 
+@@ -121,6 +125,10 @@ static const char IFNAME[]              = "IFNAME=";
+ #define IFNAMELEN			(sizeof(IFNAME) - 1)
+ static const char WPA_EVENT_IGNORE[]    = "CTRL-EVENT-IGNORE ";
+ 
++static const int MTU_DEFAULT_VALUE	= 1950;
++static const char MTU_VALUE_PROPERTY[]	= "wifi.mtu";
++static const char WLAN_IF_PROPERTY[]	= "wifi.interface";
++
+ static const char SUPP_ENTROPY_FILE[]   = WIFI_ENTROPY_FILE;
+ static unsigned char dummy_key[21] = { 0x02, 0x11, 0xbe, 0x33, 0x43, 0x35,
+                                        0x68, 0x47, 0x84, 0x99, 0xa9, 0x2b,
+@@ -227,6 +235,37 @@ int is_wifi_driver_loaded() {
+ #endif
+ }
+ 
++void set_mtu() {
++    char interface_name[PROPERTY_VALUE_MAX];
++    char mtu_str_value[PROPERTY_VALUE_MAX];
++    int mtu_value = MTU_DEFAULT_VALUE;
++    int ret;
++    struct ifreq ifr;
++
++    property_get(WLAN_IF_PROPERTY, interface_name, "wlan0");
++    property_get(MTU_VALUE_PROPERTY, mtu_str_value, NULL);
++
++    sscanf(mtu_str_value, "%d", &mtu_value);//ignoring errors, there is default
++
++    /* init socket */
++    int ifc_ctl_sock = socket(AF_INET, SOCK_DGRAM, 0);
++    if (ifc_ctl_sock < 0) {
++        ALOGE("Cannot create raw socket. Error:%s", strerror(errno));
++        return;
++    }
++
++    /* set up interface name for request */
++    strncpy(ifr.ifr_name, interface_name, IFNAMSIZ);
++    ifr.ifr_name[IFNAMSIZ - 1] = 0;
++    ifr.ifr_mtu = mtu_value;
++    /* go */
++    ret = ioctl(ifc_ctl_sock, SIOCSIFMTU, &ifr);
++    if (ret < 0) {
++        ALOGE("Error writing MTU=%d with IOCTL. Error:%s", mtu_value, strerror(errno));
++    }
++    close(ifc_ctl_sock);
++}
++
+ int wifi_load_driver()
+ {
+ #ifdef WIFI_DRIVER_MODULE_PATH
+@@ -250,9 +289,10 @@ int wifi_load_driver()
+     sched_yield();
+     while (count-- > 0) {
+         if (property_get(DRIVER_PROP_NAME, driver_status, NULL)) {
+-            if (strcmp(driver_status, "ok") == 0)
++            if (strcmp(driver_status, "ok") == 0) {
++                set_mtu();
+                 return 0;
+-            else if (strcmp(driver_status, "failed") == 0) {
++            } else if (strcmp(driver_status, "failed") == 0) {
+                 wifi_unload_driver();
+                 return -1;
+             }
+-- 
+1.8.2.1
+

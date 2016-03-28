@@ -1,0 +1,41 @@
+From 35bfd3f43fda3df770880e0ebf1a2ffe720d6d3b Mon Sep 17 00:00:00 2001
+From: Eugene Yasman <eyasman@codeaurora.org>
+Date: Wed, 20 Aug 2014 12:31:52 +0300
+Subject: [PATCH 1/5] defconfig: msm8994: Add SMB349 dual charger driver
+
+Enable SMB349 dual charger driver.
+
+Change-Id: I65e0c80db4bc981fdb5437075808d543d9b0615a
+Signed-off-by: Eugene Yasman <eyasman@codeaurora.org>
+---
+ arch/arm64/configs/msm8994-perf_defconfig | 1 +
+ arch/arm64/configs/msm8994_defconfig      | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/arch/arm64/configs/msm8994-perf_defconfig b/arch/arm64/configs/msm8994-perf_defconfig
+index dbaa213..2eaeb16 100644
+--- a/arch/arm64/configs/msm8994-perf_defconfig
++++ b/arch/arm64/configs/msm8994-perf_defconfig
+@@ -286,6 +286,7 @@ CONFIG_PINCTRL_MSM_TLMM=y
+ CONFIG_GPIO_SYSFS=y
+ CONFIG_GPIO_QPNP_PIN=y
+ CONFIG_SMB135X_CHARGER=y
++CONFIG_SMB349_DUAL_CHARGER=y
+ CONFIG_QPNP_SMBCHARGER=y
+ CONFIG_QPNP_FG=y
+ CONFIG_BATTERY_BCL=y
+diff --git a/arch/arm64/configs/msm8994_defconfig b/arch/arm64/configs/msm8994_defconfig
+index 10e4b05..e0843aa 100644
+--- a/arch/arm64/configs/msm8994_defconfig
++++ b/arch/arm64/configs/msm8994_defconfig
+@@ -297,6 +297,7 @@ CONFIG_PINCTRL_MSM_TLMM=y
+ CONFIG_GPIO_SYSFS=y
+ CONFIG_GPIO_QPNP_PIN=y
+ CONFIG_SMB135X_CHARGER=y
++CONFIG_SMB349_DUAL_CHARGER=y
+ CONFIG_QPNP_SMBCHARGER=y
+ CONFIG_QPNP_FG=y
+ CONFIG_BATTERY_BCL=y
+-- 
+1.8.2.1
+

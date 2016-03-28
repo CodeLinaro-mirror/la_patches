@@ -1,0 +1,32 @@
+From e32f9041d711a864dff82925a401b3508c590267 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 3 Mar 2015 18:49:17 -0800
+Subject: [PATCH 08/10] mms: performance patch vib Signed-off-by: Baji Patthan
+ <bpatth@codeaurora.org>
+
+Change-Id: I23cc393e423c47cc41d2898398c8a5c8271c17f6
+---
+ arch/arm/configs/msm8960_defconfig | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/arch/arm/configs/msm8960_defconfig b/arch/arm/configs/msm8960_defconfig
+index b2c0346..a61dfc9 100644
+--- a/arch/arm/configs/msm8960_defconfig
++++ b/arch/arm/configs/msm8960_defconfig
+@@ -279,7 +279,7 @@ CONFIG_CMA=y
+ CONFIG_BLK_DEV_LOOP=y
+ CONFIG_BLK_DEV_RAM=y
+ CONFIG_HAPTIC_ISA1200=y
+-CONFIG_PMIC8XXX_VIBRATOR=y
++#CONFIG_PMIC8XXX_VIBRATOR=y
+ CONFIG_QSEECOM=y
+ CONFIG_USB_HSIC_SMSC_HUB=y
+ CONFIG_SCSI_TGT=y
+@@ -602,3 +602,4 @@ CONFIG_GENLOCK_MISCDEVICE=y
+ CONFIG_BLK_DEV_LOOP=y
+ CONFIG_WCNSS_MEM_PRE_ALLOC=y
+ CONFIG_NL80211_TESTMODE=y
++CONFIG_KERNEL_LZO=y
+-- 
+1.8.2.1
+

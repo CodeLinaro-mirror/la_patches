@@ -1,0 +1,80 @@
+From 1d3020aa808220c3f02cdfd599d9d669a1edf913 Mon Sep 17 00:00:00 2001
+From: Aravind Ganesan <aravindg@codeaurora.org>
+Date: Fri, 10 Oct 2014 15:54:32 -0600
+Subject: [PATCH 1/2] Don't split an IB at the end of ring buffer.
+
+Splitting an IB at the end of ring can hang the GPU. To fix this, if
+there isn't enough contiguous space at the end to fit the full IB,
+insert NOPs at the end, and write the IB at the start as space
+becomes available.
+
+Change-Id: Ie7e68cf449b14823cfd3e0409907a98c24354227
+Signed-off-by: Aravind Ganesan <aravindg@codeaurora.org>
+---
+ drivers/gpu/drm/msm/adreno/adreno_gpu.c | 48 +++++++++++++++++++++++++++++++--
+ 1 file changed, 46 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/msm/adreno/adreno_gpu.c b/drivers/gpu/drm/msm/adreno/adreno_gpu.c
+index a62aae6..ca11a31 100644
+--- a/drivers/gpu/drm/msm/adreno/adreno_gpu.c
++++ b/drivers/gpu/drm/msm/adreno/adreno_gpu.c
+@@ -282,10 +282,54 @@ static uint32_t ring_freewords(struct msm_gpu *gpu)
+ 	return (rptr + (size - 1) - wptr) % size;
+ }
+ 
++static void ring_wait_contiguous_freewords(struct msm_gpu *gpu,
++		uint32_t ndwords)
++{
++	struct adreno_gpu *adreno_gpu = to_adreno_gpu(gpu);
++	uint32_t size = gpu->rb->size/4;
++	uint32_t wptr;
++	uint32_t rptr;
++
++	/* Wait for free space and then check if they are contiguous */
++	if(spin_until(ring_freewords(gpu)>= ndwords)){
++		DRM_ERROR("%s: timeout waiting for ringbuffer space\n",
++				gpu->name);
++		return;
++	}
++
++	wptr = get_wptr(gpu->rb);
++	rptr = adreno_gpu->memptrs->rptr;
++
++	/* We have enough space in the ring for ndwords. Three conditions
++	 * indicates we have contigous space:
++	 * (1) wptr can be equal to size, ring has wrapped and wptr is 0
++	 * (see OUT_RING), meaning we have enough space.
++	 * (2) We have enough space in the ring, wptr < rptr indicates
++	 * enough contiguous space
++	 * (3) wptr + ndwords < size - 1 implies enough space in the ring.
++	 */
++	if((wptr == size) || (wptr < rptr) || (wptr + ndwords < size - 1))
++		return;
++
++	/* Fill the end of ring with no-ops
++	 * */
++	OUT_RING(gpu->rb, CP_TYPE3_PKT | (((size - wptr - 1) - 1) << 16) |
++			((CP_NOP & 0xFF) << 8));
++	gpu->rb->cur = gpu->rb->start;
++
++	/* We have reset cur pointer to start. If ring_freewords returns
++	 * greater than ndwords, then we have contigous space.
++	 * */
++	if(spin_until(ring_freewords(gpu)>= ndwords)){
++		DRM_ERROR("%s: timeout waiting for ringbuffer space\n",
++				gpu->name);
++		return;
++	}
++}
++
+ void adreno_wait_ring(struct msm_gpu *gpu, uint32_t ndwords)
+ {
+-	if (spin_until(ring_freewords(gpu) >= ndwords))
+-		DRM_ERROR("%s: timeout waiting for ringbuffer space\n", gpu->name);
++	ring_wait_contiguous_freewords(gpu, ndwords);
+ }
+ 
+ static const char *iommu_ports[] = {
+-- 
+1.8.5.2
+

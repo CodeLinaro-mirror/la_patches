@@ -1,0 +1,173 @@
+From 8e29443d6d7ef3a4f1b77fa9e7d0464c5e30b02c Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Fri, 20 Mar 2015 17:32:21 -0700
+Subject: [PATCH] hqd: Do not process WFD teardown as part of HDMI connection
+
+WFD teardown was required when HDMI is connected on V4L2
+architecture. This is because WFD connection is using HDMI
+piggyback connection. Since SurfaceFlinger can honour only
+one active external display, we have to teardown WFD
+connection to process HDMI connection.
+
+This is no longer applicable on VDS architecture. WFD connection
+is established using Virtual Display adapter.
+WFD Stack listen to HDMI broadcast event and initiate wfd teardown.
+
+Change-Id: Iaca249f4f45193f02d32ac0ab56d68ce85e8c9a3
+---
+ libhwcomposer/hwc.cpp         |  8 ++++---
+ libhwcomposer/hwc_uevents.cpp | 52 ++++++++++++++++++++++++++++++-------------
+ libhwcomposer/hwc_utils.h     | 10 +++++++++
+ libhwcomposer/hwc_virtual.cpp | 19 ++++++----------
+ 4 files changed, 58 insertions(+), 31 deletions(-)
+
+diff --git a/libhwcomposer/hwc.cpp b/libhwcomposer/hwc.cpp
+index 3671e9b..5835226 100644
+--- a/libhwcomposer/hwc.cpp
++++ b/libhwcomposer/hwc.cpp
+@@ -226,9 +226,6 @@ static void reset(hwc_context_t *ctx, int numDisplays,
+     }
+ 
+     ctx->mAD->reset();
+-    MDPComp::reset();
+-    if(ctx->mHWCVirtual)
+-        ctx->mHWCVirtual->destroy(ctx, numDisplays, displays);
+ }
+ 
+ bool isEqual(float f1, float f2) {
+@@ -379,6 +376,11 @@ static int hwc_prepare(hwc_composer_device_1 *dev, size_t numDisplays,
+     ctx->mOverlay->configDone();
+     ctx->mRotMgr->configDone();
+     overlay::Writeback::configDone();
++    // If VD list is deleted, mdp overlay pipe objects and writeback object
++    // are deleted as part of configDone functions.
++    // Proceed with HWCVirtualVDS object deletion.
++    if(ctx->mHWCVirtual)
++        ctx->mHWCVirtual->destroy(ctx, numDisplays, displays);
+ 
+     return ret;
+ }
+diff --git a/libhwcomposer/hwc_uevents.cpp b/libhwcomposer/hwc_uevents.cpp
+index 726d143..19cf19c 100644
+--- a/libhwcomposer/hwc_uevents.cpp
++++ b/libhwcomposer/hwc_uevents.cpp
+@@ -223,22 +223,42 @@ static void handle_uevent(hwc_context_t* ctx, const char* udata, int len)
+                    * 2 / 1000);
+ 
+             if(dpy == HWC_DISPLAY_EXTERNAL) {
+-                if(ctx->dpyAttr[HWC_DISPLAY_VIRTUAL].connected) {
+-                    // Triple Display is supported on 8084 target
+-                    // WFD can be initiated by Wfd-client or Settings app
+-                    // 1. wfd-client use hdmi hotplug mechanism.
+-                    //    If wfd is connected via wfd-client and if HDMI is
+-                    //    connected, we have to teardown wfd session.
+-                    //    (as SF support only one active External display
+-                    //     at a given time).
+-                    //    (ToDo: Once wfd-client migrates using virtual display
+-                    //     apis, second condition is redundant).
+-                    // 2. Settings app use virtual display mechanism.
+-                    //    In this approach, there is no limitation of supporting
+-                    //    triple display.
+-                    if(!(qdutils::MDPVersion::getInstance().is8084() &&
+-                                !ctx->mVirtualonExtActive)) {
+-                        teardownWfd(ctx);
++                if(isVDConnected(ctx)) {
++                    // Do not initiate WFD teardown if WFD architecture is based
++                    // on VDS mechanism.
++                    // WFD Stack listens to HDMI intent and initiates virtual
++                    // display teardown.
++                    // ToDo: Currently non-WFD Virtual display clients do not
++                    // involve HWC. If there is a change, we need to come up
++                    // with mechanism of how to address non-WFD Virtual display
++                    // clients + HDMI
++                    if(isVDSEnabled(ctx)) {
++                        ctx->mWfdSyncLock.lock();
++                        ALOGD_IF(HWC_WFDDISPSYNC_LOG,
++                                "%s: Waiting for wfd-teardown to be signalled",
++                                __FUNCTION__);
++                        ctx->mWfdSyncLock.wait();
++                        ALOGD_IF(HWC_WFDDISPSYNC_LOG,
++                                "%s: Teardown signalled. Completed waiting in"
++                                "uevent thread", __FUNCTION__);
++                        ctx->mWfdSyncLock.unlock();
++                    } else {
++                        // Triple Display is supported on 8084 target
++                        // WFD can be initiated by Wfd-client or Settings app
++                        // 1. wfd-client use hdmi hotplug mechanism.
++                        //    If wfd is connected via wfd-client and if HDMI is
++                        //    connected, we have to teardown wfd session.
++                        //    (as SF support only one active External display
++                        //     at a given time).
++                        //    (ToDo: Once wfd-client migrates using virtual
++                        //     display apis, second condition is redundant).
++                        // 2. Settings app use virtual display mechanism.
++                        //    In this approach, there is no limitation of
++                        //    supporting triple display.
++                        if(!(qdutils::MDPVersion::getInstance().is8084() &&
++                                    !ctx->mVirtualonExtActive)) {
++                            teardownWfd(ctx);
++                        }
+                     }
+                 }
+                 ctx->mExtDisplay->configure();
+diff --git a/libhwcomposer/hwc_utils.h b/libhwcomposer/hwc_utils.h
+index f0f453c..a0797df 100644
+--- a/libhwcomposer/hwc_utils.h
++++ b/libhwcomposer/hwc_utils.h
+@@ -626,6 +626,16 @@ static inline bool isSecondaryConnected(hwc_context_t* ctx) {
+             ctx->dpyAttr[HWC_DISPLAY_VIRTUAL].connected);
+ }
+ 
++/* Return true if HWC supports VirtualDisplaySurface mechanism */
++static inline bool isVDSEnabled(hwc_context_t* ctx) {
++    return ctx->mVDSEnabled;
++}
++
++/* Return Virtual Display connection status */
++static inline bool isVDConnected(hwc_context_t* ctx) {
++    return ctx->dpyAttr[HWC_DISPLAY_VIRTUAL].connected;
++}
++
+ };
+ 
+ #endif //HWC_UTILS_H
+diff --git a/libhwcomposer/hwc_virtual.cpp b/libhwcomposer/hwc_virtual.cpp
+index bbfd1bb..ab107de 100644
+--- a/libhwcomposer/hwc_virtual.cpp
++++ b/libhwcomposer/hwc_virtual.cpp
+@@ -77,11 +77,7 @@ void HWCVirtualVDS::destroy(hwc_context_t *ctx, size_t /*numDisplays*/,
+             delete ctx->mMDPComp[dpy];
+             ctx->mMDPComp[dpy] = NULL;
+         }
+-        // We reset the WB session to non-secure when the virtual display
+-        // has been disconnected.
+-        if(!Writeback::getInstance()->setSecure(false)) {
+-            ALOGE("Failure while attempting to reset WB session.");
+-        }
++        // signal synclock to indicate successful wfd teardown
+         ctx->mWfdSyncLock.lock();
+         ctx->mWfdSyncLock.signal();
+         ctx->mWfdSyncLock.unlock();
+@@ -165,13 +161,12 @@ int HWCVirtualVDS::set(hwc_context_t *ctx, hwc_display_contents_1_t *list) {
+             Writeback::getInstance()->setOutputFormat(
+                                     utils::getMdpFormat(format));
+ 
+-            // Configure WB as secure if the output buffer handle is secure.
+-            if(isSecureBuffer(ohnd)){
+-                if(! Writeback::getInstance()->setSecure(true))
+-                {
+-                    ALOGE("Failed to set WB as secure for virtual display");
+-                    return false;
+-                }
++            // Configure WB secure mode based on output buffer handle
++            if(! Writeback::getInstance()->setSecure(isSecureBuffer(ohnd)))
++            {
++                ALOGE("Failed to set WB secure mode: %d for virtual display",
++                    isSecureBuffer(ohnd));
++                return false;
+             }
+ 
+             int fd = -1; //FenceFD from the Copybit
+-- 
+1.8.2.1
+

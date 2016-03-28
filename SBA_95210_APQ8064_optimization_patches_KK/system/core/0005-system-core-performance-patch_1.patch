@@ -1,0 +1,445 @@
+From 275ff140d4c39dea2ed01e495f8d8970fb9f55d7 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Mon, 9 Mar 2015 10:29:46 -0700
+Subject: [PATCH 5/5] system:core: performance patch_1
+
+Change-Id: I076351bbf702df7d2946207963b98b0daca631e3
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ 0001-system-core-performance-patch.patch           |  63 +++++++++
+ ...block-sys-entry-creation-to-initiate-bloc.patch |  28 ++++
+ ...-init-adding-checkpoint-for-boot-time-mea.patch |  45 +++++++
+ init/init.c                                        |   2 +-
+ rootdir/init.rc                                    | 147 +++++++++++----------
+ 5 files changed, 211 insertions(+), 74 deletions(-)
+ create mode 100644 0001-system-core-performance-patch.patch
+ create mode 100644 0002-Prioritize-block-sys-entry-creation-to-initiate-bloc.patch
+ create mode 100644 0003-system-core-init-adding-checkpoint-for-boot-time-mea.patch
+
+diff --git a/0001-system-core-performance-patch.patch b/0001-system-core-performance-patch.patch
+new file mode 100644
+index 0000000..742de70
+--- /dev/null
++++ b/0001-system-core-performance-patch.patch
+@@ -0,0 +1,63 @@
++From 83b2a8003aab6f10919c97fb1d90f9aaa0fc236a Mon Sep 17 00:00:00 2001
++From: Baji Patthan <bpatth@codeaurora.org>
++Date: Mon, 2 Mar 2015 17:46:57 -0800
++Subject: [PATCH 1/3] system:core: performance patch
++
++Change-Id: Iecff6ff0ed24d81f432ae37cf11f2f7da1ed612b
++Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
++---
++ rootdir/init.rc | 13 +++++++++----
++ 1 file changed, 9 insertions(+), 4 deletions(-)
++
++diff --git a/rootdir/init.rc b/rootdir/init.rc
++index e8c58c3..745e62a 100644
++--- a/rootdir/init.rc
+++++ b/rootdir/init.rc
++@@ -431,8 +431,8 @@ service console /system/bin/sh
++     user shell
++     group log
++ 
++-on property:ro.debuggable=1
++-    start console
+++#on property:ro.debuggable=1
+++#    start console
++ 
++ # adbd is controlled via property triggers in init.<platform>.usb.rc
++ service adbd /sbin/adbd
++@@ -442,8 +442,8 @@ service adbd /sbin/adbd
++     seclabel u:r:adbd:s0
++ 
++ # adbd on at boot in emulator
++-on property:ro.kernel.qemu=1
++-    start adbd
+++#on property:ro.kernel.qemu=1
+++#    start adbd
++ 
++ service servicemanager /system/bin/servicemanager
++     class core
++@@ -476,6 +476,7 @@ service ril-daemon /system/bin/rild
++     socket rild-debug stream 660 radio system
++     user root
++     group radio cache inet misc audio log qcom_diag
+++	 disabled
++ 
++ service surfaceflinger /system/bin/surfaceflinger
++     class main
++@@ -495,6 +496,7 @@ service drm /system/bin/drmserver
++     class main
++     user drm
++     group drm system inet drmrpc
+++	 diabled
++ 
++ service media /system/bin/mediaserver
++     class main
++@@ -555,3 +557,6 @@ service mdnsd /system/bin/mdnsd
++     socket mdnsd stream 0660 mdnsr inet
++     disabled
++     oneshot
+++on property:sys.boot_completed=1
+++	 start ril-daemon
+++	 start drm
++-- 
++1.8.2.1
++
+diff --git a/0002-Prioritize-block-sys-entry-creation-to-initiate-bloc.patch b/0002-Prioritize-block-sys-entry-creation-to-initiate-bloc.patch
+new file mode 100644
+index 0000000..8142739
+--- /dev/null
++++ b/0002-Prioritize-block-sys-entry-creation-to-initiate-bloc.patch
+@@ -0,0 +1,28 @@
++From 714f107303cd3a36591a53d584276772e9fc2606 Mon Sep 17 00:00:00 2001
++From: Siddalingesh Koosalapur <skoosa@codeaurora.org>
++Date: Thu, 29 Jan 2015 07:28:26 +0000
++Subject: [PATCH 2/3] Prioritize "block" sys entry creation to initiate block
++ events early.
++
++Change-Id: I684f7ecc92676c1b92f3370f5255382b84467625
++---
++ init/devices.c | 2 +-
++ 1 file changed, 1 insertion(+), 1 deletion(-)
++
++diff --git a/init/devices.c b/init/devices.c
++index 420690e..7675674 100644
++--- a/init/devices.c
+++++ b/init/devices.c
++@@ -971,8 +971,8 @@ void device_init(void)
++ 
++     if (stat(coldboot_done, &info) < 0) {
++         t0 = get_usecs();
++-        coldboot("/sys/class");
++         coldboot("/sys/block");
+++        coldboot("/sys/class");
++         coldboot("/sys/devices");
++         t1 = get_usecs();
++         fd = open(coldboot_done, O_WRONLY|O_CREAT, 0000);
++-- 
++1.8.2.1
++
+diff --git a/0003-system-core-init-adding-checkpoint-for-boot-time-mea.patch b/0003-system-core-init-adding-checkpoint-for-boot-time-mea.patch
+new file mode 100644
+index 0000000..d414518
+--- /dev/null
++++ b/0003-system-core-init-adding-checkpoint-for-boot-time-mea.patch
+@@ -0,0 +1,45 @@
++From 431a84b5285441f5bfd7a1af85799500c0a76755 Mon Sep 17 00:00:00 2001
++From: Steven Veigas <sveiga@codeaurora.org>
++Date: Wed, 18 Feb 2015 07:13:31 +0000
++Subject: [PATCH 3/3] system: core: init: adding checkpoint for boot time
++ measurement
++
++Marker is added at start of init, for boot time measurement
++
++Change-Id: Idd53f86477d676ee51488449cf634a17b94a8d00
++---
++ init/init.c | 11 +++++++++++
++ 1 file changed, 11 insertions(+)
++
++diff --git a/init/init.c b/init/init.c
++index ea6f904..524b72c 100644
++--- a/init/init.c
+++++ b/init/init.c
++@@ -965,6 +965,15 @@ static void selinux_initialize(void)
++     security_setenforce(is_enforcing);
++ }
++ 
+++void place_marker(char *name)
+++{
+++    int fd=open("/proc/bootkpi/marker_entry", O_RDWR);
+++    if (fd > 0) {
+++        write(fd, name, strlen(name));
+++        close(fd);
+++    }
+++}
+++
++ int main(int argc, char **argv)
++ {
++     int fd_count = 0;
++@@ -978,6 +987,8 @@ int main(int argc, char **argv)
++     bool is_charger = false;
++     bool is_ffbm = false;
++ 
+++    place_marker("init[user]-start");
+++
++     if (!strcmp(basename(argv[0]), "ueventd"))
++         return ueventd_main(argc, argv);
++ 
++-- 
++1.8.2.1
++
+diff --git a/init/init.c b/init/init.c
+index 524b72c..aeb166a 100644
+--- a/init/init.c
++++ b/init/init.c
+@@ -1063,7 +1063,7 @@ int main(int argc, char **argv)
+     queue_builtin_action(wait_for_coldboot_done_action, "wait_for_coldboot_done");
+     queue_builtin_action(mix_hwrng_into_linux_rng_action, "mix_hwrng_into_linux_rng");
+     queue_builtin_action(keychord_init_action, "keychord_init");
+-    queue_builtin_action(console_init_action, "console_init");
++    //queue_builtin_action(console_init_action, "console_init");
+ 
+     /* execute all the boot actions to get us started */
+     action_for_each_trigger("init", action_add_queue_tail);
+diff --git a/rootdir/init.rc b/rootdir/init.rc
+index 745e62a..947f341 100644
+--- a/rootdir/init.rc
++++ b/rootdir/init.rc
+@@ -47,15 +47,15 @@ loglevel 3
+ # Create cgroup mount point for memory
+     mount tmpfs none /sys/fs/cgroup mode=0750,uid=0,gid=1000
+     mkdir /sys/fs/cgroup/memory 0750 root system
+-    mount cgroup none /sys/fs/cgroup/memory memory
++#    mount cgroup none /sys/fs/cgroup/memory memory
+     write /sys/fs/cgroup/memory/memory.move_charge_at_immigrate 1
+-    chown root system /sys/fs/cgroup/memory/tasks
+-    chmod 0660 /sys/fs/cgroup/memory/tasks
++#   chown root system /sys/fs/cgroup/memory/tasks
++#   chmod 0660 /sys/fs/cgroup/memory/tasks
+     mkdir /sys/fs/cgroup/memory/sw 0750 root system
+     write /sys/fs/cgroup/memory/sw/memory.swappiness 100
+     write /sys/fs/cgroup/memory/sw/memory.move_charge_at_immigrate 1
+-    chown root system /sys/fs/cgroup/memory/sw/tasks
+-    chmod 0660 /sys/fs/cgroup/memory/sw/tasks
++#    chown root system /sys/fs/cgroup/memory/sw/tasks
++#    chmod 0660 /sys/fs/cgroup/memory/sw/tasks
+ 
+     mkdir /system
+     mkdir /data 0771 system system
+@@ -86,11 +86,11 @@ loglevel 3
+     mount tmpfs tmpfs /mnt/obb mode=0755,gid=1000
+ 
+     write /proc/sys/kernel/panic_on_oops 1
+-    write /proc/sys/kernel/hung_task_timeout_secs 0
++#    write /proc/sys/kernel/hung_task_timeout_secs 0
+     write /proc/cpu/alignment 4
+-    write /proc/sys/kernel/sched_latency_ns 10000000
+-    write /proc/sys/kernel/sched_wakeup_granularity_ns 2000000
+-    write /proc/sys/kernel/sched_compat_yield 1
++#    write /proc/sys/kernel/sched_latency_ns 10000000
++#   write /proc/sys/kernel/sched_wakeup_granularity_ns 2000000
++#    write /proc/sys/kernel/sched_compat_yield 1
+     write /proc/sys/kernel/sched_child_runs_first 0
+     write /proc/sys/kernel/randomize_va_space 2
+     write /proc/sys/kernel/kptr_restrict 2
+@@ -113,7 +113,7 @@ loglevel 3
+     mkdir /dev/cpuctl/apps
+     chown system system /dev/cpuctl/apps/tasks
+     chmod 0666 /dev/cpuctl/apps/tasks
+-    write /dev/cpuctl/apps/cpu.shares 1024
++#    write /dev/cpuctl/apps/cpu.shares 1024
+     write /dev/cpuctl/apps/cpu.rt_runtime_us 800000
+     write /dev/cpuctl/apps/cpu.rt_period_us 1000000
+ 
+@@ -152,8 +152,8 @@ on post-fs
+     restorecon /cache
+ 
+     # This may have been created by the recovery system with odd permissions
+-    chown system cache /cache/recovery
+-    chmod 0770 /cache/recovery
++#    chown system cache /cache/recovery
++#    chmod 0770 /cache/recovery
+     # This may have been created by the recovery system with the wrong context.
+     restorecon /cache/recovery
+ 
+@@ -167,10 +167,10 @@ on post-fs
+     #change permissions on kmsg & sysrq-trigger so bugreports can grab kthread stacks
+     chown root system /proc/kmsg
+     chmod 0440 /proc/kmsg
+-    chown root system /proc/sysrq-trigger
+-    chmod 0220 /proc/sysrq-trigger
+-    chown system log /proc/last_kmsg
+-    chmod 0440 /proc/last_kmsg
++#    chown root system /proc/sysrq-trigger
++#    chmod 0220 /proc/sysrq-trigger
++#    chown system log /proc/last_kmsg
++#    chmod 0440 /proc/last_kmsg
+ 
+     # create the lost+found directories, so as to enforce our permissions
+     mkdir /cache/lost+found 0770 root root
+@@ -191,15 +191,15 @@ on post-fs-data
+     mkdir /data/dontpanic 0750 root log
+ 
+     # Collect apanic data, free resources and re-arm trigger
+-    copy /proc/apanic_console /data/dontpanic/apanic_console
+-    chown root log /data/dontpanic/apanic_console
+-    chmod 0640 /data/dontpanic/apanic_console
++#    copy /proc/apanic_console /data/dontpanic/apanic_console
++#    chown root log /data/dontpanic/apanic_console
++#    chmod 0640 /data/dontpanic/apanic_console
+ 
+-    copy /proc/apanic_threads /data/dontpanic/apanic_threads
+-    chown root log /data/dontpanic/apanic_threads
+-    chmod 0640 /data/dontpanic/apanic_threads
++#    copy /proc/apanic_threads /data/dontpanic/apanic_threads
++#    chown root log /data/dontpanic/apanic_threads
++#    chmod 0640 /data/dontpanic/apanic_threads
+ 
+-    write /proc/apanic_console 1
++#    write /proc/apanic_console 1
+ 
+     # create basic filesystem structure
+     mkdir /data/misc 01771 system misc
+@@ -215,7 +215,7 @@ on post-fs-data
+     mkdir /data/misc/systemkeys 0700 system system
+     # give system access to wpa_supplicant.conf for backup and restore
+     mkdir /data/misc/wifi 0770 wifi wifi
+-    chmod 0660 /data/misc/wifi/wpa_supplicant.conf
++#    chmod 0660 /data/misc/wifi/wpa_supplicant.conf
+     mkdir /data/local 0751 root root
+     mkdir /data/misc/media 0700 media media
+ 
+@@ -251,7 +251,7 @@ on post-fs-data
+     mkdir /data/mediadrm 0770 mediadrm mediadrm
+ 
+     # symlink to bugreport storage location
+-    symlink /data/data/com.android.shell/files/bugreports /data/bugreports
++#    symlink /data/data/com.android.shell/files/bugreports /data/bugreports
+ 
+     # Separate location for storing security policy files on data
+     mkdir /data/security 0711 system system
+@@ -261,7 +261,8 @@ on post-fs-data
+     # won't work.
+     # Set indication (checked by vold) that we have finished this action
+     #setprop vold.post_fs_data_done 1
+-
++	 insmod /system/lib/modules/rfkill.ko
++	 insmod /system/lib/modules/cfg80211.ko
+ on boot
+ # basic network init
+     ifup lo
+@@ -286,12 +287,12 @@ on boot
+     write /proc/sys/vm/dirty_background_ratio  5
+ 
+     # Permissions for System Server and daemons.
+-    chown radio system /sys/android_power/state
+-    chown radio system /sys/android_power/request_state
+-    chown radio system /sys/android_power/acquire_full_wake_lock
+-    chown radio system /sys/android_power/acquire_partial_wake_lock
+-    chown radio system /sys/android_power/release_wake_lock
+-    chown system system /sys/power/autosleep
++#    chown radio system /sys/android_power/state
++#    chown radio system /sys/android_power/request_state
++#    chown radio system /sys/android_power/acquire_full_wake_lock
++#    chown radio system /sys/android_power/acquire_partial_wake_lock
++#    chown radio system /sys/android_power/release_wake_lock
++#    chown system system /sys/power/autosleep
+     chown system system /sys/power/state
+     chown system system /sys/power/wakeup_count
+     chown radio system /sys/power/wake_lock
+@@ -300,47 +301,47 @@ on boot
+     chmod 0660 /sys/power/wake_lock
+     chmod 0660 /sys/power/wake_unlock
+ 
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/timer_rate
+-    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/timer_rate
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/timer_slack
+-    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/timer_slack
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/min_sample_time
+-    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/min_sample_time
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/hispeed_freq
+-    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/hispeed_freq
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/target_loads
+-    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/target_loads
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/go_hispeed_load
+-    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/go_hispeed_load
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/above_hispeed_delay
+-    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/above_hispeed_delay
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/boost
+-    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/boost
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/boostpulse
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/input_boost
+-    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/input_boost
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/boostpulse_duration
+-    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/boostpulse_duration
+-    chown system system /sys/devices/system/cpu/cpufreq/interactive/io_is_busy
+-    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/io_is_busy
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/timer_rate
++#    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/timer_rate
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/timer_slack
++#    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/timer_slack
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/min_sample_time
++#    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/min_sample_time
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/hispeed_freq
++#    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/hispeed_freq
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/target_loads
++#    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/target_loads
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/go_hispeed_load
++#    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/go_hispeed_load
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/above_hispeed_delay
++#    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/above_hispeed_delay
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/boost
++#    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/boost
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/boostpulse
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/input_boost
++#    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/input_boost
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/boostpulse_duration
++#    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/boostpulse_duration
++#    chown system system /sys/devices/system/cpu/cpufreq/interactive/io_is_busy
++#    chmod 0660 /sys/devices/system/cpu/cpufreq/interactive/io_is_busy
+ 
+     # Assume SMP uses shared cpufreq policy for all CPUs
+     chown system system /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+     chmod 0660 /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+ 
+-    chown system system /sys/class/timed_output/vibrator/enable
+-    chown system system /sys/class/leds/keyboard-backlight/brightness
++#    chown system system /sys/class/timed_output/vibrator/enable
++#    chown system system /sys/class/leds/keyboard-backlight/brightness
+     chown system system /sys/class/leds/lcd-backlight/brightness
+-    chown system system /sys/class/leds/button-backlight/brightness
+-    chown system system /sys/class/leds/jogball-backlight/brightness
+-    chown system system /sys/class/leds/red/brightness
+-    chown system system /sys/class/leds/green/brightness
+-    chown system system /sys/class/leds/blue/brightness
+-    chown system system /sys/class/leds/red/device/grpfreq
+-    chown system system /sys/class/leds/red/device/grppwm
+-    chown system system /sys/class/leds/red/device/blink
+-    chown system system /sys/class/timed_output/vibrator/enable
+-    chown system system /sys/module/sco/parameters/disable_esco
++#    chown system system /sys/class/leds/button-backlight/brightness
++#    chown system system /sys/class/leds/jogball-backlight/brightness
++#    chown system system /sys/class/leds/red/brightness
++#    chown system system /sys/class/leds/green/brightness
++#    chown system system /sys/class/leds/blue/brightness
++#    chown system system /sys/class/leds/red/device/grpfreq
++#    chown system system /sys/class/leds/red/device/grppwm
++#    chown system system /sys/class/leds/red/device/blink
++#    chown system system /sys/class/timed_output/vibrator/enable
++#    chown system system /sys/module/sco/parameters/disable_esco
+     chown system system /sys/kernel/ipv4/tcp_wmem_min
+     chown system system /sys/kernel/ipv4/tcp_wmem_def
+     chown system system /sys/kernel/ipv4/tcp_wmem_max
+@@ -350,8 +351,8 @@ on boot
+     chown root radio /proc/cmdline
+ 
+ # Set these so we can remotely update SELinux policy
+-    chown system system /sys/fs/selinux/load
+-    chown system system /sys/fs/selinux/enforce
++#    chown system system /sys/fs/selinux/load
++#    chown system system /sys/fs/selinux/enforce
+ 
+ # Define TCP buffer sizes for various networks
+ #   ReadMin, ReadInitial, ReadMax, WriteMin, WriteInitial, WriteMax,
+@@ -396,12 +397,12 @@ on property:vold.decrypt=trigger_shutdown_framework
+     class_reset late_start
+     class_reset main
+ 
+-on property:sys.powerctl=*
+-    powerctl ${sys.powerctl}
++#on property:sys.powerctl=*
++#    powerctl ${sys.powerctl}
+ 
+ # system server cannot write to /proc/sys files, so proxy it through init
+-on property:sys.sysctl.extra_free_kbytes=*
+-    write /proc/sys/vm/extra_free_kbytes ${sys.sysctl.extra_free_kbytes}
++#on property:sys.sysctl.extra_free_kbytes=*
++#    write /proc/sys/vm/extra_free_kbytes ${sys.sysctl.extra_free_kbytes}
+ 
+ ## Daemon processes to be run by init.
+ ##
+-- 
+1.8.2.1
+

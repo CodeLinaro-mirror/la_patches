@@ -1,0 +1,109 @@
+From b80d7aa66730fb6b5aa0b853587ca949a6a8fe51 Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Mon, 2 Mar 2015 17:36:40 -0800
+Subject: [PATCH 1/5] device:qcom:msm896: performace patch
+
+Change-Id: Ib2c1234ede14037b102be675c0027d4536086fdf
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ init.target.rc | 34 ++++++++++++++++++++++++----------
+ 1 file changed, 24 insertions(+), 10 deletions(-)
+
+diff --git a/init.target.rc b/init.target.rc
+index a3a395c..e082c47 100644
+--- a/init.target.rc
++++ b/init.target.rc
+@@ -51,10 +51,10 @@ on fs
+     wait /dev/block/platform/msm_sdcc.1/by-name/modem
+     mount vfat /dev/block/platform/msm_sdcc.1/by-name/modem /firmware ro shortname=lower,uid=1000,gid=1000,dmask=227,fmask=337
+ 
+-on boot
+-   write /sys/devices/i2c-3/3-0024/cyttsp_update_fw 1
+-   write /sys/devices/i2c-3/3-005b/update_fw 1
+-   start qcamerasvr
++#on boot
++#   write /sys/devices/i2c-3/3-0024/cyttsp_update_fw 1
++#   write /sys/devices/i2c-3/3-005b/update_fw 1
++#   start qcamerasvr
+ 
+ on post-fs-data
+    mkdir /data/tombstones 0771 system system
+@@ -70,6 +70,7 @@ service qcamerasvr /system/bin/mm-qcamera-daemon
+         class late_start
+         user camera
+         group camera system inet input graphics net_bt_stack
++		  disabled
+ 
+ #start GNSS/Sensor interface daemon
+ service gsiff_daemon /system/bin/gsiff_daemon
+@@ -97,6 +98,7 @@ service rf4ce /system/bin/rf4ce
+    class main
+    user root
+    group root
++   disabled
+ 
+ service qosmgrd /system/bin/qosmgr /system/etc/qosmgr_rules.xml
+    user system
+@@ -116,11 +118,13 @@ service qrngd /system/bin/qrngd -f
+    class main
+    user root
+    group root
++	disabled
+ 
+ service qseecomd /system/bin/qseecomd
+    class late_start
+    user system
+    group system
++	disabled
+ 
+ # Start kickstart if mdm is detected
+ on property:ro.baseband=mdm
+@@ -172,13 +176,14 @@ service usf-post-boot /system/bin/sh /system/etc/usf_post_boot.sh
+     disabled
+     oneshot
+ 
+-on property:init.svc.bootanim=stopped
+-    start usf-post-boot
++#on property:init.svc.bootanim=stopped
++#    start usf-post-boot
+ 
+ service time_daemon /system/bin/time_daemon
+    class late_start
+    user root
+    group root
++	disabled
+ 
+ service imsqmidaemon /system/bin/imsqmidaemon
+     class main
+@@ -204,9 +209,10 @@ service wcnss-service /system/bin/wcnss_service
+     user system
+     group system wifi
+     oneshot
++	 disabled
+ 
+-on property:sys.ims.QMI_DAEMON_STATUS=1
+-    start imsdatadaemon
++#on property:sys.ims.QMI_DAEMON_STATUS=1
++#    start imsdatadaemon
+ 
+ service ims_rtp_daemon /system/bin/ims_rtp_daemon
+    class main
+@@ -215,5 +221,13 @@ service ims_rtp_daemon /system/bin/ims_rtp_daemon
+    group ims net_raw diag qcom_diag log
+    disabled
+ 
+-on property:sys.ims.DATA_DAEMON_STATUS=1
+-    start ims_rtp_daemon
++#on property:sys.ims.DATA_DAEMON_STATUS=1
++#    start ims_rtp_daemon
++on property:sys.boot_completed=1
++	 start qrngd
++	 start qseecomd
++	 start imsqmidaemon
++	 start imsdatadaemon
++	 start ims_rtp_daemon
++	 start wcnss-service
++	 start usf-post-boot
+-- 
+1.8.2.1
+

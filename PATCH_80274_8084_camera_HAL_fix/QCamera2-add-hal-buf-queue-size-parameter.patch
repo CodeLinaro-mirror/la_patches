@@ -1,0 +1,261 @@
+From 1e43474115be13922e6769152011118bf7f75938 Mon Sep 17 00:00:00 2001
+From: Mike Mager <mikemager@codeaurora.com>
+Date: Thu, 6 Nov 2014 14:53:02 -0800
+Subject: [PATCH] M8: QCamera2: add "hal-buf-queue-size" parameter
+
+With an infinite queue size, it was observed that as the device is
+thermally mitigated and CPU clocks drop, the ability to empty the
+queue falls drastically, eventually resulting in a crash due to too
+many open file handles.
+
+When the "hal-buf-queue-size" parameter is set to 1, the queue only
+ever holds the most recently queued frame. This addresses the
+problem described above, but has an additional benefit for the
+augmented reality use case since the pose should always be
+determined from the most recent frame.
+
+Change-Id: I649462f8aa0981c6983cdb0d12833fdd89a8d0f6
+---
+ QCamera2/HAL/QCamera2HWI.h            |  3 +-
+ QCamera2/HAL/QCamera2HWICallbacks.cpp | 35 +++++++++++++++++++--
+ QCamera2/HAL/QCameraParameters.cpp    | 59 ++++++++++++++++++++++++++++++++++-
+ QCamera2/HAL/QCameraParameters.h      |  6 ++++
+ 4 files changed, 98 insertions(+), 5 deletions(-)
+ mode change 100755 => 100644 QCamera2/HAL/QCameraParameters.cpp
+
+diff --git a/QCamera2/HAL/QCamera2HWI.h b/QCamera2/HAL/QCamera2HWI.h
+index 20d663d..46a2437 100644
+--- a/QCamera2/HAL/QCamera2HWI.h
++++ b/QCamera2/HAL/QCamera2HWI.h
+@@ -148,7 +148,8 @@ public:
+ 
+     virtual ~QCameraCbNotifier();
+ 
+-    virtual int32_t notifyCallback(qcamera_callback_argm_t &cbArgs);
++    virtual int32_t notifyCallback(qcamera_callback_argm_t &cbArgs,
++                                   int32_t nHALBufQueueSize = 0);
+     virtual void setCallbacks(camera_notify_callback notifyCb,
+                               camera_data_callback dataCb,
+                               camera_data_timestamp_callback dataCbTimestamp,
+diff --git a/QCamera2/HAL/QCamera2HWICallbacks.cpp b/QCamera2/HAL/QCamera2HWICallbacks.cpp
+index 36b491a..eccf97c 100644
+--- a/QCamera2/HAL/QCamera2HWICallbacks.cpp
++++ b/QCamera2/HAL/QCamera2HWICallbacks.cpp
+@@ -666,7 +666,7 @@ int32_t QCamera2HardwareInterface::sendPreviewCallback(QCameraStream *stream,
+         cbArg.release_cb = releaseCameraMemory;
+     }
+     cbArg.cookie = this;
+-    rc = m_cbNotifier.notifyCallback(cbArg);
++    rc = m_cbNotifier.notifyCallback(cbArg, mParameters.halBufQueueSize());
+     if (rc != NO_ERROR) {
+         ALOGE("%s: fail sending notification", __func__);
+         if (previewMem) {
+@@ -1001,7 +1001,7 @@ void QCamera2HardwareInterface::video_stream_cb_routine(mm_camera_super_buf_t *s
+             cbArg.msg_type = CAMERA_MSG_VIDEO_FRAME;
+             cbArg.data = video_mem;
+             cbArg.timestamp = timeStamp;
+-            int32_t rc = pme->m_cbNotifier.notifyCallback(cbArg);
++            int32_t rc = pme->m_cbNotifier.notifyCallback(cbArg, pme->mParameters.halBufQueueSize());
+             if (rc != NO_ERROR) {
+                 ALOGE("%s: fail sending data notify", __func__);
+                 stream->bufDone(frame->buf_idx);
+@@ -2136,6 +2136,22 @@ void * QCameraCbNotifier::cbNotifyRoutine(void * data)
+ }
+ 
+ /*===========================================================================
++ * FUNCTION   : matchCamFramesExceptOne
++ *
++ * DESCRIPTION: match function for deleting all camera frames except the one
++ *              passed in (just added)
++ *==========================================================================*/
++bool matchCamFramesExceptOne(void *data, void *, void *match_data) {
++    if (data == match_data) {
++        return false;
++    }
++    if (((qcamera_callback_argm_t *) data)->cb_type != QCAMERA_NOTIFY_CALLBACK) {
++        return true;
++    }
++    return false;
++}
++
++/*===========================================================================
+  * FUNCTION   : notifyCallback
+  *
+  * DESCRIPTION: Enqueus pending callback notifications for the upper layers.
+@@ -2147,7 +2163,8 @@ void * QCameraCbNotifier::cbNotifyRoutine(void * data)
+  *              NO_ERROR  -- success
+  *              none-zero failure code
+  *==========================================================================*/
+-int32_t QCameraCbNotifier::notifyCallback(qcamera_callback_argm_t &cbArgs)
++int32_t QCameraCbNotifier::notifyCallback(qcamera_callback_argm_t &cbArgs,
++                                          int32_t nHALBufQueueSize)
+ {
+     if (!mActive) {
+         ALOGE("%s: notify thread is not active", __func__);
+@@ -2162,6 +2179,18 @@ int32_t QCameraCbNotifier::notifyCallback(qcamera_callback_argm_t &cbArgs)
+     memset(cbArg, 0, sizeof(qcamera_callback_argm_t));
+     *cbArg = cbArgs;
+ 
++    // if we get a camera frame, put it at the top of the queue and erase all
++    // other older camera frames
++    if (1 == nHALBufQueueSize && cbArgs.cb_type != QCAMERA_NOTIFY_CALLBACK) {
++        if (!mDataQ.enqueueWithPriority((void *)cbArg)) {
++            ALOGE("%s: Error adding cb data into queue", __func__);
++            delete cbArg;
++            return UNKNOWN_ERROR;
++        }
++        mDataQ.flushNodes(&matchCamFramesExceptOne, cbArg);
++        return mProcTh.sendCmd(CAMERA_CMD_TYPE_DO_NEXT_JOB, FALSE, FALSE);
++    }
++
+     if (mDataQ.enqueue((void *)cbArg)) {
+         return mProcTh.sendCmd(CAMERA_CMD_TYPE_DO_NEXT_JOB, FALSE, FALSE);
+     } else {
+diff --git a/QCamera2/HAL/QCameraParameters.cpp b/QCamera2/HAL/QCameraParameters.cpp
+old mode 100755
+new mode 100644
+index b4230a3..1dde4a1
+--- a/QCamera2/HAL/QCameraParameters.cpp
++++ b/QCamera2/HAL/QCameraParameters.cpp
+@@ -130,6 +130,7 @@ const char QCameraParameters::KEY_QC_RDI_MODE[] = "rdi-mode";
+ const char QCameraParameters::KEY_QC_SUPPORTED_RDI_MODES[] = "rdi-mode-values";
+ const char QCameraParameters::KEY_QC_SECURE_MODE[] = "secure-mode";
+ const char QCameraParameters::KEY_QC_SUPPORTED_SECURE_MODES[] = "secure-mode-values";
++const char QCameraParameters::KEY_QC_HAL_BUFFER_QUEUE_SIZE[] = "hal-buf-queue-size";
+ 
+ // Values for effect settings.
+ const char QCameraParameters::EFFECT_EMBOSS[] = "emboss";
+@@ -678,7 +679,8 @@ QCameraParameters::QCameraParameters()
+       m_bSecureMode(false),
+       m_bAeBracketingEnabled(false),
+       mFlashValue(CAM_FLASH_MODE_OFF),
+-      mFlashDaemonValue(CAM_FLASH_MODE_OFF)
++      mFlashDaemonValue(CAM_FLASH_MODE_OFF),
++      m_HALBufQueueSize(0)
+ {
+     char value[PROPERTY_VALUE_MAX];
+     // TODO: may move to parameter instead of sysprop
+@@ -3549,6 +3551,34 @@ int32_t QCameraParameters::setSecureMode(
+     return NO_ERROR;
+ }
+ 
++/*==========================================================
++ * FUNCTION   : setHALBufQueueSize
++ *
++ * DESCRIPTION: set HAL buffer queue size from user setting
++ *
++ * PARAMETERS :
++ *   @params  : user setting parameters
++ *
++ * RETURN     : int32_t type of status
++ *              NO_ERROR  -- success
++ *              none-zero failure code
++ *===========================================================*/
++
++int32_t QCameraParameters::setHALBufQueueSize(
++  const QCameraParameters& params)
++{
++    const char *str = params.get(KEY_QC_HAL_BUFFER_QUEUE_SIZE);
++    const char *prev_str = get(KEY_QC_HAL_BUFFER_QUEUE_SIZE);
++    char prop[PROPERTY_VALUE_MAX];
++    memset(prop, 0, sizeof(prop));
++
++    if ((str != NULL) && (prev_str == NULL || strcmp(str, prev_str) != 0)) {
++        ALOGD("%s : HAL bufferq queue size set to KEY: %s", __func__, str);
++        setHALBufQueueSize(str);
++    }
++    return NO_ERROR;
++}
++
+ /*===========================================================================
+  * FUNCTION   : setZslAttributes
+  *
+@@ -3861,6 +3891,7 @@ int32_t QCameraParameters::updateParameters(QCameraParameters& params,
+     if ((rc = setSnapshotFDReq(params)))                final_rc = rc;
+     if ((rc = setTintlessValue(params)))                final_rc = rc;
+     if ((rc = setCDSMode(params)))                      final_rc = rc;
++    if ((rc = setHALBufQueueSize(params)))              final_rc = rc;
+ 
+     // update live snapshot size after all other parameters are set
+     if ((rc = setLiveSnapshotSize(params)))             final_rc = rc;
+@@ -6759,6 +6790,32 @@ int32_t QCameraParameters::setSecureMode(const char *str)
+ }
+ 
+ /*===========================================================================
++ * FUNCTION   : setHALBufQueueSize
++ *
++ * DESCRIPTION: set HAL buffer queue size value
++ *
++ * PARAMETERS :
++ *   @str     : HAL buffer queue size value string
++ *
++ * RETURN     : int32_t type of status
++ *              NO_ERROR  -- success
++ *              none-zero failure code
++ *==========================================================================*/
++int32_t QCameraParameters::setHALBufQueueSize(const char *str)
++{
++  ALOGD("%s: HAL buffer queue size value: %s", __func__, str);
++
++  if (str != NULL) {
++    int32_t value = atoi(str);
++    updateParamEntry(KEY_QC_HAL_BUFFER_QUEUE_SIZE, str);
++    m_HALBufQueueSize = value;
++    return NO_ERROR;
++  }
++  ALOGE("%s: HAL buffer queue size is NULL", __func__);
++  return BAD_VALUE;
++}
++
++/*===========================================================================
+  * FUNCTION   : setPreviewFrameRateMode
+  *
+  * DESCRIPTION: set preview frame rate mode
+diff --git a/QCamera2/HAL/QCameraParameters.h b/QCamera2/HAL/QCameraParameters.h
+index 90ef031..ec6330c 100644
+--- a/QCamera2/HAL/QCameraParameters.h
++++ b/QCamera2/HAL/QCameraParameters.h
+@@ -396,6 +396,7 @@ public:
+     static const char KEY_QC_SUPPORTED_RDI_MODES[];
+     static const char KEY_QC_SECURE_MODE[];
+     static const char KEY_QC_SUPPORTED_SECURE_MODES[];
++    static const char KEY_QC_HAL_BUFFER_QUEUE_SIZE[];
+ 
+     // Values for SKIN TONE ENHANCEMENT
+     static const char SKIN_TONE_ENHANCEMENT_ENABLE[] ;
+@@ -621,6 +622,8 @@ public:
+             isHDREnabled();}
+     int32_t setAecLock(const char *aecStr);
+ 
++    inline int32_t halBufQueueSize() {return m_HALBufQueueSize;};
++
+ private:
+     int32_t setPreviewSize(const QCameraParameters& );
+     int32_t setVideoSize(const QCameraParameters& );
+@@ -689,6 +692,7 @@ private:
+     int32_t setMobicat(const QCameraParameters& params);
+     int32_t setRdiMode(const QCameraParameters& );
+     int32_t setSecureMode(const QCameraParameters& );
++    int32_t setHALBufQueueSize(const QCameraParameters& );
+     int32_t setAutoExposure(const char *autoExp);
+     int32_t setPreviewFpsRange(int min_fps,int max_fps,
+             int vid_min_fps,int vid_max_fps);
+@@ -730,6 +734,7 @@ private:
+     bool UpdateHFRFrameRate(const QCameraParameters& params);
+     int32_t setRdiMode(const char *str);
+     int32_t setSecureMode(const char *str);
++    int32_t setHALBufQueueSize(const char *str);
+ 
+     int32_t parse_pair(const char *str, int *first, int *second,
+                        char delim, char **endptr);
+@@ -864,6 +869,7 @@ private:
+     bool m_bAeBracketingEnabled;
+     int32_t mFlashValue;
+     int32_t mFlashDaemonValue;
++    int32_t m_HALBufQueueSize;
+ 
+ };
+ 
+-- 
+1.8.2.1
+

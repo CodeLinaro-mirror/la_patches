@@ -1,0 +1,28 @@
+From 15e569e1f1bd6e805e3a70afdb6798e70e01a7e7 Mon Sep 17 00:00:00 2001
+From: Sathish Ambley <sathishambley@codeaurora.org>
+Date: Tue, 6 Oct 2015 11:38:28 -0700
+Subject: [PATCH 2/2] msm8916: Enable adsprpcd daemon
+
+Enable adsprpcd daemon
+
+Change-Id: Iab3b1446f0b8a599e6eb84ab74cb365490703bae
+---
+ init.target.rc | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/init.target.rc b/init.target.rc
+index 9dd7e63..06842a8 100644
+--- a/init.target.rc
++++ b/init.target.rc
+@@ -135,3 +135,8 @@ service wcnss-service /system/bin/wcnss_service
+     user system
+     group system wifi
+     oneshot
++
++service adsprpcd /system/bin/adsprpcd
++   class main
++   user media
++   group media
+-- 
+1.8.2.1
+

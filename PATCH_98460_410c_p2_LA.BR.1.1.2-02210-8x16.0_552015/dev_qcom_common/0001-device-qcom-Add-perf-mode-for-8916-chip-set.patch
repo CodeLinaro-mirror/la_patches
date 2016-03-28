@@ -1,0 +1,149 @@
+From a5759ad8171dc7bd8b7be8f57146b79bc925464a Mon Sep 17 00:00:00 2001
+From: Baji Patthan <bpatth@codeaurora.org>
+Date: Tue, 5 May 2015 20:19:50 -0700
+Subject: [PATCH] device:qcom: Add perf mode for 8916 chip set.
+
+Temporary workaround for SBC8016, enable S2 to be flat on 1.25V.
+
+Change-Id: I80230c4f55502c2198ef0e322895077819b29909
+Signed-off-by: Baji Patthan <bpatth@codeaurora.org>
+---
+ ...vice-qcom-Add-perf-mode-for-8916-chip-set.patch | 70 ++++++++++++++++++++++
+ rootdir/etc/init.qcom.post_boot.sh                 | 44 ++++++++++++--
+ 2 files changed, 110 insertions(+), 4 deletions(-)
+ create mode 100644 0001-device-qcom-Add-perf-mode-for-8916-chip-set.patch
+
+diff --git a/0001-device-qcom-Add-perf-mode-for-8916-chip-set.patch b/0001-device-qcom-Add-perf-mode-for-8916-chip-set.patch
+new file mode 100644
+index 0000000..75abdad
+--- /dev/null
++++ b/0001-device-qcom-Add-perf-mode-for-8916-chip-set.patch
+@@ -0,0 +1,70 @@
++From 6edea40f6c9ea4cd1308d863a19eb984f3b2e464 Mon Sep 17 00:00:00 2001
++From: Tanya Finkel <tfinkel@codeaurora.org>
++Date: Sun, 22 Feb 2015 04:53:54 -0800
++Subject: [PATCH] device:qcom: Add perf mode for 8916 chip set.
++
++Temporary workaround for SBC8016, enable S2 to be flat on 1.25V.
++
++Change-Id: I92b9aa5f11cd9845ed0a568e56f72d6fd869aa5d
++---
++ rootdir/etc/init.qcom.post_boot.sh | 44 ++++++++++++++++++++++++++++++++++----
++ 1 file changed, 40 insertions(+), 4 deletions(-)
++
++diff --git a/rootdir/etc/init.qcom.post_boot.sh b/rootdir/etc/init.qcom.post_boot.sh
++index 0c89560..ea2406b 100755
++--- a/rootdir/etc/init.qcom.post_boot.sh
+++++ b/rootdir/etc/init.qcom.post_boot.sh
++@@ -344,10 +344,46 @@ case "$target" in
++         fi
++         case "$soc_id" in
++             "206" | "247" | "248" | "249" | "250")
++-		echo 0 > /sys/module/lpm_levels/parameters/sleep_disabled
++-	        echo 1 > /sys/devices/system/cpu/cpu1/online
++-		echo 1 > /sys/devices/system/cpu/cpu2/online
++-	        echo 1 > /sys/devices/system/cpu/cpu3/online
+++            echo 0 > /sys/module/lpm_levels/parameters/sleep_disabled
+++            echo 1 > /sys/devices/system/cpu/cpu0/online
+++            echo 1 > /sys/devices/system/cpu/cpu1/online
+++            echo 1 > /sys/devices/system/cpu/cpu2/online
+++            echo 1 > /sys/devices/system/cpu/cpu3/online
+++            echo 1 > /proc/sys/kernel/sched_boost
+++            echo performance > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+++            echo performance > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
+++            echo performance > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
+++            echo performance > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
+++            echo 1 > /sys/kernel/debug/msm-bus-dbg/shell-client/mas
+++            echo 512 > /sys/kernel/debug/msm-bus-dbg/shell-client/slv
+++            echo 0 > /sys/kernel/debug/msm-bus-dbg/shell-client/ab
+++            echo 17464000000 > /sys/kernel/debug/msm-bus-dbg/shell-client/ib
+++            echo 1 > /sys/kernel/debug/msm-bus-dbg/shell-client/update_request
+++            echo N > /sys/module/lpm_levels/system/cpu0/pc/idle_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu0/pc/suspend_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu0/standalone_pc/idle_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu0/standalone_pc/suspend_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu1/pc/idle_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu1/pc/suspend_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu1/standalone_pc/idle_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu1/standalone_pc/suspend_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu2/pc/idle_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu2/pc/suspend_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu2/standalone_pc/idle_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu2/standalone_pc/suspend_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu3/pc/idle_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu3/pc/suspend_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu3/standalone_pc/idle_enabled
+++            echo N > /sys/module/lpm_levels/system/cpu3/standalone_pc/suspend_enabled
+++            echo 1 > /sys/module/lpm_levels/parameters/sleep_disabled
+++            echo "800000" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq
+++            echo "800000" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_min_freq
+++            echo "800000" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_min_freq
+++            echo "800000" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_min_freq
+++            echo "800000" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+++            echo "800000" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
+++            echo "800000" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_max_freq
+++            echo "800000" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_max_freq
++ 	    ;;
++            "239" | "241" | "263" | "268" | "269" | "270" | "271")
++ 		echo 0 > /sys/module/lpm_levels/parameters/sleep_disabled
++-- 
++1.8.2.1
++
+diff --git a/rootdir/etc/init.qcom.post_boot.sh b/rootdir/etc/init.qcom.post_boot.sh
+index 0c89560..ea2406b 100755
+--- a/rootdir/etc/init.qcom.post_boot.sh
++++ b/rootdir/etc/init.qcom.post_boot.sh
+@@ -344,10 +344,46 @@ case "$target" in
+         fi
+         case "$soc_id" in
+             "206" | "247" | "248" | "249" | "250")
+-		echo 0 > /sys/module/lpm_levels/parameters/sleep_disabled
+-	        echo 1 > /sys/devices/system/cpu/cpu1/online
+-		echo 1 > /sys/devices/system/cpu/cpu2/online
+-	        echo 1 > /sys/devices/system/cpu/cpu3/online
++            echo 0 > /sys/module/lpm_levels/parameters/sleep_disabled
++            echo 1 > /sys/devices/system/cpu/cpu0/online
++            echo 1 > /sys/devices/system/cpu/cpu1/online
++            echo 1 > /sys/devices/system/cpu/cpu2/online
++            echo 1 > /sys/devices/system/cpu/cpu3/online
++            echo 1 > /proc/sys/kernel/sched_boost
++            echo performance > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
++            echo performance > /sys/devices/system/cpu/cpu1/cpufreq/scaling_governor
++            echo performance > /sys/devices/system/cpu/cpu2/cpufreq/scaling_governor
++            echo performance > /sys/devices/system/cpu/cpu3/cpufreq/scaling_governor
++            echo 1 > /sys/kernel/debug/msm-bus-dbg/shell-client/mas
++            echo 512 > /sys/kernel/debug/msm-bus-dbg/shell-client/slv
++            echo 0 > /sys/kernel/debug/msm-bus-dbg/shell-client/ab
++            echo 17464000000 > /sys/kernel/debug/msm-bus-dbg/shell-client/ib
++            echo 1 > /sys/kernel/debug/msm-bus-dbg/shell-client/update_request
++            echo N > /sys/module/lpm_levels/system/cpu0/pc/idle_enabled
++            echo N > /sys/module/lpm_levels/system/cpu0/pc/suspend_enabled
++            echo N > /sys/module/lpm_levels/system/cpu0/standalone_pc/idle_enabled
++            echo N > /sys/module/lpm_levels/system/cpu0/standalone_pc/suspend_enabled
++            echo N > /sys/module/lpm_levels/system/cpu1/pc/idle_enabled
++            echo N > /sys/module/lpm_levels/system/cpu1/pc/suspend_enabled
++            echo N > /sys/module/lpm_levels/system/cpu1/standalone_pc/idle_enabled
++            echo N > /sys/module/lpm_levels/system/cpu1/standalone_pc/suspend_enabled
++            echo N > /sys/module/lpm_levels/system/cpu2/pc/idle_enabled
++            echo N > /sys/module/lpm_levels/system/cpu2/pc/suspend_enabled
++            echo N > /sys/module/lpm_levels/system/cpu2/standalone_pc/idle_enabled
++            echo N > /sys/module/lpm_levels/system/cpu2/standalone_pc/suspend_enabled
++            echo N > /sys/module/lpm_levels/system/cpu3/pc/idle_enabled
++            echo N > /sys/module/lpm_levels/system/cpu3/pc/suspend_enabled
++            echo N > /sys/module/lpm_levels/system/cpu3/standalone_pc/idle_enabled
++            echo N > /sys/module/lpm_levels/system/cpu3/standalone_pc/suspend_enabled
++            echo 1 > /sys/module/lpm_levels/parameters/sleep_disabled
++            echo "800000" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq
++            echo "800000" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_min_freq
++            echo "800000" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_min_freq
++            echo "800000" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_min_freq
++            echo "800000" > /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
++            echo "800000" > /sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq
++            echo "800000" > /sys/devices/system/cpu/cpu2/cpufreq/scaling_max_freq
++            echo "800000" > /sys/devices/system/cpu/cpu3/cpufreq/scaling_max_freq
+ 	    ;;
+            "239" | "241" | "263" | "268" | "269" | "270" | "271")
+ 		echo 0 > /sys/module/lpm_levels/parameters/sleep_disabled
+-- 
+1.8.2.1
+

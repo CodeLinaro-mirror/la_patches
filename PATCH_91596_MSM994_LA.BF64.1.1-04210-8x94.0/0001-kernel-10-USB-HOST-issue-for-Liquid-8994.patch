@@ -1,0 +1,42 @@
+From 0f401727f29cf484a3e5b0f50233bf8ce38e0222 Mon Sep 17 00:00:00 2001
+From: Kiran Rudramuni <kchitrik@codeaurora.org>
+Date: Mon, 9 Feb 2015 11:55:35 -0800
+Subject: [PATCH] dock: Fix the USB HOST issue for Liquid 8994
+
+Check if liquid plugged in/unplugged to/from the docking station in the
+initial state and initiate the USB EHCI driver if needed.
+
+Change-Id: Ie88abe9ebb6b14bd40a963bce6dc1e17792e9ca1
+Signed-off-by: Tanya Finkel <tfinkel@codeaurora.org>
+---
+ drivers/misc/qcom_liquid_dock.c | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/misc/qcom_liquid_dock.c b/drivers/misc/qcom_liquid_dock.c
+index 0c4aadf..b95955e 100644
+--- a/drivers/misc/qcom_liquid_dock.c
++++ b/drivers/misc/qcom_liquid_dock.c
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2013-2014, The Linux Foundation. All rights reserved.
++/* Copyright (c) 2013-2015, The Linux Foundation. All rights reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 and
+@@ -200,6 +200,14 @@ static int liquid_dock_probe(struct platform_device *pdev)
+ 		return -EPROBE_DEFER;
+ 	}
+ 
++	docked = gpio_get_value(dock->dock_detect);
++	if (docked) {
++		if (device_attach(&dock->usb3_pdev->dev) != 1) {
++			dev_err(dock->dev, "Could not add USB driver 0x%p\n",
++				dock->usb3_pdev);
++		}
++	}
++
+ 	of_node_put(usb3_node);
+ 	schedule_work(&dock->dock_work);
+ 	device_init_wakeup(dock->dev, true);
+-- 
+1.8.2.1
+
